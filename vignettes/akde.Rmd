@@ -1,0 +1,54 @@
+---
+title: "Autocorrelated Kernel Density Estimation"
+author: "Chris H. Fleming and Justin M. Calabrese"
+date: "`r Sys.Date()`"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteKeyword{akde}
+  %\VignetteIndexEntry{Autocorrelated Kernel Density Estimation}
+  %\VignetteEngine{knitr::rmarkdown}
+  \usepackage[utf8]{inputenc}
+---
+
+In this vignette we walk through autocorrelated kernel density estimation. We will assume that you have already estimated a good `ctmm` movement model for your data. For demonstration purposes we will be working from the results of the "Variograms and Model Selection" vignette (see `vignette("variogram")`).
+
+```{r,  fig.show='hold'}
+library(ctmm)
+data(buffalo)
+cilla <- buffalo[[1]]
+M0 <- ctmm.fit(cilla) # no autocorrelation timescales
+M2 <- ctmm.fit(cilla,ctmm(tau=c(6*24,1)*60^2)) # ~ 6 day and 1 hour autocorrelation timescales
+```
+
+`M0` is the innapropriate, uncorrelated model, which will result in a conventional kernel-density estimate, while `M2` is the vastly superior, continuous-velocity model. Now we can calculate an `akde` object for each model.
+
+```{r,  fig.show='hold', results = "hide"}
+KD0 <- akde(cilla,M0)
+KD2 <- akde(cilla,M2)
+```
+
+Given that we do not precisely know the autocorrelation parameters of the data, each `akde` object actually contains three kernel density estimates: `ML`, `low`, and `high` corresponding to the maxmimum likelihood optimal smoothing and confidence intervals on the optimal smoothing area. The significance level for these confidence levels can be set with the `alpha` option, which defaults to the conventional `0.05` (see `help(akde)`).
+
+Now let us plot the results.
+
+```{r,  fig.show='hold'}
+plot(cilla,AKDE=KD0,ylim=c(-14,12)*1000)
+title("M0")
+plot(cilla,AKDE=KD2,ylim=c(-14,12)*1000)
+title("M2")
+```
+
+A more useful function for plotting in R-studio is `zoom(cilla,AKDE=KD2)`, which adds a zoom slider.
+
+By default both the density function and its 95% contours are plotted along with the location data. The middle contour represent the maximum likelihood area where the animal spends 95% of its time. This percentage can be changed with the `alpha.HR` option (see `help(plot.telemetry)`). The inner and outer contours correspond to confidence intervals on the optimal smoothing. I.e., the maximum likelihood point estimate may be undersmoothed or oversmoothed because of error in our autocorrelation estimation. This pair of contours does not represent all of the uncertainty in the home-range estimate, but it gives a good sense of the magnitude of area.
+
+Even if our autocorrelation estimate were perfect, that still does not make the kernel density estimate itself perfect. The optimal bandwidth determines the "resolution" of the kernel density estimate. By default we plot grid lines with dimensions matching the standard deviations of the individual kernels. This gives a rough guideline as to what spatial details are and are not important in the density estimate. One can see that the conventional, uncorrelated estimate fits tightly to the data and reports many significant details in the buffalo's home range, including a hole near the coordinate `(45,5)` km. The autocorrelated estimate predicts future space use more accurately, based on its diffusion model, and yields a more honest account of its uncertainties. In particular, the AKDE home-range area appears larger and the presence of a hole near `(45,5)` cannot be resolved because its resolution is (appropriately) insufficient.
+
+Finally, we can compare the area estimates.
+
+```{r,  fig.show='hold'}
+summary(KD0)
+summary(KD2)
+```
+
+Note that the uncertainty here only reflects the uncertainty in what the optimal amount of smoothing is. For the uncorrelated KDE this uncertainty is insignificant, while for the autocorrelated KDE this uncertainty is very important.

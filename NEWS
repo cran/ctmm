@@ -1,0 +1,77 @@
+2015-07-27
+
+  CRAN check compliance achieved.
+  
+  All methods (plot, mean, summary, simulate) can and must be run without class extensions.
+  
+  Argument names no longer clash with function names and are more explicit about their object class.
+
+2015-07-17
+
+  Export bugfixes
+
+2015-07-14
+
+  IOU bug fixes in ctmm.fit and plot.variogram
+  
+2015-06-28
+
+  Cleaned up and labeled tau parameter arrays
+
+  Implemented Workaround for when subset demotes S4 objects to S3 objects
+
+  plot.telemetry now enforces asp=1 even with xlim/ylim arguments
+
+2015-06-19
+
+  New function summary.telemetry
+
+  Bugfix in as.telemetry for data$t
+  
+  Bugfix in ctmm.loglike for some cases with numeric underflow
+
+  periodogram and plot.periodogram can now check for spurious periodicities
+  
+  Minimal support for BM and IOU motion
+
+2015-05-21
+
+  New functions periodogram, plot.periodogram
+
+2015-05-08
+
+  New function SpatialPoints.telemetry returns SpatialPoints object from telemetry data
+
+  New function SpatialPolygonsDataFrame.akde returns akde home-range contour SpatialPolygons objects from akde object
+
+  New function writeShapefile.akde writes akde home-range contours to ESRI shapefile
+
+  New function raster.akde returns akde pdf raster object
+
+  New function summary.akde returns HR area of AKDE
+
+  Fixed bad CI in plot.telemetry model option
+
+  as.telemetry now takes a timezone argument for as.POSIXct and defaults to UTC
+
+  telemetry, ctmm, and akde objects now have idenification and projection information slotted, with consistent naming throughout
+
+2015-04-27
+  
+  Vignettes "variogram" and "akde"
+
+  New function as.telemetry imports MoveBank formatted csv data and returns telemetry objects
+
+  New function variogram.zoom plots a variogram with zoom slider
+
+  variogram.fit and variogram.zoom default to a logarithmic-scale zoom slider, which requires much less fiddling
+
+  plot.variogram now takes multiple variogram, model, and color options
+
+  plot.telemetry now takes multiple data, model, akde, and color options
+
+  plot.telemetry can now make probability density plots for both Gaussian model and akde data
+
+  ctmm.fit no longer screws up results with initial sigma guesstimates. ML parameter estimates now match closely with published Mathematica results. CIs are improved.
+
+  ks-package was producing incorrect home-range contours and has been replaced with custom code. ML home ranges now match published Mathematica results. CIs should be improved.

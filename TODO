@@ -1,0 +1,32 @@
+summary.ctmm CIs on boundary estimates with negative curvature
+
+akde with user-specified grid (and projection)
+can we rotate coordinate system to diagonalize sigma?
+Eli's kde code: armadillo, eigen, fastest
+
+vignette: gazelle dt, variogram.fit, AKDE errors and interpretation
+
+periodogram:  fast, model, averaging, zoom
+
+north vector in telemetry object
+
+contour labels in plot ctmm
+
+Email ks author
+
+Figure out optimal grid size from bandwidth
+
+Repeated times in variograms -- account for as error -- fix cap
+
+dplyr, rolling for loops
+
+mean.akde
+
+fix mean parameter for boundary issues
+
+population fit of list
+population akde of lists
+
+krige -> predict
+
+reverse order of tau so that we have sigma, tau_r, tau_v, tau_a, ... the order of increasing continuity

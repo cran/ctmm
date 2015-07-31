@@ -1,0 +1,38 @@
+# I don't understand why this needs to be here, but CRAN check complains otherwise
+import(methods)
+
+#IMPORTED GENERIC FUNCTIONS TO OVERLOAD
+importFrom("graphics",plot)
+importFrom("stats",simulate)
+
+#GENERAL FUNCTIONS
+#export(setUnits,"%#%")
+export(zoom)
+S3method(mean,list)
+S3method(plot,list)
+S3method(zoom,list)
+
+#TELEMETRY FUNCTIONS
+export(as.telemetry,SpatialPoints.telemetry)
+S3method(plot,telemetry)
+S3method(summary,telemetry)
+S3method(zoom,telemetry)
+
+#VARIOGRAM FUNCTIONS
+export(variogram,variogram.fit)
+S3method(mean,variogram)
+S3method(plot,variogram)
+S3method(zoom,variogram)
+
+#PERIODOGRAM FUNCTIONS
+export(periodogram)
+S3method(plot,periodogram)
+
+#LIKELIHOOD/MODEL FUNCTIONS
+export(ctmm,ctmm.fit,ctmm.loglike)
+S3method(simulate,ctmm)
+S3method(summary,ctmm)
+
+#AKDE FUNCTIONS
+export(akde,akde.bandwidth,raster.akde,SpatialPolygonsDataFrame.akde,writeShapefile.akde)
+S3method(summary,akde)
