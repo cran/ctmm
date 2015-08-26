@@ -83,16 +83,15 @@ variogram.fast <- function(data,dt=NULL,CI="Markov")
   }
   t <- t - stats::optimize(cost,c(-dt,dt)/2)$minimum
   
-  # count times from first grid point
-  t <- t - floor(t[1]/dt)*dt
-  
-  # fractional grid index
-  index <- 1 + t/dt
+  # fractional grid index -- starts at >=1
+  index <- t/dt
+  while(index[1]<1) { index <- index + 1 }
+  while(index[1]>=2) { index <- index - 1 }
   
   # uniform lag grid
-  lag <- seq(0,ceiling(t[n]/dt)-floor(t[1]/dt))*dt
-  n <- length(lag)
-  
+  n <- ceiling(max(index))
+  lag <- seq(0,n-1)*dt
+
   # continuously distribute times over uniform grid
   W.grid <- rep(0,n)
   X.grid <- rep(0,n)
@@ -165,7 +164,7 @@ variogram.fast <- function(data,dt=NULL,CI="Markov")
   # only count non-overlapping lags... not perfect
   if(CI=="Markov")
   {
-    dof <- 2*(t[length(t)]-t[1])/lag
+    dof <- 2*(last(t)-t[1])/lag
     dof[1] <- 2*length(t)
   
     for(i in 1:length(lag))
@@ -645,6 +644,9 @@ mean.variogram <- function(x,...)
 
   # normalize SVF
   variogram$SVF <- variogram$SVF / variogram$DOF
+  
+  # drop unused levels
+  variogram <- droplevels(variogram)
   
   # mean identity
   identity <- sapply(x , function(v) { attr(v,"info")$identity } )

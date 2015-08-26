@@ -5,7 +5,7 @@
 \title{
 Import, coerce, and summarize MoveBank data
 }
-\description{Function to import MoveBank csv files or \code{data.frame} objects, coerce them into \code{telemetry} objects, and summarize them.}
+\description{Functions to import MoveBank csv files or \code{data.frame} objects, coerce them into \code{telemetry} objects, and summarize them.}
 
 \usage{
 as.telemetry(CSV,timezone="GMT",projection=NULL,...)
@@ -21,7 +21,13 @@ as.telemetry(CSV,timezone="GMT",projection=NULL,...)
   \item{object}{\code{telemetry} object to summarize.}
 }
 
-\details{If no projection argument is specified, a two-point equidistant projection is calculated that should be good for most range resident and migratory species. Global migrations that are not relatively geodesic (locally straight) will probably suffer distortion. }
+\details{
+If no projection argument is specified, a two-point equidistant projection is calculated that should be good for most range resident and migratory species.
+Global migrations that are not relatively geodesic (locally straight) will probably suffer distortion.
+
+The current MoveBank columns used are \code{individual.local.identifier}, \code{timestamp}, \code{location.long}, \code{location.lat}.
+In the future, we will be supporting more GPS and ARGOS columns, including speed, heading, error classification, etc.
+}
 
 \value{\code{as.telemetry} returns a single \code{telemetry} object or list of \code{telemetry} objects if multiple animals are identified.}
 

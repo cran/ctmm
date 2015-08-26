@@ -1,3 +1,11 @@
+2015-08-25
+
+  efficiency gains in as.telemetry with multiple animals
+
+  bugfix in plot.telemetry for multiple Gaussian PDFs
+
+  bugfix in variogram for rare condition when fast=TRUE
+
 2015-07-27
 
   CRAN check compliance achieved.

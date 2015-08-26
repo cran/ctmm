@@ -162,6 +162,8 @@ akde <- function(data,CTMM,alpha=0.05,fast=NULL,dt=NULL,error=0.005)
 }
 
 
+
+
 ##################################
 # construct my own kde objects
 # was using ks-package but it has some bugs

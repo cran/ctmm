@@ -80,7 +80,7 @@ cilla <- buffalo[[1]]
 
 # Fit a continuous-velocity model with tau ~ c(10 days,1 hour)
 # also see help(variogram.fit)
-m2 <- list(tau=c(10*24*60^2,60^2))
+m2 <- ctmm(tau=c(10*24*60^2,60^2))
 M2 <- ctmm.fit(cilla,m2)
 
 # some human-readable information

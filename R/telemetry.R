@@ -32,6 +32,9 @@ telemetry.data.frame <- function(csv,timezone="GMT",projection=NULL)
   csv$x <- xy[,1]
   csv$y <- xy[,2]
   
+  # do this or possibly get empty animals from subset
+  csv <- droplevels(csv)
+  
   id <- levels(csv$id)
   n <- length(id)
   
@@ -64,6 +67,9 @@ telemetry.clean <- function(data)
   
   # remove duplicate observations
   data <- unique(data)
+  
+  # remove old level information
+  data <- droplevels(data)
   
   # exit with warning on duplicate times
   
@@ -285,8 +291,8 @@ plot.telemetry <- function(x,CTMM=NULL,AKDE=NULL,alpha.HR=0.05,alpha=0.05,CI=TRU
       if(PDF)
       {
         # look how lazy I am
-        PDF <- kde(list(x=CTMM[[i]]$mu[1],y=CTMM[[i]]$mu[2]),H=CTMM[[i]]$sigma)
-        plot.pdf(PDF,col=col.PDF[[i]],...)
+        pdf <- kde(list(x=CTMM[[i]]$mu[1],y=CTMM[[i]]$mu[2]),H=CTMM[[i]]$sigma)
+        plot.pdf(pdf,col=col.PDF[[i]],...)
       }
       
       # plot CIs
@@ -492,3 +498,4 @@ SpatialPoints.telemetry <- function(data)
 #buffalo[[6]] <- ctmm:::new.telemetry(buffalo[[6]][-5720,],info=attr(buffalo[[6]],"info"))
 # this time is duplicated and much less likely than the first
 #buffalo[[5]] <- ctmm:::new.telemetry(buffalo[[5]][-869,],info=attr(buffalo[[5]],"info"))
+#save(buffalo,file="data/buffalo.rda",compress="xz")

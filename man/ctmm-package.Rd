@@ -10,8 +10,8 @@ The methods are based on those introduced in Fleming et al. (2014-2015).
 \tabular{ll}{
 Package: \tab ctmm\cr
 Type: \tab Package\cr
-Version: \tab 0.2.7 \cr
-Date: \tab 2015-07-27\cr
+Version: \tab 0.2.8 \cr
+Date: \tab 2015-08-25\cr
 License: \tab GPL-3 \cr
 }
 }
