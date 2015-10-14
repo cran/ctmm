@@ -52,10 +52,10 @@ data(buffalo)
 cilla <- buffalo[[1]]
 
 # Calculate variogram
-var <- variogram(cilla)
+svf <- variogram(cilla)
 
 # Plot the variogram
-plot(var)
+plot(svf)
 }
 
 % Add one or more standard keywords, see file 'KEYWORDS' in the

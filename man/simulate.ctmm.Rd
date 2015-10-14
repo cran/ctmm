@@ -31,7 +31,7 @@ C. H. Fleming and Y. Subasi and J. M. Calabrese. (2015). A maximum-entropy descr
 }
 
 
-\author{ Chris H. Fleming. }
+\author{ C. H. Fleming. }
 % \note{ }
 
 %% ~Make other sections like Warning with \section{Warning }{....} ~

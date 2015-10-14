@@ -29,7 +29,7 @@ By default, parameter values are estimated from the shape of the variogram. If t
 
 %\references{}
 
-\author{ Chris H. Fleming. }
+\author{ C. H. Fleming. }
 
 %\note{ }
 
@@ -46,10 +46,10 @@ data(buffalo)
 cilla <- buffalo[[1]]
 
 #Calculate variogram
-v1 <- variogram(cilla)
+svf <- variogram(cilla)
 
 # generate a visual fit of the variogram (requires RStudio)
-\donttest{variogram.fit(v1)}
+\donttest{variogram.fit(svf)}
 }
 
 % Add one or more standard keywords, see file 'KEYWORDS' in the

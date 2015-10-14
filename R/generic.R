@@ -1,3 +1,20 @@
+# is.installed <- function(pkg) is.element(pkg, installed.packages()[,1]) 
+
+# worst case FFT functions
+FFT <- function(X) { stats::fft(X,inverse=FALSE) }
+IFFT <- function(X) { stats::fft(X,inverse=TRUE)/length(X) }
+
+# THIS SEEMS TO RUN FINE, BUT THEN CHECK FAILS
+# .onLoad <- function(libname, pkgname)
+# {
+#   # Use good FFT library if available
+#   if(is.installed("fftw"))
+#   {
+#     FFT <<- function(X) { fftw::FFT(as.numeric(X)) }
+#     IFFT <<- function(X) { fftw::IFFT(as.numeric(X)) }
+#   }
+# }
+
 zoom <- function(x,...) UseMethod("zoom") #S3 generic
 #setGeneric("zoom",function(x,...) standardGeneric("zoom"),package="ctmm") #S4 generic
 
@@ -34,6 +51,13 @@ is.even <- Vectorize(function(x) {x %% 2 == 0})
 is.odd <- Vectorize(function(x) {x %% 2 != 0})
 
 
+# indices where a condition is met
+where <- function(x)
+{
+  (1:length(x))[x]
+}
+
+
 # statistical mode
 Mode <- function(x)
 {
@@ -42,6 +66,52 @@ Mode <- function(x)
   ux[tab == max(tab)]
   mean(ux)
 }
+
+# adjoint of matrix
+Adj <- function(M) { t(Conj(M)) }
+
+# Hermitian part of matrix
+He <- function(M) { (M + Adj(M))/2 }
+
+# Positive definite part of matrix
+PDpart <- function(M)
+{ 
+  M <- He(M) # symmetrize
+
+  # singular value decomposition
+  M <- svd(M)
+  M$d <- clamp(M$d,max=Inf) # toss out small negative values
+  M$u <- (M$u + M$v)/2 # symmetrize
+  
+  M <- lapply(1:length(M$d),function(i){M$d[i]*(M$u[i,]%o%Conj(M$u[i,]))})
+  M <- Reduce("+",M)
+  
+  return(M)
+}
+
+# Positive definite solver
+PDsolve <- function(M)
+{
+  # symmetrize
+  M <- He(M)
+  
+  # rescale
+  W <- diag(M)
+  W <- sqrt(W)
+  W <- W %o% W
+  
+  # now a correlation matrix that is easy to invert
+  M <- M/W
+  M <- qr.solve(M)
+  M <- M/W
+
+  # symmetrize
+  M <- He(M)
+
+  return(M)
+}
+
+# COULD JUST MAKE A GENERAL PD-FUN OPERATION
 
 
 # confidence interval functions
@@ -71,7 +141,7 @@ last <- function(vec) { vec[length(vec)] }
 
 
 # CLAMP A NUMBER
-clamp <- Vectorize(function(num,min.num=0,max.num=1) { if(num<min.num) {min.num} else if(num>max.num) {max.num} else {num} })
+clamp <- Vectorize(function(num,min=0,max=1) { if(num<min) {min} else if(num<max) {num} else {max} })
 
 
 # PAD VECTOR

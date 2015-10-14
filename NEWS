@@ -1,3 +1,23 @@
+2015-10-13
+
+  Fixed a rare condition in ctmm.fit where solve would fail on correlated errors
+
+  Multiscale variogram and mean variogram example in vignette
+
+  New data example Mongolian gazelle
+
+  new fast option for periodogram
+  
+  improvements in plot.periodogram
+
+  bugfix in as.telemetry for numeric indentifiers
+
+  bugfix in dt array option of variogram
+  
+  new resolution option and better estimation algorithms in akde
+  
+  alpha, alpha.HR, res arguments made consistent across all functions
+
 2015-08-25
 
   efficiency gains in as.telemetry with multiple animals

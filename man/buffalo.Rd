@@ -20,12 +20,12 @@
 %%  ~~ possibly secondary sources and usages ~~
 %}
 
-\seealso{ \code{\link{as.telemetry}}, \code{\link{plot.telemetry}}. }
+\seealso{ \code{\link{as.telemetry}}, \code{\link{gazelle}}, \code{\link{plot.telemetry}}. }
 
 \examples{
 # Load package and data
 library(ctmm)
-data(buffalo)
+data("buffalo")
 
 # Extract movement data for a single animal
 cilla <- buffalo[[1]]

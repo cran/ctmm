@@ -19,6 +19,7 @@ ctmm <- function(tau=NULL,isotropic=FALSE,...)
 
   # label tau elements
   K <- length(tau)
+  tau <- sort(tau,decreasing=TRUE)
   tau.names <- c("position","velocity","acceleration")
   if(length(tau)>0) { names(tau) <- tau.names[1:K] }
   List$tau <- tau
@@ -92,8 +93,10 @@ langevin <- function(dt,tau)
 }
 
 
-########################################################
+#############################################################
+# Internal Kalman filter/smoother for multiple derivatives, dimensions, trends
 # Kalman filter/smoother for matrix P operator and multiple mean functions
+# this is a lower level function
 # more for generalizability/readability than speed at this point
 kalman <- function(data,model,smooth=FALSE)
 {
@@ -102,6 +105,14 @@ kalman <- function(data,model,smooth=FALSE)
   y <- data$y
   n <- length(t)
   
+  # observed dimensions
+  OBS <- 1
+  Id <- diag(OBS)
+  
+  # check to see if there is telemetry error recorded
+  error <- data$error
+  if(is.null(error)) { error <- rep(0,n) }
+  
   tau <- model$tau
   K <- length(tau)  # dimension of hidden state per spatial dimension
   
@@ -109,25 +120,26 @@ kalman <- function(data,model,smooth=FALSE)
   dt <- c(Inf,diff(t))
   
   # observable state projection operator (will eventially upgrade to use velocity telemetry)
-  P <- array(0,c(K,1))
-  P[1,] <- 1
+  P <- array(0,c(K,OBS))
+  P[1:OBS,] <- 1
   
   # stationary mean function
   u <- array(1,n)
   
   # Observations to run through filter
   z <- cbind(x,y,u)
+  VEC <- ncol(z)
   
   # forecast estimates for zero-mean, unit-variance filters
-  zFor <- array(0,c(n,K,3))
+  zFor <- array(0,c(n,K,VEC))
   sFor <- array(0,c(n,K,K))
   
   # forcast residuals
-  zRes <- array(0,c(n,1,3))
-  sRes <- array(0,c(n,1,1))
+  zRes <- array(0,c(n,OBS,VEC))
+  sRes <- array(0,c(n,OBS,OBS))
   
   # concurrent estimates
-  zCon <- array(0,c(n,K,3))
+  zCon <- array(0,c(n,K,VEC))
   sCon <- array(0,c(n,K,K))
   
   # initial state info
@@ -138,17 +150,19 @@ kalman <- function(data,model,smooth=FALSE)
   
   for(i in 1:n)
   {
+    # residual covariance
     sForP <- sFor[i,,] %*% P # why do I need this?
-    sRes[i,,] <- Matrix::symmpart(t(P) %*% sForP) # zero telemetry error
+    sRes[i,,] <- ((t(P) %*% sForP) + error[i]*Id)
     
     # forcast residuals
     zRes[i,,] <- z[i,] - (t(P) %*% zFor[i,,])
     
-    Gain <- sForP %*% solve(sRes[i,,])
+    if(error[i]<Inf){ Gain <- sForP %*% solve(sRes[i,,]) }
+    else { Gain <- sForP %*% (0*Id) } # solve() doesn't like this case
     
     # concurrent estimates
     zCon[i,,] <- zFor[i,,] + (Gain %*% zRes[i,,])
-    sCon[i,,] <- Matrix::symmpart(sFor[i,,] - (Gain %*% t(sForP)))
+    sCon[i,,] <- (sFor[i,,] - (Gain %*% t(sForP)))
     
     # update forcast estimates for next iteration
     if(i<n)
@@ -162,7 +176,7 @@ kalman <- function(data,model,smooth=FALSE)
       }
       #update forcast estimates now
       zFor[i+1,,] <- Green %*% zCon[i,,]
-      sFor[i+1,,] <- Matrix::symmpart(Green %*% sCon[i,,] %*% t(Green) + Sigma)
+      sFor[i+1,,] <- ((Green %*% sCon[i,,] %*% t(Green)) + Sigma)
     }
   }
   
@@ -184,20 +198,22 @@ kalman <- function(data,model,smooth=FALSE)
   # delete residuals
   rm(zRes,sRes)
   
-  # Finish detrending stationary mean
-  zCon[,1,1:2] <- zCon[,1,1:2] - (zCon[,1,3] %o% mu)
-  zFor[,1,1:2] <- zFor[,1,1:2] - (zFor[,1,3] %o% mu)
+  # Finish detrending the effect of a stationary mean
+  zCon[,,1:2] <- zCon[,,1:2] - (zCon[,,3] %o% mu)
+  zFor[,,1:2] <- zFor[,,1:2] - (zFor[,,3] %o% mu)
 
   # delete u(t)
-  zCon <- zCon[,,1:2]
-  zFor <- zFor[,,1:2]
-  
+  zCon <- zCon[,,1:2,drop=FALSE]
+  zFor <- zFor[,,1:2,drop=FALSE]
+  # drop=FALSE must be here for BM/OU and I don't fully understand why
+    
   # upgrade concurrent estimates to Kriged estimates  
   Green <- langevin(dt=dt[n],tau=tau)$Green
   for(i in (n-1):1)
   {
     L <- sCon[i,,] %*% t(Green) %*% solve(sFor[i+1,,])
 
+    # overwrite concurrent estimate with smoothed estimate
     zCon[i,,] <- zCon[i,,] + L %*% (zCon[i+1,,]-zFor[i+1,,])
     sCon[i,,] <- sCon[i,,] + L %*% (sCon[i+1,,]-sFor[i+1,,]) %*% t(L)
     
@@ -217,20 +233,18 @@ kalman <- function(data,model,smooth=FALSE)
   dimnames(sCon) <- list(NULL,zname,zname)
   
   # return smoothed states
-  state <- list(model=model,dt=stats::median(dt),t=t,H=zCon,C=sCon)
-  class(state) <- "krige"
+  # this object is temporary
+  state <- list(model=model,t=t,H=zCon,C=sCon)
+  class(state) <- "state"
   
   return(state)
 }
 
-
-####################################
-# log likelihood function
-####################################
-ctmm.loglike <- function(data,CTMM=NULL,verbose=FALSE)
+############################
+# coarce infinite parameters into finite parameters appropriate for numerics
+###########################
+ctmm.prepare <- function(data,CTMM)
 {
-  n <- length(data$t)
-  
   tau <- CTMM$tau
   K <- length(tau)  # dimension of hidden state per spatial dimension
   
@@ -254,7 +268,29 @@ ctmm.loglike <- function(data,CTMM=NULL,verbose=FALSE)
   }
   # I am this lazy
   if(K==0) { K <- 1 ; tau <- 0 }
+  
   CTMM$tau <- tau
+  CTMM$sigma <- sigma
+  CTMM$range <- range
+  
+  return(CTMM)
+}
+
+####################################
+# log likelihood function
+####################################
+ctmm.loglike <- function(data,CTMM=NULL,verbose=FALSE)
+{
+  n <- length(data$t)
+  
+  # prepare model for numerics
+  CTMM <- ctmm.prepare(data,CTMM)
+  
+  tau <- CTMM$tau
+  K <- length(tau)  # dimension of hidden state per spatial dimension
+  
+  sigma <- CTMM$sigma
+  range <- CTMM$range
   
   # bounds to constrain optim
   if(min(tau)<0){return(-Inf)}
@@ -371,7 +407,8 @@ ctmm.fit <- function(data,CTMM=NULL,...)
       if(!range){ CTMM.par$tau <- c(Inf,CTMM.par$tau) }
       return(-ctmm.loglike(data=data,CTMM=CTMM.par))
     }
-    COV.tau <- solve(numDeriv::hessian(fn,c(GM.sigma,if(range){tau}else{tau[-1]})))
+    COV.tau <- numDeriv::hessian(fn,c(GM.sigma,if(range){tau}else{tau[-1]}))
+    COV.tau <- PDsolve(COV.tau) # robust inverse
     tau.names <- c("position","velocity","acceleration")
     COVstring <- c(COVstring,tau.names[(2-range):K])
     
@@ -408,8 +445,6 @@ newton.ctmm <- function(data,CTMM)
   # wrapper function to differentiate
   fn <- function(par)
   { 
-    CTMM.par <- CTMM
-    CTMM.par$tau <- par
     # will need to update this for telemetry error
     return(-ctmm.loglike(data=data,CTMM=ctmm(tau=par)))
   }
@@ -419,7 +454,7 @@ newton.ctmm <- function(data,CTMM)
   
   tau <- tau - (H %*% D)
 
-  return(ctmm(tau=tau))
+  return(ctmm(tau=tau,info=attr(data,"info")))
 }
 
 

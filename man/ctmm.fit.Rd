@@ -1,6 +1,7 @@
 \name{ctmm.fit}
 \alias{ctmm.fit}
 \alias{ctmm}
+\encoding{UTF-8}
 %- Also NEED an '\alias' for EACH other topic documented here.
 \title{
 Fit a continuous-time movement model
@@ -44,11 +45,11 @@ More models will be implemented in the future.
 \item{\code{loglike}}{The log-likelihood.}
 \item{\code{isotropic}}{A Boolean denoting whether or not the animal's covariance is circular or elliptical.}
 \item{\code{tau}}{The maximum likelihood \code{tau} estimate.}
-\item{\code{sigma}}{The maximum likelihood variance/covariance estimate. For the endlessly diffusing BM and IOU processes, this becomes the diffusion rate estimate.}
+\item{\code{sigma}}{The maximum likelihood variance/covariance estimate. For the endlessly diffusing BM and IOU processes, this is instead the diffusion rate estimate.}
 \item{\code{mu}}{The maximum likelihood stationary mean vector estimate.}
 \item{\code{COV.mu}}{The covariance matrix of the vector \code{mu}, assuming that the point estimate \code{sigma} is good.}
 \item{\code{DOF.mu}}{The effective number of degrees of freedom in the estimate of \code{mu}, assuming that the point estimate of \code{tau} is good. This can be much smaller than \code{length(data$t)} if the data are autocorrelated.}
-\item{\code{COV.tau}}{Covariance of the vector \code{c(tau,GM.sigma)}, as derived from \code{hessian}, where \code{GM.sigma=sqrt(det(sigma))} is the geometric mean of the covariance matrix \code{sigma}. The animal's home-range area is proportional to \code{GM.sigma}. Typically, sequential components of \code{tau} are slightly correlated, while the last component of \code{tau} is extremely correlated to \code{sigma}, here summarized by its geometric mean.
+\item{\code{COV.tau}}{Covariance of the vector \code{c(GM.sigma,tau)}, as derived from \code{hessian}, where \code{GM.sigma=sqrt(det(sigma))} is the geometric mean of the covariance matrix \code{sigma}. The animal's home-range area is proportional to \code{GM.sigma}. Typically, \code{sigma} is extremely correlated to \code{tau[1]}, and sequential components of \code{tau} are slightly correlated.
 
 \code{COV.tau} assumes that \code{tau>0}, which may not be the case if OU motion is more supported than OUF motion. 
 }
@@ -62,7 +63,7 @@ C. H. Fleming and Y. Subasi and J. M. Calabrese. (2015). A maximum-entropy descr
 }
 
 
-\author{ Chris H. Fleming. }
+\author{ C. H. Fleming and G. Péron. }
 
 \note{ Good starting guesses for the parameters can be obtained from \code{variogram.fit}.
 

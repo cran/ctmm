@@ -14,16 +14,16 @@ raster.akde(AKDE,CI="ML")
 
 SpatialPoints.telemetry(data)
 
-SpatialPolygonsDataFrame.akde(AKDE,alpha=0.05)
+SpatialPolygonsDataFrame.akde(AKDE,alpha.HR=0.05)
 
-writeShapefile.akde(AKDE,folder,file=AKDE@info$identity,alpha=0.05,...)
+writeShapefile.akde(AKDE,folder,file=AKDE@info$identity,alpha.HR=0.05,...)
 }
 %- maybe also 'usage' for other objects documented here.
 \arguments{
   \item{AKDE}{ \code{akde} kernel density object. }
   \item{CI}{Which confidence interval of the bandwidth uncertainty to use: the "ML" point estimate, "low" or "high".}
   \item{data}{ \code{telemetry} data object. }
-  \item{alpha}{ Significance level of the home-range area. I.e., the 50\% core home range is given by \code{alpha=0.50}. }
+  \item{alpha.HR}{ Significance level of the home-range area. I.e., the 50\% core home range is given by \code{alpha.HR=0.50}. }
   \item{folder}{Character name of folder for shapefile.}
   \item{file}{Character name of files for shapefile.}
   \item{...}{ Optional arguments passed to \code{\link[rgdal]{writeOGR}}.}

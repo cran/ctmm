@@ -58,7 +58,7 @@ akde.bandwidth <- function(data,CTMM,fast=NULL,dt=NULL)
   # Extract lag data
   DOF <- lag.DOF$DOF
   lag <- lag.DOF$lag
-    
+  
   tau <- CTMM$tau
   tau <- tau[tau>0]
   K <- length(tau)
@@ -99,7 +99,7 @@ akde.bandwidth <- function(data,CTMM,fast=NULL,dt=NULL)
 
 #######################################
 # wrap the kde function for our telemetry data format and CIs.
-akde <- function(data,CTMM,alpha=0.05,fast=NULL,dt=NULL,error=0.005)
+akde <- function(data,CTMM,alpha=0.05,fast=NULL,dt=NULL,error=0.001,res=200,grid=NULL)
 {
   pb <- utils::txtProgressBar(min=-1,max=3,initial=-1,style=3)
   
@@ -151,7 +151,8 @@ akde <- function(data,CTMM,alpha=0.05,fast=NULL,dt=NULL,error=0.005)
   for(i in 1:3)
   {
     H <- GM.H[i]*R
-    KDE[[i]] <- kde(data,H,alpha=error)
+    KDE[[i]] <- kde(data,H,alpha=error,res=res,grid=grid)
+    KDE[[i]]$H <- H
     utils::setTxtProgressBar(pb,i)
   }
   
@@ -163,119 +164,272 @@ akde <- function(data,CTMM,alpha=0.05,fast=NULL,dt=NULL,error=0.005)
 
 
 
-
 ##################################
 # construct my own kde objects
 # was using ks-package but it has some bugs
 # alpha is the error goal in my total probability
-kde <- function(data,H,alpha=0.005)
+kde <- function(data,H,W=rep(1,length(data$x)),alpha=0.001,res=100,grid=NULL)
 {
   x <- data$x
   y <- data$y
-  
-  min.x <- min(x)
-  max.x <- max(x)
-  
-  min.y <- min(y)
-  max.y <- max(y) 
-  
-  std.x <- sqrt(H[1,1])
-  std.y <- sqrt(H[2,2])
-  
-  # how far to extend range from data as to ensure alpha significance in total probability
-  z <- sqrt(-2*log(alpha))
-  
-  # kernel buffer sizes
-  DX <- z*std.x
-  DY <- z*std.y
-  
-  min.x <- min.x - DX
-  max.x <- max.x + DX
-  
-  min.y <- min.y - DY
-  max.y <- max.y + DY
-  
-  # how fine to make grid as to ensure alpha significance in total probability
-  # ~0.4 calculated from asymptotic behavior of elliptic theta function from Riemmann sum approximation of Gaussian integral
-  
-  z <- (alpha/0.4)
-  
-  dx <- z*std.x
-  dy <- z*std.y
-  
-  mu.x <- (min.x+max.x)/2
-  mu.y <- (min.y+max.y)/2
-  
-  n.x <- ceiling((max.x-min.x)/2/dx)
-  n.y <- ceiling((max.y-min.y)/2/dy)
-  
-  # grid locations
-  X <- mu.x + ((-n.x):(n.x))*dx
-  Y <- mu.y + ((-n.y):(n.y))*dy
-  
-  H.inv <- solve(H)
 
-  # could maybe speed this up with compact subset of X,Y + translation
-  Gauss <- function(x,y,r1,r2,c1,c2)
-  {
-    x <- x-X[r1:r2]
-    y <- y-Y[c1:c2]
-    # grid of -1/2 * standard variances without correlation
-    R <- outer(-H.inv[1,1]/2*x^2,-H.inv[2,2]/2*y^2,"+")
-    # now add correlation grid
-    R <- R - H.inv[1,2]*(x %o% y)
-    R <- exp(R)
-    return(R)
-  }
-  
-  pdf <- array(0,c(length(X),length(Y)))
-  for(i in 1:length(data$x))
-  {
-    # calculate sub-grid indices
-    r1 <- floor((x[i]-DX-X[1])/dx) + 1
-    r2 <- ceiling((x[i]+DX-X[1])/dx) + 1
-
-    c1 <- floor((y[i]-DY-Y[1])/dy) + 1
-    c2 <- ceiling((y[i]+DY-Y[1])/dy) + 1
+  # normalize weights
+  W <- W/sum(W)
     
-    pdf[r1:r2,c1:c2] <- pdf[r1:r2,c1:c2] + Gauss(x[i],y[i],r1,r2,c1,c2)
+  # if a single H matrix is given, make it into an array of H matrices
+  n <- length(x)
+  if(length(dim(H))==2)
+  {
+    H <- array(H,c(2,2,n))
+    H <- aperm(H,c(3,1,2))
   }
-  pdf <- pdf / (length(data$x) * 2*pi*sqrt(det(H)))
 
-  result <- list(pdf=pdf,x=X,y=Y,H=H,dA=dx*dy)
+  # design a good grid
+  if(is.null(grid))
+  {
+    # how far to extend range from data as to ensure alpha significance in total probability
+    z <- sqrt(-2*log(alpha))
+    DX <- z * apply(H,1,function(h){sqrt(h[1,1])})
+    DY <- z * apply(H,1,function(h){sqrt(h[2,2])})
+    
+    # now to find the necessary extent of our grid
+    min.x <- min(x - DX)
+    max.x <- max(x + DX)
+    
+    min.y <- min(y - DY)
+    max.y <- max(y + DY)
+    
+    # grid center
+    mu.x <- (min.x+max.x)/2
+    mu.y <- (min.y+max.y)/2
+    
+    # grid resolution 
+    dx <- (max.x-min.x)/(res)
+    dy <- (max.y-min.y)/(res)
+    
+    # grid locations
+    res <- res/2+1 # half resolution
+    X <- mu.x + (-res):(res)*dx
+    Y <- mu.y + (-res):(res)*dy
+  }
+  
+  cdf <- array(0,c(length(X),length(Y)))
+  for(i in 1:n)
+  {
+    # sub-grid row indices
+    r1 <- floor((x[i]-DX[i]-X[1])/dx) + 1
+    r2 <- ceiling((x[i]+DX[i]-X[1])/dx) + 1
+    
+    # sub-grid column indices
+    c1 <- floor((y[i]-DY[i]-Y[1])/dy) + 1
+    c2 <- ceiling((y[i]+DY[i]-Y[1])/dy) + 1
+    
+    #if(i==2){ return(list(x=X[r1:r2],y=Y[c1:c2],CDF=pnorm2(X[r1:r2],Y[c1:c2],c(x[i],y[i]),H[i,,],dx,dy),mu=c(x[i],y[i]),sigma=H[i,,])) }
+    
+    cdf[r1:r2,c1:c2] <- cdf[r1:r2,c1:c2] + W[i]*pnorm2(X[r1:r2]-x[i],Y[c1:c2]-y[i],H[i,,],dx,dy,alpha)
+  }
+
+  dA <- dx*dy
+  pdf <- cdf/dA
+  
+  # cdf: cell probability -> probability included in contour
+  DIM <- dim(cdf)
+  cdf <- c(cdf) # flatten table
+  cdf <- sort(cdf,decreasing=TRUE,method="quick",index.return=TRUE)
+  IND <- cdf[[2]] # sorted indices
+  cdf <- cdf[[1]]
+  cdf <- cumsum(cdf)
+  cdf[IND] <- cdf # back in spatial order
+  cdf <- array(cdf,DIM) # back in table form
+  
+  result <- list(PDF=pdf,CDF=cdf,x=X,y=Y,dA=dA)
   class(result) <- "kde"
   
   return(result)
 }
 
 
-##################
-# find probability density of % contour
-qkde <- function(kde,alpha=0.05,cells=FALSE)
+#######################
+# robust bi-variate CDF (mean zero assumed)
+#######################
+pnorm2 <- function(X,Y,sigma,dx=stats::mean(diff(X)),dy=stats::mean(diff(Y)),alpha=0.001)
 {
-  # here we make a lookup table to find the pdf @ a given cumulative probability from the max pdf down
-  pdf <- c(kde$pdf)
-  pdf <- sort(pdf,decreasing=TRUE,method="quick")
-  cdf <- cumsum(pdf)*kde$dA
+  cdf <- array(0,c(length(X),length(Y)))
   
-  # search sorted list
-  n <- findInterval(1-alpha,cdf)
-  p <- pdf[n]
+  # eigensystem of kernel covariance
+  v <- eigen(sigma)
+  s <- v$values
   
-  if(cells) { return(n) }
-  else { return(p) }  
+  # effective degree of degeneracy at best resolution
+  ZERO <- sum(s/min(dx,dy)^2 <= 0)
+
+  # correlation
+  S <- sqrt(sigma[1,1]*sigma[2,2])
+  if(S>0)
+  {
+    rho <- sigma[1,2]/S
+    # prevent some tiny numerical errors just in case
+    rho <- clamp(rho,min=-1,max=1)
+  }
+  else { rho <- 0 }
+  
+  # main switch
+  if(ZERO==0 && abs(rho)<1) # no degeneracy
+  {
+    # relative grid size (worst case)
+    z <- sqrt((dx^2+dy^2)/s[2])
+    
+    if(z^3/12<=alpha) # midpoint integration
+    {
+      cdf <- (dx*dy) * Gauss(X,Y,sigma)
+    }
+    else if(z^5/2880<=alpha) # Simpson integration
+    {
+      W <- c(1,4,1)
+      cdf <- NewtonCotes(X,Y,sigma,W,dx,dy)
+    }
+    else if(z^7/1935360<=alpha) # Boole integration
+    {
+      W <- c(7,32,12,32,7)
+      cdf <- NewtonCotes(X,Y,sigma,W,dx,dy)
+    }
+    else # exact calculation
+    {
+      # offset to corners
+      x <- c(X-dx/2,last(X)+dx/2)
+      y <- c(Y-dy/2,last(Y)+dy/2)
+      
+      # standardized all locations
+      x <- (x)/sqrt(sigma[1,1])
+      y <- (y)/sqrt(sigma[2,2])
+      
+      # dimensions
+      n.x <- length(x)
+      n.y <- length(y)
+      
+      # corner grid of cell probabilities
+      CDF <- outer(x,y,function(x,y){pbivnorm::pbivnorm(x,y,rho=rho)})
+      
+      # integrate over cell and add
+      cdf <- CDF[-1,-1] - CDF[-n.x,-1] - CDF[-1,-n.y] + CDF[-n.x,-n.y]
+    }
+  }
+  else if(ZERO==1 || abs(rho)==1) # line degeneracy
+  {
+    # max variance
+    s <- s[1]
+    # unit vector of max variance
+    v <- v$vectors[,1]
+    
+    # crossings along X grid
+    x.cell <- c()
+    y.cross <- c()
+    m.y <- v[2]/v[1]
+    if(abs(m.y)<Inf)
+    {
+      x.cell <- c(X-dx/2,last(X)+dx/2)
+      y.cross <- (x.cell)*m.y
+    }
+    
+    # crossings along Y grid
+    y.cell <- c()
+    x.cross <- c()
+    m.x <- v[1]/v[2]
+    if(abs(m.x)<Inf)
+    {
+      y.cell <- c(Y-dy/2,last(Y)+dy/2)
+      x.cross <- (y.cell)*m.x
+    }
+    
+    # all crossings
+    x.cross <- c(x.cell,x.cross)
+    y.cross <- c(y.cross,y.cell)
+    
+    # standardized location along line
+    z.cross <- ((x.cross)*v[1] + (y.cross)*v[2])/sqrt(s)
+    z.cross <- sort(z.cross,method="quick")
+    z.cross <- unique(z.cross)
+    
+    for(i in 1:(length(z.cross)-1))
+    {
+      # what cell is this line segment in?
+      z.mid <- mean(z.cross[i:(i+1)])
+      
+      x <- sqrt(s)*v[1]*z.mid
+      y <- sqrt(s)*v[2]*z.mid
+      
+      r <- abs(x-X) <= dx/2
+      c <- abs(y-Y) <= dy/2
+      
+      cdf[r,c] <- (stats::pnorm(z.cross[i+1])-stats::pnorm(z.cross[i]))/(sum(r)*sum(c))
+    }
+  }
+  else if(ZERO==2) # point degeneracy
+  {
+    # the closest point(s)
+    r <- abs(X) <= dx/2
+    c <- abs(Y) <= dy/2
+    
+    # increment the closest point(s)
+    cdf[r,c] <- cdf[r,c] + 1/(sum(r)*sum(c))
+  }
+  else stop("something is wrong with this matrix: sigma == ",sigma)
+  
+  return(cdf)
 }
 
+#################
+# Newton-Cotes integrators
+NewtonCotes <- function(X,Y,sigma,W,dx=mean(diff(X)),dy=mean(diff(Y)))
+{
+  W <- W/sum(W)
+  
+  n <- length(W)
+  m <- n-1
+  
+  # refined grid
+  x <- seq(X[1]-dx/2,last(X)+dx/2,dx/m)
+  y <- seq(Y[1]-dy/2,last(Y)+dy/2,dy/m)
+
+  # weight arrays
+  w.x <- array(W[-n]*dx,length(x)) ; w.x[length(x)] <- w.x[1]
+  w.y <- array(W[-n]*dy,length(y)) ; w.y[length(y)] <- w.y[1]
+
+  # weight table
+  W <- (w.x %o% w.y)
+
+  cdf <- W * Gauss(x,y,sigma)
+
+  # coarsen grid
+  # index order is (x,y)
+  cdf <- vapply(1:length(X)-1,function(i){colSums(cdf[1:n+m*i,])},rep(0,length(y)))
+  # index order is (y,X)
+  cdf <- vapply(1:length(Y)-1,function(i){colSums(cdf[1:n+m*i,])},rep(0,length(X)))
+  # index order is (X,Y)
+  
+  return(cdf)
+}
+
+#####################
+# gaussian pdf
+Gauss <- function(X,Y,sigma)
+{
+  sigma.inv <- solve(sigma)
+
+  cdf <- outer(X^2*sigma.inv[1,1],Y^2*sigma.inv[2,2],"+")/2
+  cdf <- cdf + (X %o% Y)*sigma.inv[1,2]
+  cdf <- exp(-cdf)/(2*pi*sqrt(det(sigma)))
+  return(cdf)
+}
 
 #######################
 # summarize details of akde object
-summary.akde <- function(object,alpha=0.05,...)
+summary.akde <- function(object,alpha.HR=0.05,...)
 {
   area <- c(0,0,0)
   for(i in 1:3)
   {
-    n <- qkde(object[[i]],alpha,cells=TRUE)
-    area[i] <- n * object[[i]]$dA
+    area[i] <- sum(object[[i]]$CDF <= 1-alpha.HR) * object[[i]]$dA
   }
   
   unit.info <- unit(area,"area")
@@ -305,7 +459,7 @@ raster.akde <- function(AKDE,CI="ML")
   ymn <- kde$y[1]-dy/2
   ymx <- last(kde$y)+dy/2
   
-  Raster <- raster::raster(t(kde$pdf[,dim(kde$pdf)[2]:1]),xmn=xmn,xmx=xmx,ymn=ymn,ymx=ymx,crs=attr(AKDE,"info")$projection)
+  Raster <- raster::raster(t(kde$PDF[,dim(kde$PDF)[2]:1]),xmn=xmn,xmx=xmx,ymn=ymn,ymx=ymx,crs=attr(AKDE,"info")$projection)
   
   return(Raster)
 }
@@ -321,16 +475,15 @@ inside <- function(A,B)
 
 
 ##############
-SpatialPolygonsDataFrame.akde <- function(AKDE,alpha=0.05)
+SpatialPolygonsDataFrame.akde <- function(AKDE,alpha.HR=0.05)
 {
-  ID <- paste(AKDE@info$identity," ",names(AKDE)," ",round(100*(1-alpha)),"%",sep="")
+  ID <- paste(AKDE@info$identity," ",names(AKDE)," ",round(100*(1-alpha.HR)),"%",sep="")
 
   polygons <- list()
   for(i in 1:length(AKDE))
   {
     kde <- AKDE[[i]]
-    p <- qkde(kde,alpha=alpha)
-    CL <- grDevices::contourLines(x=kde$x,y=kde$y,z=kde$pdf,levels=p)
+    CL <- grDevices::contourLines(x=kde$x,y=kde$y,z=kde$CDF,levels=1-alpha.HR)
     
     # create contour heirarchy matrix (half of it)
     H <- array(0,c(1,1)*length(CL))    
@@ -373,9 +526,9 @@ SpatialPolygonsDataFrame.akde <- function(AKDE,alpha=0.05)
 
 
 ################
-writeShapefile.akde <- function(AKDE, folder, file=AKDE@info$identity, alpha=0.05,  ...)
+writeShapefile.akde <- function(AKDE, folder, file=AKDE@info$identity, alpha.HR=0.05,  ...)
 {
-  SP <- SpatialPolygonsDataFrame.akde(AKDE,alpha=alpha)
+  SP <- SpatialPolygonsDataFrame.akde(AKDE,alpha.HR=alpha.HR)
   
   rgdal::writeOGR(SP, dsn=folder, layer=file, driver="ESRI Shapefile",...)
 }

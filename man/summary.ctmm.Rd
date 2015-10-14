@@ -30,7 +30,7 @@ This point estimate itself is subject to uncertainty, and is given confidence in
 
 %\references{}
 
-\author{ Chris H. Fleming. }
+\author{ C. H. Fleming. }
 
 \note{ Confidence intervals on the autocorrelation timescales assume they are sufficiently greater than zero and less than infinity.  }
 

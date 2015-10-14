@@ -41,11 +41,11 @@ Let us look at the first buffalo and then every buffalo:
 
 ```{r,  fig.show='hold'}
 library(ctmm)
-data(buffalo)
+data("buffalo")
 cilla <- buffalo[[1]]
 plot(cilla)
 title("1 Buffalo")
-plot(buffalo,col=rainbow(length(buffalo),alpha=0.5))
+plot(buffalo,col=rainbow(length(buffalo)),alpha=c(0.5,0.05))
 title("5 Buffalo")
 ```
 
@@ -58,10 +58,10 @@ These buffalo all look fairly range resident, and so we can move on to variogram
 Variograms are an unbiased way to visualize autocorrelation structure when migration, range shifting, drift, or other translations of the mean location are not happening. When drift occurs in the data, then the variogram represents a mixture of both the drift and the autocorrelation structure, each of which contains distinct movement behaviors. In the future, we will have models that can allow for drift, but the current models assume range residence, which we can check with the variogram.
 
 ```{r,  fig.show='hold'}
-var <- variogram(cilla)
-plot(var,fraction=0.005)
+svf <- variogram(cilla)
+plot(svf,fraction=0.005)
 title("zoomed in")
-plot(var,fraction=0.65,alpha=0.5)
+plot(svf,fraction=0.65,alpha=c(0.5,0.05))
 title("zoomed out")
 ```
 
@@ -75,9 +75,9 @@ The asymptote of our variogram is around 23 square km, and the fact that it take
 ```{r,  fig.show='hold'}
 m0 <- ctmm(sigma=23*1000^2) # 23 km^2 in m^2
 m1 <- ctmm(sigma=23*1000^2,tau=6*24*60^2) # and 6 days in seconds
-plot(var,CTMM=m0,fraction=0.65,alpha=0.5,col.CTMM="red")
+plot(svf,CTMM=m0,fraction=0.65,alpha=c(0.5,0.05),col.CTMM="red")
 title("m0")
-plot(var,CTMM=m1,fraction=0.65,alpha=0.5,col.CTMM="purple")
+plot(svf,CTMM=m1,fraction=0.65,alpha=c(0.5,0.05),col.CTMM="purple")
 title("m1")
 ```
 
@@ -87,18 +87,18 @@ The uncorrelated model `m0` is obviously incorrect and in the zoomed in plot we 
 
 ```{r,  fig.show='hold'}
 m2 <- ctmm(sigma=23*1000^2,tau=c(6*24*60^2,1*60^2)) # and 1 hour in seconds
-plot(var,CTMM=m1,fraction=0.002,col.CTMM="purple")
+plot(svf,CTMM=m1,fraction=0.002,col.CTMM="purple")
 title("m1")
-plot(var,CTMM=m2,fraction=0.002,col.CTMM="blue")
+plot(svf,CTMM=m2,fraction=0.002,col.CTMM="blue")
 title("m2")
 ```
 
 The confidence intervals at short lags are also very narrow, though both of these models look the same at coarser scales and so the discrepancy is only revealed by high resolution data.
 
 ```{r,  fig.show='hold'}
-plot(var,CTMM=m1,fraction=0.65,alpha=0.5,col.CTMM="purple")
+plot(svf,CTMM=m1,fraction=0.65,alpha=c(0.5,0.05),col.CTMM="purple")
 title("m1")
-plot(var,CTMM=m2,fraction=0.65,alpha=0.5,col.CTMM="blue")
+plot(svf,CTMM=m2,fraction=0.65,alpha=c(0.5,0.05),col.CTMM="blue")
 title("m2")
 ```
 
@@ -106,7 +106,7 @@ The model `m2` introduces an additional autocorrelation timescale for the animal
 
 The linear regime of the variogram (regular diffusion) is just as important as the asymptotic regime. In the linear regime it is reasonable to assume a Markovian model as with step selection functions (SSF) and Brownian bridges (BB). Therefore, the variogram has informed us as to how much we need to coarsen our data for it to be appropriate in many common analyses that neglect various aspects of movement.
 
-Finally, the R-studio function `variogram.fit(var)` is much easier to use than guestimating the model parameters by hand as we did above. `variogram.fit` gives you sliders to choose the most visually appropriate parameters and save them to a global variable (`global.variogram.fit` by default).
+Finally, the R-studio function `variogram.fit(svf)` is much easier to use than guestimating the model parameters by hand as we did above. `variogram.fit` gives you sliders to choose the most visually appropriate parameters and save them to a global variable (`global.variogram.fit` by default).
 
 ### Variogram Error is Autocorrelated
 
@@ -118,9 +118,40 @@ willa <- simulate(m2,t=cilla$t)
 plot(willa)
 title("simulation")
 # now calculate and plot its variogram
-var2 <- variogram(willa)
-plot(var2,CTMM=m2,fraction=0.65,alpha=c(0.5,0.05),col.CTMM="blue")
+svf2 <- variogram(willa)
+plot(svf2,CTMM=m2,fraction=0.65,alpha=c(0.5,0.05),col.CTMM="blue")
 title("simulation")
+```
+
+### Irregular Sampling Schedules
+
+Random gaps in the data are acceptable and fully accounted for in both variogram estimation and model fitting.
+However, if under any condition the sampling rate changes during data collection, then you will have to account for that in the varioram with the \code{dt} argument. In the followng example, the collar was programed to cycle between 1, 5, 25 hour sampling intervals
+
+```{r, fig.show='hold'}
+data("gazelle")
+svf3 <- variogram(gazelle[[18]],fast=TRUE)
+plot(svf3,fraction=0.85,alpha=c(0.5,0.05))
+title("Default method")
+# 1, 5, 25 hour sampling intervals
+dt <- 60*60*c(1,5,25)
+svf3 <- variogram(gazelle[[18]],dt=dt,fast=TRUE)
+plot(svf3,fraction=0.85,alpha=c(0.5,0.05))
+title("Multi method")
+```
+
+### Pooling Variograms
+
+If multiple individuals exhibit similar movement behaviors, then we can pool their individual variograms to create a more precise population variogram. You should be careful though, if the individual movement behaviors and sampling schedules are not identical, then there will be discontinuities at lags where one timeseries runs out of data.
+
+```{r, fig.show='hold'}
+# 1 hour sampling intervals
+dt = 60*60
+# buffalo 4 is bad
+svf4 <- lapply(buffalo[-4],function(b){ variogram(b,dt=dt,fast=TRUE) })
+svf4 <- mean(svf4)
+plot(svf4,fraction=0.35,alpha=c(0.5,0.05))
+title("Population variogram")
 ```
 
 ### Non-Stationarity in Stationary Variograms
@@ -192,9 +223,9 @@ The fit parameter `DOF.mu` is the number of degrees of freedom worth of data we 
 Now its time to make sure that our selected model is explaining the most significant features of the animal's movement. Let us plot our variogram again with our fit models
 
 ```{r,  fig.show='hold'}
-plot(var,CTMM=list(M0,M1,M2),col.CTMM=c("red","purple","blue"),fraction=0.65,alpha=0.5)
+plot(svf,CTMM=list(M0,M1,M2),col.CTMM=c("red","purple","blue"),fraction=0.65,alpha=0.5)
 title("zoomed out")
-plot(var,CTMM=list(M0,M1,M2),col.CTMM=c("red","purple","blue"),fraction=0.002,alpha=0.5)
+plot(svf,CTMM=list(M0,M1,M2),col.CTMM=c("red","purple","blue"),fraction=0.002,alpha=0.5)
 title("zoomed in")
 ```
 

@@ -5,7 +5,7 @@
 Calculate the optimal bandwidth matrix of movement data
 }
 \description{
-This function calculates the optimal bandwidth matrix for a two-dimensional animal tracking dataset, given an autocorrelated movement model (Fleming et al, 2015). This optimal bandwidth can fully take into account all autocorrelation in the data, assuming it is captured by the movement model.
+This function calculates the optimal bandwidth matrix (kernel covariance) for a two-dimensional animal tracking dataset, given an autocorrelated movement model (Fleming et al, 2015). This optimal bandwidth can fully take into account all autocorrelation in the data, assuming it is captured by the movement model.
 }
 \usage{
 akde.bandwidth(data,CTMM,fast=NULL,dt=NULL)
@@ -33,8 +33,9 @@ Rigorous home-range estimation with movement data: A new autocorrelated kernel-d
 D. Marcotte. (1996). Fast variogram computation with FFT. \emph{Computers and Geosciences} 22(10), 1175-1186.
 }
 
-\author{ Chris H. Fleming. }
-% \note{ }
+\author{ C. H. Fleming. }
+
+\note{ To obtain a bandwidth scalar representing the variance of each kernel, a \code{ctmm} object with \code{isotropic=TRUE} is required.  In this case, \code{akde.bandwidth} will return bandwidth matrix with identical variances along its diagonal. Note that this will provide an inaccurate estimate for very eccentric distributions}
 
 %% ~Make other sections like Warning with \section{Warning }{....} ~
 

@@ -19,7 +19,7 @@ as.telemetry <- function(CSV,timezone="GMT",projection=NULL,...)
 # this assumes a MoveBank data.frame
 telemetry.data.frame <- function(csv,timezone="GMT",projection=NULL)
 {
-  csv <- data.frame(id=csv$individual.local.identifier,timestamp=as.POSIXct(csv$timestamp,tz=timezone),longitude=csv$location.long,latitude=csv$location.lat)
+  csv <- data.frame(id=as.factor(csv$individual.local.identifier),timestamp=as.POSIXct(csv$timestamp,tz=timezone),longitude=as.numeric(csv$location.long),latitude=as.numeric(csv$location.lat))
   csv <- stats::na.omit(csv)
   csv$t <- as.numeric(csv$timestamp)
   
@@ -48,7 +48,7 @@ telemetry.data.frame <- function(csv,timezone="GMT",projection=NULL)
     telist[[i]] <- telemetry.clean(telist[[i]])
         
     # combine data.frame with ancillary info
-    info <- list(identity=id[i] ,timezone=timezone , projection=projection)
+    info <- list(identity=id[i], type="?GPS?", timezone=timezone, projection=projection)
     telist[[i]] <- new.telemetry( telist[[i]] , info=info )
   }
   names(telist) <- id
@@ -94,14 +94,14 @@ suggest.projection <- function(data,datum="WGS84")
   lon <- data$longitude
   lat <- data$latitude
   
-  # as a first approximation use one-point equidistant at mean geolocation
-  lon_0 <- mean(lon)
-  lat_0 <- mean(lat)
+  # as a first approximation use one-point equidistant at average geolocation
+  lon_0 <- stats::median(lon)
+  lat_0 <- stats::median(lat)
   proj <- paste("+proj=aeqd +lon_0=",lon_0," +lat_0=",lat_0," +datum=",datum,sep="")
   xy <- rgdal::project(cbind(lon,lat),proj)
   
-  # calculate and detrend mean
-  mu <- c(mean(xy[,1]),mean(xy[,2]))
+  # calculate and detrend average
+  mu <- c(stats::median(xy[,1]),stats::median(xy[,2]))
   xy <- xy - mu
   colnames(xy) <- c("x","y")
   
@@ -120,8 +120,8 @@ suggest.projection <- function(data,datum="WGS84")
   xy2 <- xy[xy[,1]>0,]
   
   # bi-modal modes
-  mu1 <- c(mean(xy1[,1]),mean(xy1[,2]))
-  mu2 <- c(mean(xy2[,1]),mean(xy2[,2]))
+  mu1 <- c(stats::median(xy1[,1]),stats::median(xy1[,2]))
+  mu2 <- c(stats::median(xy2[,1]),stats::median(xy2[,2]))
   
   # reverse rotation
   R <- solve(R)
@@ -136,6 +136,7 @@ suggest.projection <- function(data,datum="WGS84")
   mu1 <- rgdal::project(mu1,proj,inv=TRUE)[1,]
   mu2 <- rgdal::project(mu2,proj,inv=TRUE)[1,]
   
+  # did east and west get mixed up?
   if(mu1[1] > mu2[1])
   {
     mu <- mu1
@@ -144,8 +145,30 @@ suggest.projection <- function(data,datum="WGS84")
   }
   
   proj <- paste("+proj=tpeqd +lon_1=",mu1[1]," +lat_1=",mu1[2]," +lon_2=",mu2[1]," +lat_2=",mu2[2]," +datum=",datum,sep="")
-  
+
   return(proj)
+  #STOP HERE
+  
+  # NON-FUNCTIONAL NORTH ROTATION CODE
+  # This doesn't seem to do anything. I don't think the +axis and +towgs84 options are fully implemented in PROJ4.
+  # keeping this code here for later.
+  
+  # project origin back
+  mu <- rgdal::project(rbind(c(0,0)),proj,inv=TRUE)[1,]
+
+  # add a touch of north
+  mu <- mu + rbind(c(0,0.001))
+  
+  # project forward
+  mu <- rgdal::project(mu,proj)[1,]
+  
+  # solve for rotation angle to get north vector
+  theta <- atan2(mu[2],mu[1])
+  
+  # generate rotated projection...
+  # abusing PROj4 small-angle rotation + rescaling = true rotation
+  # this would ruin z data if we had any
+  proj <- paste(proj," +towgs84=0,0,0,0,0,",tan(theta),",",cos(theta),sep="")
 }
 
 ################################
@@ -177,7 +200,11 @@ plot.telemetry <- function(x,CTMM=NULL,AKDE=NULL,alpha.HR=0.05,alpha=0.05,CI=TRU
   if(class(x)=="telemetry" || class(x)=="data.frame") { x <- list(x)  }
   if(!is.null(CTMM)) { if(class(CTMM)=="ctmm") { CTMM <- list(CTMM) } }
   if(!is.null(AKDE)) { if(class(AKDE)=="akde") { AKDE <- list(AKDE) } }
-    
+  
+  # median time step of data
+  dt <- lapply(x,function(X){diff(X$t)})
+  dt <- stats::median(unlist(dt))
+  
   dist.name <- "meters"
   dist.scale <- 1
   if(!add)
@@ -226,7 +253,7 @@ plot.telemetry <- function(x,CTMM=NULL,AKDE=NULL,alpha.HR=0.05,alpha=0.05,CI=TRU
         ext.y[2] <- max(ext.y[2], CTMM[[i]]$mu[2] + buff[2])
       }
     }
-        
+    
     # bounding box
     mu <- c(mean(ext.x),mean(ext.y))
     buff <- c(diff(ext.x),diff(ext.y))/2
@@ -267,6 +294,9 @@ plot.telemetry <- function(x,CTMM=NULL,AKDE=NULL,alpha.HR=0.05,alpha=0.05,CI=TRU
     # empty base layer plot
     plot(ext.x,ext.y, xlab=xlab, ylab=ylab, col=grDevices::rgb(1,1,1,0), asp=1, ...)
   }
+
+  # plot cm per unit of distance plotted (m or km)
+  cmpkm <- 2.54*mean(graphics::par("fin")*diff(graphics::par("plt"))[-2]/diff(graphics::par("usr"))[-2])
   
   #########################
   # PLOT GAUSSIAN CONTOURS AND DENSITY
@@ -340,7 +370,7 @@ plot.telemetry <- function(x,CTMM=NULL,AKDE=NULL,alpha.HR=0.05,alpha=0.05,CI=TRU
         # unit conversion
         AKDE[[i]][[j]]$x <- AKDE[[i]][[j]]$x / dist.scale
         AKDE[[i]][[j]]$y <- AKDE[[i]][[j]]$y / dist.scale
-        AKDE[[i]][[j]]$pdf <- AKDE[[i]][[j]]$pdf * dist.scale^2
+        AKDE[[i]][[j]]$PDF <- AKDE[[i]][[j]]$PDF * dist.scale^2
         AKDE[[i]][[j]]$dA <- AKDE[[i]][[j]]$dA / dist.scale^2
         AKDE[[i]][[j]]$H <- AKDE[[i]][[j]]$H / dist.scale^2
       }
@@ -382,13 +412,30 @@ plot.telemetry <- function(x,CTMM=NULL,AKDE=NULL,alpha.HR=0.05,alpha=0.05,CI=TRU
   col <- array(col,length(x))
   
   # automagic the plot point size
+  # need to change this to telemetry error size
   p <- sum(sapply(x, function(d) { length(d$t) } ))
   cex <- 1
   if(p>1000) { cex <- 1000/p }
   
   for(i in 1:length(x))
-  {    
-    graphics::points(x[[i]][,c("x","y")]/dist.scale, cex=cex, col=col[[i]],...)
+  { 
+    r <- x[[i]][,c("x","y")]/dist.scale
+    
+    # also plot velocity vectors at dt scale
+    if(all(c("vx","vy") %in% names(x[[i]])))
+    {
+      dr <- x[[i]][,c("vx","vy")]/dist.scale*dt
+      
+      arr.length <- dr^2
+      arr.length <- sqrt(arr.length[,1]+arr.length[,2])
+      arr.length <- 0.1*cmpkm*arr.length
+
+      shape::Arrows(x0=r$x, y0=r$y, x1=(r$x+dr$vx), y1=(r$y+dr$vy), col=col[[i]], code=2, segment=T, arr.adj=1, arr.length=arr.length, arr.type="curved")
+    }
+    else
+    {
+      graphics::points(r, cex=cex, col=col[[i]],...)
+    }
   }
   
 }
@@ -405,8 +452,8 @@ plot.telemetry <- function(x,CTMM=NULL,AKDE=NULL,alpha.HR=0.05,alpha=0.05,CI=TRU
 plot.pdf <- function(kde,col="blue",...)
 {
   col <- translucent(col,alpha=(0:255)/255)
-  zlim <- c(0,max(kde$pdf))
-  graphics::image(kde$x,kde$y,kde$pdf,useRaster=TRUE,zlim=zlim,col=col,add=TRUE,...)
+  zlim <- c(0,max(kde$PDF))
+  graphics::image(kde$x,kde$y,kde$PDF,useRaster=TRUE,zlim=zlim,col=col,add=TRUE,...)
 }
 
 
@@ -414,10 +461,7 @@ plot.pdf <- function(kde,col="blue",...)
 # Plot a KDE object's contours
 plot.kde <- function(kde,alpha=0.05,col="black",...)
 {
-  # probability density of contour...
-  p <- qkde(kde,alpha=alpha)
-
-  graphics::contour(x=kde$x,y=kde$y,z=kde$pdf,levels=p,labels=round((1-alpha)*100),labelcex=1,col=col,add=TRUE,...)
+  graphics::contour(x=kde$x,y=kde$y,z=kde$CDF,levels=1-alpha,labels=round((1-alpha)*100),labelcex=1,col=col,add=TRUE,...)
 }
 
 
@@ -492,10 +536,26 @@ SpatialPoints.telemetry <- function(data)
 #methods::setMethod("SpatialPoints",signature(coords="telemetry"), function(coords,...) SpatialPoints.telemetry(coords,...))
 
 
-######################
-# clean up of buffalo data
-# this point is way off
-#buffalo[[6]] <- ctmm:::new.telemetry(buffalo[[6]][-5720,],info=attr(buffalo[[6]],"info"))
-# this time is duplicated and much less likely than the first
-#buffalo[[5]] <- ctmm:::new.telemetry(buffalo[[5]][-869,],info=attr(buffalo[[5]],"info"))
-#save(buffalo,file="data/buffalo.rda",compress="xz")
+##############
+# BUFFALO DATA
+##############
+# buffalo <- as.telemetry("../Data/buffalo/Kruger African Buffalo, GPS tracking, South Africa.csv")
+## this point is way off
+# buffalo[[6]] <- ctmm:::new.telemetry(buffalo[[6]][-5720,],info=attr(buffalo[[6]],"info"))
+## this time is duplicated and much less likely than the first
+# buffalo[[5]] <- ctmm:::new.telemetry(buffalo[[5]][-869,],info=attr(buffalo[[5]],"info"))
+# save(buffalo,file="data/buffalo.rda",compress="xz")
+
+
+##############
+# GAZELLE DATA
+##############
+# gazelle <- read.csv("../Data/gazelles/data_semiVarianceToIdentifyingMovementModes.csv")
+# gazelle$t <- gazelle$time ; gazelle$time <- NULL
+# gazelle$id <- gazelle$gazelle ; gazelle$gazelle <- NULL
+# ids <- levels(gazelle$id)
+# g <- list()
+# for(i in 1:length(ids)) { g[[i]] <- ctmm:::new.telemetry(droplevels(gazelle[gazelle$id==ids[i],][,1:3]),info=list(identity=ids[i])) }
+# names(g) <- ids
+# gazelle <- g ; rm(g)
+# save(gazelle,file="data/gazelle.rda",compress="xz")

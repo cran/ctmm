@@ -40,14 +40,14 @@ data(buffalo)
 
 # Calculate a list of variograms for all similar individuals in the dataset
 # the 4th buffalo has a different sampling rate
-varlist <- lapply( buffalo[-4] , variogram )
+svflist <- lapply( buffalo[-4] , variogram )
 # alternatively, we could variogram all at coarsest scale with variogram option dt
 
 # Calculate the average variogram
-meanvar <- mean(varlist)
+meansvf <- mean(svflist)
 
 # Plot the mean variogram
-plot(meanvar)
+plot(meansvf)
 }
 
 % Add one or more standard keywords, see file 'KEYWORDS' in the

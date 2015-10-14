@@ -40,7 +40,7 @@ C. H. Fleming, J. M. Calabrese, T. Mueller, K.A. Olson, P. Leimgruber, and W. F.
 C. H. Fleming and Y. Subasi and J. M. Calabrese. (2015). A maximum-entropy description of animal movement. \href{http://journals.aps.org/pre/abstract/10.1103/PhysRevE.91.032107}{Physical Review E, 91, 032107.}
 }
 
-\author{ Chris H. Fleming. }
+\author{ C. H. Fleming. }
 % \note{ }
 
 %% ~Make other sections like Warning with \section{Warning }{....} ~

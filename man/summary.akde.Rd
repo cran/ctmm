@@ -6,12 +6,12 @@ Summarize an autocorrelated kernel density estimate
 }
 \description{ This function returns a list of biologically interesting parameters in human readable format, as derived from an autocorrelated kernel density estimate.}
 \usage{
-\S3method{summary}{akde}(object,alpha=0.05,...)
+\S3method{summary}{akde}(object,alpha.HR=0.05,...)
 }
 %- maybe also 'usage' for other objects documented here.
 \arguments{
   \item{object}{ An \code{akde} autocorrelated kernel-density estimate from the output of \code{akde}. }
-  \item{alpha}{ Significance level for parameter estimates. }
+  \item{alpha.HR}{ Significance level for the home-range area. }
   \item{...}{Unused options.}
 }
 
@@ -20,7 +20,7 @@ Summarize an autocorrelated kernel density estimate
 \value{
 A \code{matrix} with low, maximum likelihood, and high estimates for the following parameters:
 \describe{
-\item{\code{area}}{The home-range area with fraction of inclusion \code{1-alpha}. E.g., the 50\% core home range is estimated with \code{alpha=0.50}. The confidence intervals reported here reflect the uncertainty in optimal smoothing, and are set by the \code{alpha} option of \code{akde()} when generating the \code{akde} object. In the case of IID data, where the uncertainty in optimal bandwidth is much smaller than the maximum likelihood optimal bandwidth (depicted by gridlines in \code{plot.telemetry()}), then the confidence intervals reported here are not particularly informative.}
+\item{\code{area}}{The home-range area with fraction of inclusion \code{1-alpha.HR}. E.g., the 50\% core home range is estimated with \code{alpha.HR=0.50}. The confidence intervals reported here reflect the uncertainty in optimal smoothing, and are set by the \code{alpha} option of \code{akde()} when generating the \code{akde} object. In the case of IID data, where the uncertainty in optimal bandwidth is much smaller than the maximum likelihood optimal bandwidth (depicted by gridlines in \code{plot.telemetry()}), then the confidence intervals reported here are not particularly informative.}
 }
 }
 
@@ -30,7 +30,7 @@ Rigorous home-range estimation with movement data: A new autocorrelated kernel-d
 \href{http://www.esajournals.org/doi/abs/10.1890/14-2010.1}{Ecology, 96(5), 1182-1188}.
 }
 
-\author{ Chris H. Fleming. }
+\author{ C. H. Fleming. }
 
 %\note{ }
 

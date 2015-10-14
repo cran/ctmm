@@ -1,6 +1,7 @@
 \name{as.telemetry}
 \alias{as.telemetry}
 \alias{summary.telemetry}
+\encoding{UTF-8}
 %- Also NEED an '\alias' for EACH other topic documented here.
 \title{
 Import, coerce, and summarize MoveBank data
@@ -33,7 +34,7 @@ In the future, we will be supporting more GPS and ARGOS columns, including speed
 
 %\references{}
 
-\author{C. H. Fleming and K. Safi.}
+\author{C. H. Fleming, G. Péron, and K. Safi.}
 
 %\note{}
 

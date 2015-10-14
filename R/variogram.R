@@ -1,28 +1,40 @@
 # variogram class
 new.variogram <- methods::setClass("variogram",representation(info="list"),contains="data.frame")
 
+# extend subset method
+subset.variogram <- function(x,...)
+{
+  info <- attr(x,"info")
+  x <- subset.data.frame(x,...)
+  x < - droplevels(x)
+  new.variogram(x,info=info)
+}
+
 
 # variogram funcion wrapper
 variogram <- function(data,dt=NULL,fast=NULL,CI="Markov")
 {
-  # R CHECK CRAN BUG WORKAROUND
-  lag <- NULL
-  
   if(length(dt)<2) { return(variogram.dt(data,dt=dt,fast=fast,CI=CI)) }
   
-  var <- lapply(dt, function(DT) { variogram.dt(data,dt=DT,fast=fast,CI=CI) } )
+  # calculate a variograms at each dt
+  vars <- lapply(dt, function(DT) { variogram.dt(data,dt=DT,fast=fast,CI=CI) } )
   
+  # subset each variogram to relevant range of lags
   dt <- c(dt,Inf)
-
-  var[[1]] <- subset(var[[1]],lag<dt[2])
-  for(i in 2:(length(dt)-1))
+  lag <- vars[[1]]$lag
+  vars[[1]] <- vars[[1]][lag<=dt[2],]
+  for(i in 1:(length(dt)-1))
   {
-    var[[i]] <- subset(var[[i]],lag<dt[i+1])[-1,]
+    lag <- vars[[i]]$lag
+    vars[[i]] <- vars[[i]][(dt[i]<lag)&(lag<=dt[i+1]),]
   }
   
-  # lazy coalate
-  var <- mean.variogram(var)
-  
+  # coalate
+  var <- vars[[1]]
+  for(i in 2:(length(dt)-1)) { var <- rbind(var,vars[[i]]) }
+
+  var <- new.variogram(var,info=attr(data,"info"))
+    
   return(var)
 } 
   
@@ -47,41 +59,41 @@ variogram.dt <- function(data,dt=NULL,fast=NULL,CI="Markov")
   }
 }
 
+############################
+# best initial time for a uniform grid
+grid.init <- function(t,dt=stats::median(diff(t)),W=rep(1,length(t)))
+{
+  cost <- function(t0)
+  { 
+    grid <- (t-t0)/dt
+    return( sum(W*(grid-round(grid))^2) )
+  }
+
+  t0 <- stats::optimize(cost,t[1]+c(-1,1)*dt/2)$minimum
+  
+  return(t0)   
+}
 
 ############################
-# FFT VARIOGRAM
-variogram.fast <- function(data,dt=NULL,CI="Markov")
+# smear data across a uniform grid
+gridder <- function(t,x,y,dt)
 {
-  # quick replacement for fftw
-  FFT <- function(X) { stats::fft(X,inverse=FALSE) }
-  IFFT <- function(X) { stats::fft(X,inverse=TRUE)/length(X) }
-  
-  t <- data$t
-  x <- data$x
-  y <- data$y
-  
   n <- length(t)
   
   # time lags
   DT <- diff(t)
- 
+  
   # default time step
   if(is.null(dt))
   { dt <- stats::median(DT) }
   
   # gap weights to prevent oversampling with coarse dt
   W <- clamp(c(DT[1],DT)/dt) # left weights
-  W <- W + clamp(c(DT,DT[n-1])/dt) # right weights
+  W <- W + clamp(c(DT,DT[n-1])/dt) # + right weights
   W <- W/2 # average left and right
   
   # choose best grid alignment
-  t <- t - t[1]
-  cost <- function(t0)
-  {
-    grid <- t-t0
-    return( sum(W*(grid-round(grid))^2) )
-  }
-  t <- t - stats::optimize(cost,c(-dt,dt)/2)$minimum
+  t <- t - grid.init(t,dt,W)
   
   # fractional grid index -- starts at >=1
   index <- t/dt
@@ -91,7 +103,7 @@ variogram.fast <- function(data,dt=NULL,CI="Markov")
   # uniform lag grid
   n <- ceiling(max(index))
   lag <- seq(0,n-1)*dt
-
+  
   # continuously distribute times over uniform grid
   W.grid <- rep(0,n)
   X.grid <- rep(0,n)
@@ -110,14 +122,14 @@ variogram.fast <- function(data,dt=NULL,CI="Markov")
     }
     else
     { # distribution information between adjacent grids
-     
+      
       # left grid portion
       J <- floor(j)
       w <- W[i]*(1-(j-J))
       W.grid[J] <- W.grid[J] + w
       X.grid[J] <- X.grid[J] + w*x[i]
       Y.grid[J] <- Y.grid[J] + w*y[i]
-   
+      
       # right grid portion
       J <- ceiling(j)
       w <- W[i]*(1-(J-j))
@@ -139,6 +151,27 @@ variogram.fast <- function(data,dt=NULL,CI="Markov")
   # continuous weights eff up the FFT numerics so discretize weights
   W <- sum(W) # now total DOF
   W.grid <- sign(W.grid) # discrete weights
+  
+  return(list(w=W.grid,x=X.grid,y=Y.grid,lag=lag,dt=dt))
+}
+
+
+############################
+# FFT VARIOGRAM
+variogram.fast <- function(data,dt=NULL,CI="Markov")
+{
+  t <- data$t
+  x <- data$x
+  y <- data$y
+  
+  # smear the data over an evenly spaced time grid
+  GRID <- gridder(t,x,y,dt)
+  W.grid <- GRID$w
+  X.grid <- GRID$x
+  Y.grid <- GRID$y
+  lag <- GRID$lag
+  
+  n <- length(lag)
   
   W.grid <- Conj(FFT(pad(W.grid,2*n)))
   XX.grid <- FFT(pad(X.grid^2,2*n))
@@ -402,7 +435,7 @@ plot.variogram <- function(x, CTMM=NULL, alpha=0.05, fraction=0.5, col="black", 
   max.lag <- fraction*max.lag
   
   # subset all data to fraction of total period
-  x <- lapply(x, function(v) { subset(v, lag <= max.lag) })
+  x <- lapply(x, function(v) { subset.data.frame(v, lag <= max.lag) })
 
   # maximum CI on SVF
   max.SVF <- max(sapply(x, function(v){ max(v$SVF * CI.upper(v$DOF,min(alpha))) } ))
@@ -648,14 +681,23 @@ mean.variogram <- function(x,...)
   # drop unused levels
   variogram <- droplevels(variogram)
   
-  # mean identity
-  identity <- sapply(x , function(v) { attr(v,"info")$identity } )
-  identity <- unique(identity)
-  identity <- paste(identity,collapse=" ")
-    
-  variogram <- new.variogram(variogram, info=attr(x[[1]],"info"))
-  attr(variogram,"info")$identiy <- identity
-  
+  variogram <- new.variogram(variogram, info=mean.info(x))
+
   return(variogram)
 }
 #methods::setMethod("mean",signature(x="variogram"), function(x,...) mean.variogram(x,...))
+
+
+# consolodate info attributes from multiple datasets
+mean.info <- function(x)
+{
+  # mean identity
+  identity <- sapply(x , function(v) { attr(v,"info")$identity } )
+  identity <- unique(identity) # why did I do this?
+  identity <- paste(identity,collapse=" ")
+  
+  info=attr(x[[1]],"info")
+  info$identity <- identity
+  
+  return(info)
+  }
