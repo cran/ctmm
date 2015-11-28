@@ -1,25 +1,91 @@
 ################################
 # Return hidden state estimates
-# more appropriate to call this "smooth", but maybe more confusing
 ################################
-filter <- function(data,model)
+smoother <- function(DATA,CTMM)
 {
-  return(kalman(data,model,smooth=TRUE))
-}
+  CTMM <- ctmm.prepare(DATA,CTMM)
+  
+  x <- DATA$x
+  y <- DATA$y
+  t <- DATA$t
+  
+  dt <- c(Inf,diff(t))
+  n <- length(t)
+  
+  sigma <- CTMM$sigma
+  K <- length(CTMM$tau)
+  
+  if(!CTMM$error)
+  {
+    CTMM$sigma <- 1
+    KALMAN <- kalman(cbind(x,y),dt=dt,CTMM=CTMM,error=DATA$error,smooth=TRUE)
+    
+    R <- KALMAN$Z[,"position",]
+    if(K>1) { V <- KALMAN$Z[,"velocity",] }
+    COV <- KALMAN$S[,"position","position"] %o% sigma
+  }
+  else if(CTMM$isotropic)
+  {
+    CTMM$sigma <- sigma@par[1]
+    KALMAN <- kalman(cbind(x,y),dt=dt,CTMM=CTMM,error=DATA$error,smooth=TRUE)
+    
+    R <- KALMAN$Z[,"position",]
+    if(K>1) { V <- KALMAN$Z[,"velocity",] }
+    COV <- KALMAN$S[,"position","position"] %o% diag(1,2)
+  }
+  else
+  {
+    #diagonalize data and then run two 1D Kalman filters with separate means
+    R <- cbind(x,y)
+    V <- array(0,dim=c(n,2))
+    COV <- array(0,dim=c(n,2,2))
+    
+    GM <- sigma@par[1]
+    e <- sigma@par[2]
+    theta <- sigma@par[3]
+    
+    M <- rotate(-theta)
+    R <- t(M %*% t(R))
+    
+    # major axis likelihood
+    CTMM$sigma <- GM * exp(+e/2)
+    KALMAN <- kalman(cbind(R[,1]),dt=dt,CTMM=CTMM,error=DATA$error,smooth=TRUE)
+    
+    R[,1] <- KALMAN$Z[,"position",1]
+    if(K>1) { V[,1] <- KALMAN$Z[,"velocity",1] }
+    COV[,1,1] <- KALMAN$S[,"position","position"]
 
-##################################
-# Plot the state estimate as if it were telemetry data
-# This needs to be listified, ...
-##################################
-plot.state <- function(state,...)
-{
-  info <- state$model$info
-  info$type <- "Krige"
+    # minor axis likelihood
+    CTMM$sigma <- GM * exp(-e/2)
+    KALMAN <- kalman(cbind(R[,2]),dt=dt,CTMM=CTMM,error=DATA$error,smooth=TRUE)
+    
+    R[,2] <- KALMAN$Z[,"position",1]
+    if(K>1) { V[,2] <- KALMAN$Z[,"velocity",1] }
+    COV[,2,2] <- KALMAN$S[,"position","position"]
+    
+    # transform results back
+    M <- rotate(+theta)
+    
+    # there MUST be an easier way to do a simple inner product but %*% fails
+    COV <- aperm(COV,perm=c(2,1,3))
+    dim(COV) <- c(2,2*n)
+    COV <- M %*% COV
+    dim(COV) <- c(2*n,2)
+    COV <- COV %*% t(M)
+    dim(COV) <- c(2,n,2)
+    COV <- aperm(COV,perm=c(2,1,3))
+    
+    R <- t(M %*% t(R))
+    V <- t(M %*% t(V))
+  }
   
-  state <- data.frame(t=state$t,x=state$H[,1,1],y=state$H[,1,2],vx=state$H[,2,1],vy=state$H[,2,2])
-  state <- new.telemetry(state,info=info)
+  CTMM$sigma <- sigma
+  CTMM <- ctmm.repair(CTMM)
   
-  plot.telemetry(state,...)
+  RETURN <- list(t=t,R=R,COV=COV)
+  if(K>1) { RETURN$V <- V }
+  
+  return(RETURN)
 }
 
 #################################
@@ -29,22 +95,22 @@ plot.state <- function(state,...)
 # cor.min is roughly the correlation required between locations to bridge them
 # dt.max is (alternatively) the maximum gap allowed between locations to bridge them
 #################################
-kkde <- function(data,model,H=diag(0,2),res.time=20,res.space=1000,cor.min=0.5,dt.max=NULL)
+occurrence <- function(data,CTMM,H=diag(0,2),res.time=20,res.space=1000,grid=NULL,cor.min=0.5,dt.max=NULL)
 {
-  model <- ctmm.prepare(data,model)
+  info <- attr(data,"info")
+  CTMM <- ctmm.prepare(data,CTMM)
   
-  # attach zero error to observations... VERY TEMPORARY
-  data$error <- rep(0,dim(data)[1])
+  # prepare data error
+  data$error <- error.prepare(data,CTMM)
   
-  # FIX THE TIME GRID TO AVOID SMALL DT
-  
+  # FIX THE TIME GRID TO AVOID TINY DT
   # target resolution
   t <- data$t
   DT <- diff(t)
   dt <- stats::median(DT)/res.time
   
   # maximum gap to bridge
-  if(is.null(dt.max)) { dt.max <- -log(cor.min)*model$tau[1] }
+  if(is.null(dt.max)) { dt.max <- -log(cor.min)*CTMM$tau[1] }
   
   # gaps to bridge
   BRIDGE <- where(DT<=dt.max)
@@ -98,7 +164,10 @@ kkde <- function(data,model,H=diag(0,2),res.time=20,res.space=1000,cor.min=0.5,d
   data <- data[sort.list(data$t,na.last=NA,method="quick"),]
   # this is now our fake data set to feed into the kalman smoother
   
-  state <- filter(data,model)
+  # !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+  # FIX EVERYTING BELOW THIS LINE
+  # NEED TO EITHER RUN ONE FILTER OR TWO FILTERS WITH A ROTATION
+  state <- smoother(data,CTMM)
   
   # evenly sampled subset: data points (bridge ends) may be counted twice and weighted half
   GRID <- c( where(data$t %in% t.grid) , where(data$t %in% t.grid[where(diff(t.grid)==0)]) )
@@ -107,98 +176,46 @@ kkde <- function(data,model,H=diag(0,2),res.time=20,res.space=1000,cor.min=0.5,d
 #  GRID <- data$t %in% t.grid
   
 #  t <- state$t[GRID]
-  x <- state$H[GRID,"position","x"]
-  y <- state$H[GRID,"position","y"]
-  C <- state$C[GRID,"position","position"]
+  R <- state$R[GRID,]
+  COV <- state$COV[GRID,,]
+  n <- length(R[,1])
   
   # continuous velocities will give us more information to use
-  if(length(model$tau)>1)
-  {
-    v.x <- state$H[GRID,"velocity","x"]
-    v.y <- state$H[GRID,"velocity","y"]
-  }
-  else # empty velocity data otherwise
-  {
-    v.x <- rep(0,length(x))
-    v.y <- rep(0,length(y))
-  }
+  if(length(CTMM$tau)>1)
+  { V <- state$V[GRID,] }
+  else # null velocity data otherwise
+  { V <- array(0,c(n,2)) }
 
   # fake data
-  data <- data.frame(x=x,y=y)
+  data <- data.frame(x=R[,1],y=R[,2])
 
-  # some variances are slightly negative due to roundoff error
-  C <- clamp(C,min=0,max=Inf)
+  # some covariances are slightly negative due to roundoff error
+  # so here I clamp the negative singular values to zero
+  COV <- lapply(1:n,function(i){ PDpart(COV[i,,]) })
+  COV <- unlist(COV)
+  dim(COV) <- c(2,2,n)
+  COV <- aperm(COV,perm=c(3,1,2))
   
-  n <- length(x)
   # uncertainties/bandwidths for this data
   h <- H # extra smoothing
   H <- array(0,c(n,2,2))
   for(i in 1:n)
   {
-    v <- c(v.x[i],v.y[i])
     # total covariance is bandwidth + krige uncertainty + kinetic numerical correction
-    H[i,,] <- h + model$sigma*C[i] + dt.grid[i]^2/12*(v %o% v)
+    H[i,,] <- h + COV[i,,] + dt.grid[i]^2/12*(V[i,] %o% V[i,])
     # maybe publish the last part as a technical note
   }
+  # there is probably a faster way to do that
   
-  # need to fix and understand this alpha problem
-  kde(data,H=H,W=w.grid,res=res.space)
+  # using the same data format as AKDE, but with only the ML estimate (alpha=1)
+  KDE <- kde(data,H=H,W=w.grid,res=res.space)
+  KDE$H <- diag(0,2)
+  KDE <- list(ML=KDE)
+  KDE <- new.UD(KDE,info=info,level=0)
+  return(KDE)
 }
 
 # here is some sample code for this function
 # KDE <- ctmm:::kkde(DATA[2:100,],MODEL,H=diag(5^2,2),res.time=100)
 # image(x=KDE$x/1000,y=KDE$y/1000,z=100*KDE$CDF,col=gray(0:10^5/10^5))
 # contour(x=KDE$x/1000,y=KDE$y/1000,z=100*KDE$CDF,levels=c(95,99))
-
-
-################################
-# TOTALLY UNFINISHED
-# Krige at one time or over list of times
-krige <- function(Krige, t)
-{
-  # sampled times
-  T <- Krige$t
-  N <- length(T)
-  dt <- Krige$dt
-
-  # Kriged time indices (bisection lookup)
-  n <- length(t)
-  I <- array(1,n)
-  for(i in 1:n) 
-  {
-    I.min <- I[i]
-    I.max <- N
-    
-    # iterate two methods:
-    # biased/informed bisection that is exact for evenly sampled data
-    # naive bisection that always converges
-    while(I.max-I.min>1)
-    {
-      # VANILLA BISECTION
-      dI <- floor((I.max-I.min)/2)
-      I.test <- I.min + dI
-      if(T[I.test]<=t) { I.min <- I.test }
-      
-      I.test <- I.max - dI
-      if(T[I.test]<=t) { I.min <- I.test }
-      
-      # BIASED/INFORMED BISECTION  
-      # How many steps we need to push forward for evenly sampled data
-      I.test <- I.min + floor((t[i]-T[I.min])/dt)
-      if(T[I.test]<=t) { I.min <- I.test }
-      
-      # How many steps we need to push backwards for evenly sampled data
-      I.test <- I.max - floor((T[I.max]-t[i])/dt)
-      if(T[I.test]>=t) { I.max <- I.test }
-    }
-
-    # Update max-min
-    I[i] <- I.min
-    if(i<n) { I[i+1] <- I[i] }
-  }
-  
-  
-  
-}
-
-

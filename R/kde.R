@@ -1,6 +1,6 @@
 # akde object generator
 # list of kde objects with info slots
-new.akde <- methods::setClass("akde", representation(info="list",alpha="numeric"), contains="list")
+new.UD <- methods::setClass("UD", representation(info="list",level="numeric"), contains="list")
 
 
 # Slow lag counter
@@ -89,7 +89,7 @@ akde.bandwidth <- function(data,CTMM,fast=NULL,dt=NULL)
   h <- 1/n^(1/6) # User Silverman's rule of thumb to place lower bound
   h <- stats::optimize(f=MISE,interval=c(h/2,2))$minimum
   
-  H <- h^2*CTMM$sigma
+  H <- h^2*methods::getDataPart(CTMM$sigma)
   
   rownames(H) <- c("x","y")
   colnames(H) <- c("x","y")
@@ -97,11 +97,21 @@ akde.bandwidth <- function(data,CTMM,fast=NULL,dt=NULL)
   return(H)
 }
 
+
+###################
+# homerange wrapper function
+homerange <- function(data,CTMM,method="AKDE",...)
+{
+  akde(data,CTMM,...)
+}
+
+
 #######################################
 # wrap the kde function for our telemetry data format and CIs.
-akde <- function(data,CTMM,alpha=0.05,fast=NULL,dt=NULL,error=0.001,res=200,grid=NULL)
+akde <- function(data,CTMM,level=0.95,error=0.001,res=200,grid=NULL,...)
 {
-  pb <- utils::txtProgressBar(min=-1,max=3,initial=-1,style=3)
+  alpha <- 1-level
+  #pb <- utils::txtProgressBar(min=-1,max=3,initial=-1,style=3)
   
   tau <- CTMM$tau
   K <- length(tau)
@@ -119,7 +129,7 @@ akde <- function(data,CTMM,alpha=0.05,fast=NULL,dt=NULL,error=0.001,res=200,grid
     CTMM.par <- CTMM
     CTMM.par$sigma <- par[1]*R
     if(K>0) { CTMM.par$tau <- par[-1] }
-    H <- akde.bandwidth(data=data,CTMM=CTMM.par,fast=fast,dt=dt)
+    H <- akde.bandwidth(data=data,CTMM=CTMM.par,...)
     return(H)
   }
 
@@ -147,18 +157,18 @@ akde <- function(data,CTMM,alpha=0.05,fast=NULL,dt=NULL,error=0.001,res=200,grid
   # object to store crap
   KDE <- list(low=0,ML=0,high=0)
   
-  utils::setTxtProgressBar(pb,0)
+  #utils::setTxtProgressBar(pb,0)
   for(i in 1:3)
   {
     H <- GM.H[i]*R
     KDE[[i]] <- kde(data,H,alpha=error,res=res,grid=grid)
     KDE[[i]]$H <- H
-    utils::setTxtProgressBar(pb,i)
+    #utils::setTxtProgressBar(pb,i)
   }
+  #close(pb)
   
-  KDE <- new.akde(KDE,info=attr(data,"info"),alpha=alpha)
+  KDE <- new.UD(KDE,info=attr(data,"info"),level=level)
   
-  close(pb)
   return(KDE)
 }
 
@@ -175,7 +185,7 @@ kde <- function(data,H,W=rep(1,length(data$x)),alpha=0.001,res=100,grid=NULL)
 
   # normalize weights
   W <- W/sum(W)
-    
+  
   # if a single H matrix is given, make it into an array of H matrices
   n <- length(x)
   if(length(dim(H))==2)
@@ -261,7 +271,7 @@ pnorm2 <- function(X,Y,sigma,dx=stats::mean(diff(X)),dy=stats::mean(diff(Y)),alp
   s <- v$values
   
   # effective degree of degeneracy at best resolution
-  ZERO <- sum(s/min(dx,dy)^2 <= 0)
+  ZERO <- sum(s <= 0 | (min(dx,dy)/2)^2/s > -2*log(alpha))
 
   # correlation
   S <- sqrt(sigma[1,1]*sigma[2,2])
@@ -312,6 +322,9 @@ pnorm2 <- function(X,Y,sigma,dx=stats::mean(diff(X)),dy=stats::mean(diff(Y)),alp
       
       # integrate over cell and add
       cdf <- CDF[-1,-1] - CDF[-n.x,-1] - CDF[-1,-n.y] + CDF[-n.x,-n.y]
+      
+      # pbivnorm is very fragile
+      # if(any(is.nan(cdf))) { stop(" dx=",dx," dy=",dy," sigma=",sigma," x=",x," y=",y," rho=",rho," CDF=",cdf)}
     }
   }
   else if(ZERO==1 || abs(rho)==1) # line degeneracy
@@ -373,7 +386,7 @@ pnorm2 <- function(X,Y,sigma,dx=stats::mean(diff(X)),dy=stats::mean(diff(Y)),alp
     # increment the closest point(s)
     cdf[r,c] <- cdf[r,c] + 1/(sum(r)*sum(c))
   }
-  else stop("something is wrong with this matrix: sigma == ",sigma)
+  else stop("something is wrong in matrix: sigma == ",sigma)
   
   return(cdf)
 }
@@ -424,12 +437,14 @@ Gauss <- function(X,Y,sigma)
 
 #######################
 # summarize details of akde object
-summary.akde <- function(object,alpha.HR=0.05,...)
+summary.UD <- function(object,level.UD=0.95,...)
 {
+  alpha.UD <- 1-level.UD
+  
   area <- c(0,0,0)
   for(i in 1:3)
   {
-    area[i] <- sum(object[[i]]$CDF <= 1-alpha.HR) * object[[i]]$dA
+    area[i] <- sum(object[[i]]$CDF <= 1-alpha.UD) * object[[i]]$dA
   }
   
   unit.info <- unit(area,"area")
@@ -442,14 +457,14 @@ summary.akde <- function(object,alpha.HR=0.05,...)
   
   return(area)
 }
-#methods::setMethod("summary",signature(object="akde"), function(object,...) summary.akde(object,...))
+#methods::setMethod("summary",signature(object="UD"), function(object,...) summary.UD(object,...))
 
 
 ################################
 # create a raster of the ML akde
-raster.akde <- function(AKDE,CI="ML")
+raster.UD <- function(UD,DF="CDF",CI="ML")
 {
-  kde <- AKDE[[CI]]
+  kde <- UD[[CI]]
   dx <- kde$x[2]-kde$x[1]
   dy <- kde$y[2]-kde$y[1]
   
@@ -459,7 +474,7 @@ raster.akde <- function(AKDE,CI="ML")
   ymn <- kde$y[1]-dy/2
   ymx <- last(kde$y)+dy/2
   
-  Raster <- raster::raster(t(kde$PDF[,dim(kde$PDF)[2]:1]),xmn=xmn,xmx=xmx,ymn=ymn,ymx=ymx,crs=attr(AKDE,"info")$projection)
+  Raster <- raster::raster(t(kde[[DF]][,dim(kde[[DF]])[2]:1]),xmn=xmn,xmx=xmx,ymn=ymn,ymx=ymx,crs=attr(UD,"info")$projection)
   
   return(Raster)
 }
@@ -475,15 +490,15 @@ inside <- function(A,B)
 
 
 ##############
-SpatialPolygonsDataFrame.akde <- function(AKDE,alpha.HR=0.05)
+SpatialPolygonsDataFrame.UD <- function(UD,level.UD=0.95)
 {
-  ID <- paste(AKDE@info$identity," ",names(AKDE)," ",round(100*(1-alpha.HR)),"%",sep="")
+  ID <- paste(UD@info$identity," ",names(UD)," ",round(100*level.UD),"%",sep="")
 
   polygons <- list()
-  for(i in 1:length(AKDE))
+  for(i in 1:length(UD))
   {
-    kde <- AKDE[[i]]
-    CL <- grDevices::contourLines(x=kde$x,y=kde$y,z=kde$CDF,levels=1-alpha.HR)
+    kde <- UD[[i]]
+    CL <- grDevices::contourLines(x=kde$x,y=kde$y,z=kde$CDF,levels=level.UD)
     
     # create contour heirarchy matrix (half of it)
     H <- array(0,c(1,1)*length(CL))    
@@ -514,7 +529,7 @@ SpatialPolygonsDataFrame.akde <- function(AKDE,alpha.HR=0.05)
   names(polygons) <- ID
 
     # spatial polygons
-  polygons <- sp::SpatialPolygons(polygons, proj4string=sp::CRS(attr(AKDE,"info")$projection))
+  polygons <- sp::SpatialPolygons(polygons, proj4string=sp::CRS(attr(UD,"info")$projection))
 
   # spatial polygons data frame  
   data <- data.frame(name=rev(ID))
@@ -526,9 +541,9 @@ SpatialPolygonsDataFrame.akde <- function(AKDE,alpha.HR=0.05)
 
 
 ################
-writeShapefile.akde <- function(AKDE, folder, file=AKDE@info$identity, alpha.HR=0.05,  ...)
+writeShapefile.UD <- function(UD, folder, file=UD@info$identity, level.UD=0.95,  ...)
 {
-  SP <- SpatialPolygonsDataFrame.akde(AKDE,alpha.HR=alpha.HR)
+  SP <- SpatialPolygonsDataFrame.UD(UD,level.UD=level.UD)
   
   rgdal::writeOGR(SP, dsn=folder, layer=file, driver="ESRI Shapefile",...)
 }

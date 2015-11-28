@@ -8,22 +8,22 @@ Calculate an autocorrelated kernel density estimate
 This function calculates autocorrelated kernel density estimates of different confidence levels from \code{telemetry} data and a continuous-time movement model.
 }
 \usage{
-akde(data,CTMM,alpha=0.05,fast=NULL,dt=NULL,error=0.001,res=200,grid=NULL)
+akde(data,CTMM,level=0.95,error=0.001,res=200,grid=NULL,...)
 }
 %- maybe also 'usage' for other objects documented here.
 \arguments{
-  \item{data}{ 2D timeseries telemetry data represented as a \code{telemetry} object or data.frame or list with components \code{t}, \code{x}, \code{y} all numeric values. }
+  \item{data}{ 2D timeseries telemetry data represented as a \code{telemetry} object. }
   \item{CTMM}{A \code{ctmm} movement model from the output of \code{ctmm.fit}.}
-  \item{alpha}{Significance level for when propagating uncertainties in the \code{ctmm} parameter estimates.}
-  \item{fast, dt}{Arguments passed to all instances of \code{\link{akde.bandwidth}}.}
+  \item{level}{Confidence level for when propagating uncertainties in the \code{ctmm} parameter estimates.}
   \item{error}{Target error for kernel truncation.}
   \item{res}{Number of grid points along each axis.}
   \item{grid}{Optional grid specification with columns labeled \code{x} and \code{y}. Not yet supported.}
+  \item{...}{Arguments passed to all instances of \code{\link{akde.bandwidth}}.}
 }
 
 %\details{}
 
-\value{Returns an \code{akde} object: a list with component kernel-density objects \code{low}, \code{ML}, \code{high}, and the corresponding significance level \code{alpha} for the optimal bandwidth area. Each kernel-density object contains the sampled grid line locations \code{x} and \code{y}, the probability density function evaluated on the sampled grid locations \code{PDF}, the optimal bandwidth matrix \code{H}, and the area of each grid cell \code{dA}.
+\value{Returns a \code{UD} object: a list with component objects \code{low}, \code{ML}, \code{high}, and the corresponding confidence \code{level} for the optimal bandwidth area. Each component object contains the sampled grid line locations \code{x} and \code{y}, the probability density and cumulative distribution functions evaluated on the sampled grid locations \code{PDF} & \code{CDF}, the optimal bandwidth matrix \code{H}, and the area of each grid cell \code{dA}.
 }
 
 \references{
@@ -36,11 +36,11 @@ Rigorous home-range estimation with movement data: A new autocorrelated kernel-d
 
 \author{ C. H. Fleming. }
 
-\note{ In the case of coarse grids, the value of \code{PDF} in a grid cell actually corresponds to the average probability density over the entire rectangular cell. }
+\note{ In the case of coarse grids, the value of \code{PDF} in a grid cell corresponds to the average probability density over the entire rectangular cell. }
 
 %% ~Make other sections like Warning with \section{Warning }{....} ~
 
-\seealso{ \code{\link{akde.bandwidth}}, \code{\link{raster.akde}} }
+\seealso{ \code{\link{akde.bandwidth}}, \code{\link{raster.UD}} }
 
 \examples{\donttest{
 # Load package and data
@@ -50,14 +50,14 @@ cilla <- buffalo[[1]]
 
 # Fit a continuous-velocity model with tau ~ c(10 days, 1 hour)
 # see help(variogram.fit)
-m2 <- ctmm(tau=c(10*24*60^2,60^2))
-M2 <- ctmm.fit(cilla,m2)
+GUESS <- ctmm(tau=c(10*24*60^2,60^2))
+FIT <- ctmm.fit(cilla,GUESS)
 
 # Compute akde object
-KD2 <- akde(cilla,M2)
+UD <- akde(cilla,FIT)
 
 # Plot data with AKDE contours
-plot(cilla,AKDE=KD2)
+plot(cilla,UD=UD)
 }}
 
 % Add one or more standard keywords, see file 'KEYWORDS' in the

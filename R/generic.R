@@ -45,11 +45,28 @@ plot.list <- function(x,...)
 #methods::setMethod("plot",signature(x="list"), function(x,...) plot.list(x,...))
 
 
+# forwarding function for list of a particular datatype
+summary.list <- function(object,...)
+{
+  CLASS <- class(object[[1]])
+  utils::getS3method("summary",CLASS)(object,...)
+}
+
+
 # parity tests
 is.even <- Vectorize(function(x) {x %% 2 == 0})
 
 is.odd <- Vectorize(function(x) {x %% 2 != 0})
 
+
+# 2D rotation matrix
+rotate <- function(theta)
+{
+  COS <- cos(theta)
+  SIN <- sin(theta)
+  R <- rbind( c(COS,-SIN), c(SIN,COS) )
+  return(R)
+}
 
 # indices where a condition is met
 where <- function(x)
@@ -76,8 +93,6 @@ He <- function(M) { (M + Adj(M))/2 }
 # Positive definite part of matrix
 PDpart <- function(M)
 { 
-  M <- He(M) # symmetrize
-
   # singular value decomposition
   M <- svd(M)
   M$d <- clamp(M$d,max=Inf) # toss out small negative values
@@ -125,15 +140,6 @@ chisq.ci <- function(MLE,COV,alpha)
   DOF <- 2*MLE^2/COV
   CI <- MLE * c(CI.lower(DOF,alpha),1,CI.upper(DOF,alpha))
 }
-
-
-# add opacity to color
-translucent <- Vectorize( function(col,alpha=0.5)
-{
-  col <- col2rgb(col)/255
-  col <- grDevices::rgb(col[1],col[2],col[3],alpha)
-  return(col)
-} )
 
 
 # last element of array

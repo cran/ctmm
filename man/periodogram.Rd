@@ -12,7 +12,7 @@ This function calculates isotropic Lomb-Scargle periodogram (LSP, Scargle, 1982)
 \usage{
 periodogram(data,CTMM=NULL,T=NULL,dt=NULL,res=1,fast=NULL)
 
-\S3method{plot}{periodogram}(x,diagnostic=FALSE,col="black",transparency=0.25,...)
+\S3method{plot}{periodogram}(x,diagnostic=FALSE,col="black",transparency=0.25,grid=TRUE,...)
 }
 %- maybe also 'usage' for other objects documented here.
 \arguments{
@@ -26,6 +26,7 @@ periodogram(data,CTMM=NULL,T=NULL,dt=NULL,res=1,fast=NULL)
   \item{diagnostic}{Plot the sampling schedule's periodogram to check for spurious periodicities.}
   \item{col}{Color of periodogram.}
   \item{transparency}{Adds transparency to clustered data if greater than zero. Should be less than one.}
+  \item{grid}{Whether or not to plot gridlines at common periodicities.}
   \item{...}{Optional arguments fed to \code{\link{plot}}.}
 }
 \details{
@@ -62,10 +63,10 @@ data(buffalo)
 cilla <- buffalo[[1]]
 
 #Calculate periodogram (fast=TRUE for example)
-lsp <- periodogram(cilla,fast=TRUE)
+LSP <- periodogram(cilla,fast=TRUE)
 
 #Plot the periodogram
-plot(lsp)
+plot(LSP)
 }
 
 % Add one or more standard keywords, see file 'KEYWORDS' in the

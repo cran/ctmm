@@ -46,10 +46,10 @@ data(buffalo)
 cilla <- buffalo[[1]]
 
 #Calculate variogram
-svf <- variogram(cilla)
+SVF <- variogram(cilla)
 
 # generate a visual fit of the variogram (requires RStudio)
-\donttest{variogram.fit(svf)}
+\donttest{variogram.fit(SVF)}
 }
 
 % Add one or more standard keywords, see file 'KEYWORDS' in the

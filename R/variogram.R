@@ -12,7 +12,7 @@ subset.variogram <- function(x,...)
 
 
 # variogram funcion wrapper
-variogram <- function(data,dt=NULL,fast=NULL,CI="Markov")
+variogram <- function(data,dt=NULL,fast=TRUE,CI="Markov")
 {
   if(length(dt)<2) { return(variogram.dt(data,dt=dt,fast=fast,CI=CI)) }
   
@@ -50,13 +50,15 @@ variogram.dt <- function(data,dt=NULL,fast=NULL,CI="Markov")
   }
   
   if(fast)
-  {
-    return(variogram.fast(data=data,dt=dt,CI=CI))
-  }
+  { SVF <- variogram.fast(data=data,dt=dt,CI=CI) }
   else
-  { 
-    return(variogram.slow(data=data,dt=dt,CI=CI))
-  }
+  { SVF <- variogram.slow(data=data,dt=dt,CI=CI) }
+  
+  # skip missing data
+  SVF <- SVF[where(SVF$DOF>0),]
+  SVF <- stats::na.omit(SVF)
+  SVF <- new.variogram(SVF,info=attr(data,"info"))
+  return(SVF)
 }
 
 ############################
@@ -212,8 +214,6 @@ variogram.fast <- function(data,dt=NULL,CI="Markov")
   }
   
   result <- data.frame(SVF=SVF,DOF=DOF,lag=lag)
-  result <- new.variogram(result, info=attr(data,"info"))
-  
   return(result)
 }
 
@@ -329,8 +329,6 @@ variogram.slow <- function(data,dt=NULL,CI="Markov")
   close(pb)
   
   result <- data.frame(SVF=SVF,DOF=DOF,lag=lag)
-  result <- new.variogram(result, info=attr(data,"info"))
-    
   return(result)
 }
 
@@ -413,7 +411,7 @@ plot.svf <- function(lag,model,alpha=0.05,col="red",type="l",...)
       svf.lower <- Vectorize(function(t){ svf(t) * CI.lower(DOF.svf(t),alpha[j]) })
       svf.upper <- Vectorize(function(t){ svf(t) * CI.upper(DOF.svf(t),alpha[j]) })
       
-      graphics::polygon(c(Lags,rev(Lags)),c(svf.lower(Lags),rev(svf.upper(Lags))),col=translucent(col,alpha=0.1/length(alpha)),border=NA,...)
+      graphics::polygon(c(Lags,rev(Lags)),c(svf.lower(Lags),rev(svf.upper(Lags))),col=grDevices::adjustcolor(col,alpha.f=0.1/length(alpha)),border=NA,...)
     }
   }
   
@@ -422,8 +420,10 @@ plot.svf <- function(lag,model,alpha=0.05,col="red",type="l",...)
 ###########################################################
 # PLOT VARIOGRAM
 ###########################################################
-plot.variogram <- function(x, CTMM=NULL, alpha=0.05, fraction=0.5, col="black", col.CTMM="red", ...)
+plot.variogram <- function(x, CTMM=NULL, level=0.95, fraction=0.5, col="black", col.CTMM="red", ...)
 {  
+  alpha <- 1-level
+  
   # number of variograms
   if(class(x)=="variogram" || class(x)=="data.frame") { x <- list(x) }
   n <- length(x)
@@ -479,7 +479,7 @@ plot.variogram <- function(x, CTMM=NULL, alpha=0.05, fraction=0.5, col="black", 
       SVF.lower <- SVF * CI.lower(DOF,alpha[j])
       SVF.upper <- SVF * CI.upper(DOF,alpha[j])
       
-      graphics::polygon(c(lag,rev(lag)),c(SVF.lower,rev(SVF.upper)),col=translucent(col[[i]],alpha=0.1),border=NA)
+      graphics::polygon(c(lag,rev(lag)),c(SVF.lower,rev(SVF.upper)),col=grDevices::adjustcolor(col[[i]],alpha.f=0.1),border=NA)
     }
   }
   
@@ -549,7 +549,7 @@ zoom.variogram <- function(x, fraction=0.5, ...)
   min.lag <- min(min.lag)
   
   b <- 4
-  min.step <- 10*min.lag/max.lag
+  min.step <- min(fraction,10*min.lag/max.lag)
   manipulate::manipulate( { plot.variogram(x, fraction=b^(z-1), ...) }, z=manipulate::slider(1+log(min.step,b),1,initial=1+log(fraction,b),label="zoom") )
 }
 #methods::setMethod("zoom",signature(x="variogram",y="missing"), function(x,y,...) zoom.variogram(x,...))

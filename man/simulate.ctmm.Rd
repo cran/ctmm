@@ -44,13 +44,13 @@ library(ctmm)
 
 #prepare simulation parameters
 t <- 1:1000
-m1 <- ctmm(tau=c(100,10),sigma=10,mu=c(0,0))
+MODEL <- ctmm(tau=c(100,10),sigma=10,mu=c(0,0))
 
 #simulate data
-s1 <- simulate(m1,t=t)
+SIM <- simulate(MODEL,t=t)
 
 #plot data with Gaussian model
-plot(s1,CTMM=m1)
+plot(SIM,CTMM=MODEL)
 }
 
 % Add one or more standard keywords, see file 'KEYWORDS' in the

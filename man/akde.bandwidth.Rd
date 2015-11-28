@@ -49,11 +49,11 @@ cilla <- buffalo[[1]]
 
 # Fit a continuous-velocity model with tau ~ c(10 days, 1 hour)
 # see help(variogram.fit)
-m2 <- ctmm(tau=c(10*24*60^2,60^2))
-M2 <- ctmm.fit(cilla,m2)
+GUESS <- ctmm(tau=c(10*24*60^2,60^2))
+FIT <- ctmm.fit(cilla,GUESS)
 
 # Optimize bandwidth matrix
-H2 <- akde.bandwidth(cilla,M2)
+H <- akde.bandwidth(cilla,FIT)
 }}
 
 % Add one or more standard keywords, see file 'KEYWORDS' in the

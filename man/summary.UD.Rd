@@ -1,17 +1,17 @@
-\name{summary.akde}
-\alias{summary.akde}
+\name{summary.UD}
+\alias{summary.UD}
 %- Also NEED an '\alias' for EACH other topic documented here.
 \title{
-Summarize an autocorrelated kernel density estimate
+Summarize a range distribution
 }
 \description{ This function returns a list of biologically interesting parameters in human readable format, as derived from an autocorrelated kernel density estimate.}
 \usage{
-\S3method{summary}{akde}(object,alpha.HR=0.05,...)
+\S3method{summary}{UD}(object,level.UD=0.95,...)
 }
 %- maybe also 'usage' for other objects documented here.
 \arguments{
   \item{object}{ An \code{akde} autocorrelated kernel-density estimate from the output of \code{akde}. }
-  \item{alpha.HR}{ Significance level for the home-range area. }
+  \item{level.UD}{ Confidence level for the home-range area. }
   \item{...}{Unused options.}
 }
 
@@ -20,7 +20,7 @@ Summarize an autocorrelated kernel density estimate
 \value{
 A \code{matrix} with low, maximum likelihood, and high estimates for the following parameters:
 \describe{
-\item{\code{area}}{The home-range area with fraction of inclusion \code{1-alpha.HR}. E.g., the 50\% core home range is estimated with \code{alpha.HR=0.50}. The confidence intervals reported here reflect the uncertainty in optimal smoothing, and are set by the \code{alpha} option of \code{akde()} when generating the \code{akde} object. In the case of IID data, where the uncertainty in optimal bandwidth is much smaller than the maximum likelihood optimal bandwidth (depicted by gridlines in \code{plot.telemetry()}), then the confidence intervals reported here are not particularly informative.}
+\item{\code{area}}{The home-range area with fraction of inclusion \code{level.UD}. E.g., the 50\% core home range is estimated with \code{level.UD=0.50}. The confidence intervals reported here reflect the uncertainty in optimal smoothing, and are set by the \code{level} option of \code{akde()} when generating its \code{UD} object. In the case of IID data, where the uncertainty in optimal bandwidth is much smaller than the maximum likelihood optimal bandwidth (depicted by gridlines in \code{plot.telemetry()}), then the confidence intervals reported here are not particularly informative.}
 }
 }
 
@@ -48,12 +48,12 @@ cilla <- buffalo[[1]]
 
 # Find the best OU movement model
 # also see help(variogram.fit)
-m1 <- ctmm(tau=6*24*60^2)
-M1 <- ctmm.fit(cilla,m1)
+GUESS <- ctmm(tau=6*24*60^2)
+FIT <- ctmm.fit(cilla,GUESS)
 
 # Estimate and summarize the AKDE
-KD1 <- akde(cilla,M1)
-summary(KD1)
+UD <- akde(cilla,FIT)
+summary(UD)
 }}
 
 % Add one or more standard keywords, see file 'KEYWORDS' in the

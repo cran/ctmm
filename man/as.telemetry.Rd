@@ -1,21 +1,30 @@
 \name{as.telemetry}
 \alias{as.telemetry}
+\alias{as.telemetry.character}
+\alias{as.telemetry.data.frame}
+\alias{as.telemetry.Move}
 \alias{summary.telemetry}
 \encoding{UTF-8}
 %- Also NEED an '\alias' for EACH other topic documented here.
 \title{
 Import, coerce, and summarize MoveBank data
 }
-\description{Functions to import MoveBank csv files or \code{data.frame} objects, coerce them into \code{telemetry} objects, and summarize them.}
+\description{Functions to import MoveBank csv files, \code{data.frame}, and \code{Move} objects, coerce them into \code{telemetry} objects, and summarize them.}
 
 \usage{
 as.telemetry(CSV,timezone="GMT",projection=NULL,...)
+
+\S3method{as.telemetry}{character}(CSV,timezone="GMT",projection=NULL,...)
+
+\S3method{as.telemetry}{data.frame}(CSV,timezone="GMT",projection=NULL,...)
+
+\S3method{as.telemetry}{Move}(CSV,timezone="GMT",projection=NULL,...)
 
 \S3method{summary}{telemetry}(object,...)
 }
 %- maybe also 'usage' for other objects documented here.
 \arguments{
-  \item{CSV}{The file name of the MoveBank csv file or a raw \code{data.frame} object from previously read MoveBank data.}
+  \item{CSV}{The file name of the MoveBank csv file, \code{data.frame} object from a MoveBank data CSV, or \code{Move} object.}
   \item{timezone}{Timezone argument for \code{\link{as.POSIXct}}.}
   \item{projection}{Optional PROJ.4 projection argument to be fed to \code{\link[rgdal]{project}}.}
   \item{...}{Optional arguments to be fed to \code{\link{read.csv}}.}
@@ -26,7 +35,7 @@ as.telemetry(CSV,timezone="GMT",projection=NULL,...)
 If no projection argument is specified, a two-point equidistant projection is calculated that should be good for most range resident and migratory species.
 Global migrations that are not relatively geodesic (locally straight) will probably suffer distortion.
 
-The current MoveBank columns used are \code{individual.local.identifier}, \code{timestamp}, \code{location.long}, \code{location.lat}.
+The necessary MoveBank columns are \code{individual.local.identifier}, \code{timestamp}, \code{location.long}, \code{location.lat}, and the optional Movebank columns are \code{eobs.horizontal.accuracy.estimate}.
 In the future, we will be supporting more GPS and ARGOS columns, including speed, heading, error classification, etc.
 }
 

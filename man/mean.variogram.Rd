@@ -18,7 +18,7 @@ Compute a number-weighted average of variogram objects
 %%  ~~ If necessary, more details than the description above ~~
 %}
 \value{
-Returns a variogram object (\code{class variogram}) which is a dataframe containing the lag, the semi-variance estimate at that lag, and the approximate degrees of freedom associated with the semi-variance estimate.
+Returns a \code{variogram} object which is a dataframe containing the lag, the semi-variance estimate at that lag, and the approximate degrees of freedom associated with the semi-variance estimate.
 }
 \references{
 C. H. Fleming, J. M. Calabrese, T. Mueller, K.A. Olson, P. Leimgruber, and W. F. Fagan.
@@ -40,14 +40,14 @@ data(buffalo)
 
 # Calculate a list of variograms for all similar individuals in the dataset
 # the 4th buffalo has a different sampling rate
-svflist <- lapply( buffalo[-4] , variogram )
+SVFS <- lapply( buffalo[-4] , variogram )
 # alternatively, we could variogram all at coarsest scale with variogram option dt
 
 # Calculate the average variogram
-meansvf <- mean(svflist)
+SVF <- mean(SVFS)
 
 # Plot the mean variogram
-plot(meansvf)
+plot(SVF)
 }
 
 % Add one or more standard keywords, see file 'KEYWORDS' in the

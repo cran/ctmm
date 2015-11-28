@@ -1,3 +1,22 @@
+2014-11-26
+
+  New function "occurrence" to estimate occurrence distributions
+  "akde" & "occurrence" class objects generalized to "UD" class
+  alpha & alpha.HR arguments simplified and generalized to level & level.UD
+  AKDE= and *.HR= arguments generalized to UD= and *.UD=
+
+  New basic telemetry error functionality in ctmm, ctmm.fit
+
+  New function ctmm.select
+
+  New function subset.telemetry
+
+  Fixed a bug in the uncertainty report of uncorrelated processes
+  
+  ctmm.fit is now much faster by specifying a reasonable parscale for optim 
+  
+  ctmm.fit now has a backup for when Brent fails
+
 2015-10-13
 
   Fixed a rare condition in ctmm.fit where solve would fail on correlated errors

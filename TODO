@@ -1,23 +1,34 @@
-extend variogram to act on lists of telemetry objects, select best dt, and mean the result, like periodogram
-document list behavior of periodogram
+use scales::alpha for transparency
 
-Move,MoveStack import
+plot.telemetry (with error) opacity tuner or bug fix
 
-overload: subset, [, str
+as.telemetry option: minimal columns, maximum columns, specified columns to keep
+
+Make class representation fully S3 instead of a mixture of S3 & S4
+
+Include telemetry errors in simulation?
+rewrite simulate function to use krige and data template
+fix simulation to include errors
+krige -> predict
+
+plot.UD without telemetry (generalize)
+plot.telemetry error transparency
+
+overload: print, subset, [, str
+
+MoveStack import to list of telemetry objects
 
 vignette: DOF estimation
 
 variogram: coarsening window method to avoid all bias
 
 proj4: email about making north up
+plot N vector in corner
 
 summary.ctmm CIs on boundary estimates with negative curvature
+profile CIs
 
 akde with user-specified grid (and projection)
-
-periodogram:  fast, model, averaging, zoom
-
-north vector in telemetry object
 
 contour labels in plot ctmm
 
@@ -31,5 +42,3 @@ fix mean parameter for boundary issues
 
 population fit of list
 population akde of lists
-
-krige -> predict

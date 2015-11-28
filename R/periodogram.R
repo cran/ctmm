@@ -188,7 +188,7 @@ periodogram.slow <- function(data,T=NULL,dt=NULL,res=1)
 
 
 # plot periodograms
-plot.periodogram <- function(x,diagnostic=FALSE,col="black",transparency=0.25,...)
+plot.periodogram <- function(x,diagnostic=FALSE,col="black",transparency=0.25,grid=TRUE,...)
 {
   # frequency in 1/days
   f <- x$f*24*60^2
@@ -211,7 +211,7 @@ plot.periodogram <- function(x,diagnostic=FALSE,col="black",transparency=0.25,..
     # harmonics
     DIV <- 2:div
     at <<- c(at,time/DIV)
-    labels <<- c(labels,rep("",length(DIV)))
+    labels <<- c(labels,rep(NA,length(DIV)))
     gcol <<- c(gcol,grDevices::rgb(0.5,0.5,0.5,1/DIV))
   }
   
@@ -224,10 +224,17 @@ plot.periodogram <- function(x,diagnostic=FALSE,col="black",transparency=0.25,..
   # diurnal periods
   ticker(1,24,"day")  
 
-  plot(1/f,LSP,log="x",xaxt="n",xlab="Period",ylab="Log Spectral Density",col=translucent(col,alpha=((f[1]/f)^transparency)),...)
-  if(diagnostic){ graphics::points(1/f,SSP,col=translucent("red",alpha=((f[1]/f)^transparency)),...) }
+  col <- sapply(f,function(freq) grDevices::adjustcolor(col,alpha.f=((f[1]/freq)^transparency)) )
+  plot(1/f,LSP,log="x",xaxt="n",xlab="Period",ylab="Log Spectral Density",col=col,...)
+
+  if(diagnostic)
+  {
+    col <- sapply(f,function(freq) grDevices::adjustcolor("red",alpha.f=((f[1]/freq)^transparency)) )
+    graphics::points(1/f,SSP,col=col,...)
+  }
+
   graphics::axis(1,at=at,labels=labels) # tck can't be a vector apparently... :(
-  graphics::abline(v=at,col=gcol)
+  if(grid){ graphics::abline(v=at,col=gcol) }
 }
 #methods::setMethod("plot",signature(x="periodogram",y="missing"), function(x,y,...) plot.periodogram(x,...))
 #methods::setMethod("plot",signature(x="periodogram"), function(x,...) plot.periodogram(x,...))

@@ -10,11 +10,16 @@ importFrom("stats",simulate)
 export(zoom)
 S3method(mean,list)
 S3method(plot,list)
+S3method(summary,list)
 S3method(zoom,list)
 
 #TELEMETRY FUNCTIONS
 export(as.telemetry,SpatialPoints.telemetry)
+S3method(as.telemetry,character)
+S3method(as.telemetry,data.frame)
+S3method(as.telemetry,Move)
 S3method(plot,telemetry)
+S3method(subset,telemetry)
 S3method(summary,telemetry)
 S3method(zoom,telemetry)
 
@@ -30,10 +35,13 @@ export(periodogram)
 S3method(plot,periodogram)
 
 #LIKELIHOOD/MODEL FUNCTIONS
-export(ctmm,ctmm.fit,ctmm.loglike)
+export(ctmm,ctmm.fit,ctmm.loglike,ctmm.select)
 S3method(simulate,ctmm)
 S3method(summary,ctmm)
 
 #AKDE FUNCTIONS
-export(akde,akde.bandwidth,raster.akde,SpatialPolygonsDataFrame.akde,writeShapefile.akde)
-S3method(summary,akde)
+export(akde,akde.bandwidth,homerange,raster.UD,SpatialPolygonsDataFrame.UD,writeShapefile.UD)
+S3method(summary,UD)
+
+#KRIGE FUNCTIONS
+export(occurrence)

@@ -4,35 +4,35 @@ data("buffalo")
 cilla <- buffalo[[1]]
 plot(cilla)
 title("1 Buffalo")
-plot(buffalo,col=rainbow(length(buffalo)),alpha=c(0.5,0.05))
+plot(buffalo,col=rainbow(length(buffalo)))
 title("5 Buffalo")
 
 ## ----  fig.show='hold'---------------------------------------------------
-svf <- variogram(cilla)
-plot(svf,fraction=0.005)
+SVF <- variogram(cilla)
+plot(SVF,fraction=0.005)
 title("zoomed in")
-plot(svf,fraction=0.65,alpha=c(0.5,0.05))
+plot(SVF,fraction=0.65,level=c(0.5,0.95))
 title("zoomed out")
 
 ## ----  fig.show='hold'---------------------------------------------------
 m0 <- ctmm(sigma=23*1000^2) # 23 km^2 in m^2
 m1 <- ctmm(sigma=23*1000^2,tau=6*24*60^2) # and 6 days in seconds
-plot(svf,CTMM=m0,fraction=0.65,alpha=c(0.5,0.05),col.CTMM="red")
+plot(SVF,CTMM=m0,fraction=0.65,level=c(0.5,0.95),col.CTMM="red")
 title("m0")
-plot(svf,CTMM=m1,fraction=0.65,alpha=c(0.5,0.05),col.CTMM="purple")
+plot(SVF,CTMM=m1,fraction=0.65,level=c(0.5,0.95),col.CTMM="purple")
 title("m1")
 
 ## ----  fig.show='hold'---------------------------------------------------
 m2 <- ctmm(sigma=23*1000^2,tau=c(6*24*60^2,1*60^2)) # and 1 hour in seconds
-plot(svf,CTMM=m1,fraction=0.002,col.CTMM="purple")
+plot(SVF,CTMM=m1,fraction=0.002,col.CTMM="purple")
 title("m1")
-plot(svf,CTMM=m2,fraction=0.002,col.CTMM="blue")
+plot(SVF,CTMM=m2,fraction=0.002,col.CTMM="blue")
 title("m2")
 
 ## ----  fig.show='hold'---------------------------------------------------
-plot(svf,CTMM=m1,fraction=0.65,alpha=c(0.5,0.05),col.CTMM="purple")
+plot(SVF,CTMM=m1,fraction=0.65,level=c(0.5,0.95),col.CTMM="purple")
 title("m1")
-plot(svf,CTMM=m2,fraction=0.65,alpha=c(0.5,0.05),col.CTMM="blue")
+plot(SVF,CTMM=m2,fraction=0.65,level=c(0.5,0.95),col.CTMM="blue")
 title("m2")
 
 ## ----  fig.show='hold'---------------------------------------------------
@@ -41,28 +41,28 @@ willa <- simulate(m2,t=cilla$t)
 plot(willa)
 title("simulation")
 # now calculate and plot its variogram
-svf2 <- variogram(willa)
-plot(svf2,CTMM=m2,fraction=0.65,alpha=c(0.5,0.05),col.CTMM="blue")
+SVF2 <- variogram(willa)
+plot(SVF2,CTMM=m2,fraction=0.65,level=c(0.5,0.95),col.CTMM="blue")
 title("simulation")
 
 ## ---- fig.show='hold'----------------------------------------------------
 data("gazelle")
-svf3 <- variogram(gazelle[[18]],fast=TRUE)
-plot(svf3,fraction=0.85,alpha=c(0.5,0.05))
+SVF3 <- variogram(gazelle[[18]])
+plot(SVF3,fraction=0.85,level=c(0.5,0.95))
 title("Default method")
 # 1, 5, 25 hour sampling intervals
 dt <- 60*60*c(1,5,25)
-svf3 <- variogram(gazelle[[18]],dt=dt,fast=TRUE)
-plot(svf3,fraction=0.85,alpha=c(0.5,0.05))
+SVF3 <- variogram(gazelle[[18]],dt=dt)
+plot(SVF3,fraction=0.85,level=c(0.5,0.95))
 title("Multi method")
 
 ## ---- fig.show='hold'----------------------------------------------------
 # 1 hour sampling intervals
 dt = 60*60
 # buffalo 4 is bad
-svf4 <- lapply(buffalo[-4],function(b){ variogram(b,dt=dt,fast=TRUE) })
-svf4 <- mean(svf4)
-plot(svf4,fraction=0.35,alpha=c(0.5,0.05))
+SVF4 <- lapply(buffalo[-4],function(b){ variogram(b,dt=dt) })
+SVF4 <- mean(SVF4)
+plot(SVF4,fraction=0.35,level=c(0.5,0.95))
 title("Population variogram")
 
 ## ----  fig.show='hold', echo=FALSE---------------------------------------
@@ -75,6 +75,12 @@ curve((1-exp(-2*x))/(1-exp(-2/4)),0,1/4,xlab="Short time lag",ylab="Semi-varianc
 curve(3/4+x,1/4,5,xlab="Short time lag",ylab="Semi-variance",ylim=c(0,6),add=TRUE,xlim=c(0,5))
 points(1/4,1)
 title("Detector Array")
+
+## ---- eval=FALSE---------------------------------------------------------
+#  GUESS1$error <- FALSE
+#  GUESS2 <- ctmm.fit(DATA,GUESS1)
+#  GUESS2$error <- TRUE
+#  FIT <- ctmm.fit(DATA,GUESS2)
 
 ## ----  fig.show='hold'---------------------------------------------------
 M0 <- ctmm.fit(cilla,m0)
@@ -94,9 +100,13 @@ colnames(TAB) <- c("AICc","DOF(mu)")
 rownames(TAB) <- c("M0","M1","M2")
 TAB
 
+## ------------------------------------------------------------------------
+FITS <- ctmm.select(cilla,M2,verbose=TRUE)
+summary(FITS)
+
 ## ----  fig.show='hold'---------------------------------------------------
-plot(svf,CTMM=list(M0,M1,M2),col.CTMM=c("red","purple","blue"),fraction=0.65,alpha=0.5)
+plot(SVF,CTMM=list(M0,M1,M2),col.CTMM=c("red","purple","blue"),fraction=0.65,level=0.5)
 title("zoomed out")
-plot(svf,CTMM=list(M0,M1,M2),col.CTMM=c("red","purple","blue"),fraction=0.002,alpha=0.5)
+plot(SVF,CTMM=list(M0,M1,M2),col.CTMM=c("red","purple","blue"),fraction=0.002,level=0.5)
 title("zoomed in")
 

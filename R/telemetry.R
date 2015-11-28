@@ -3,45 +3,69 @@
 #########################################
 new.telemetry <- methods::setClass("telemetry", representation(info="list"), contains="data.frame")
 
-
-#######################
-# Import movebank into telemetry class
-as.telemetry <- function(CSV,timezone="GMT",projection=NULL,...)
+subset.telemetry <- function(x,...)
 {
-  type <- class(CSV)
-  if (type=="data.frame") { CSV <- telemetry.data.frame(CSV,timezone=timezone,projection=projection) }
-  else if (type=="character") { CSV <- telemetry.csv(CSV,timezone=timezone,projection=projection,...) }
-  
-  return(CSV)
+   info <- attr(x,"info")
+   x <- utils::getS3method("subset","data.frame")(x,...)
+   x <- new.telemetry(x,info=info)
+   return(x)
 }
 
+#######################
+# Generic import function
+as.telemetry <- function(CSV,timezone="GMT",projection=NULL,...) UseMethod("as.telemetry")
 
-# this assumes a MoveBank data.frame
-telemetry.data.frame <- function(csv,timezone="GMT",projection=NULL)
+# Move object
+as.telemetry.Move <- function(CSV,timezone="GMT",projection=NULL,...)
 {
-  csv <- data.frame(id=as.factor(csv$individual.local.identifier),timestamp=as.POSIXct(csv$timestamp,tz=timezone),longitude=as.numeric(csv$location.long),latitude=as.numeric(csv$location.lat))
-  csv <- stats::na.omit(csv)
-  csv$t <- as.numeric(csv$timestamp)
+  # clean this up to just dump idData into columns
+  DATA <- data.frame(timestamp=CSV$timestamp,
+                    location.long=CSV@coords[,1],
+                    location.lat=CSV@coords[,2]
+                    )
+  # possibly empty columns
+  DATA$individual.local.identifier <- CSV@idData$individual.local.identifier
+  DATA$eobs.horizontal.accuracy.estimate <- CSV$eobs.horizontal.accuracy.estimate
+
+  DATA <- as.telemetry.data.frame(DATA,timezone=timezone,projection=projection)
+  return(DATA)
+}
   
-  xy <- cbind(csv$lon,csv$lat)
+# this assumes a MoveBank data.frame
+as.telemetry.data.frame <- function(CSV,timezone="GMT",projection=NULL,...)
+{
+  DATA <- data.frame(id=as.factor(CSV$individual.local.identifier),
+                    timestamp=as.POSIXct(CSV$timestamp,tz=timezone),
+                    longitude=as.numeric(CSV$location.long),
+                    latitude=as.numeric(CSV$location.lat)
+                    )
+
+  # possibly empty columns
+  DATA$error <-  CSV$eobs.horizontal.accuracy.estimate
+  if(!is.null(DATA$error)) { DATA$error <- DATA$error^2 }
+  
+  DATA <- stats::na.omit(DATA)
+  DATA$t <- as.numeric(DATA$timestamp)
+  
+  xy <- cbind(DATA$longitude,DATA$latitude)
   colnames(xy) <- c("x","y")
   
-  if(is.null(projection)) { projection <- suggest.projection(csv) }
+  if(is.null(projection)) { projection <- suggest.projection(DATA) }
   xy <- rgdal::project(xy,projection)
   
-  csv$x <- xy[,1]
-  csv$y <- xy[,2]
+  DATA$x <- xy[,1]
+  DATA$y <- xy[,2]
   
   # do this or possibly get empty animals from subset
-  csv <- droplevels(csv)
+  DATA <- droplevels(DATA)
   
-  id <- levels(csv$id)
+  id <- levels(DATA$id)
   n <- length(id)
   
   telist <- list()  
   for(i in 1:n)
   {
-    telist[[i]] <- csv[csv$id==id[i],]
+    telist[[i]] <- DATA[DATA$id==id[i],]
     telist[[i]]$id <- NULL
     
     # clean through duplicates, etc..
@@ -57,6 +81,13 @@ telemetry.data.frame <- function(csv,timezone="GMT",projection=NULL)
   else { return(telist[[1]]) }
 }
 
+# read in a MoveBank CSV file
+as.telemetry.character <- function(CSV,timezone="GMT",projection=NULL,...)
+{
+  data <- utils::read.csv(CSV,...)
+  data <- as.telemetry.data.frame(data,timezone=timezone,projection=projection)
+  return(data)
+}
 
 #################
 # clean up data
@@ -74,16 +105,6 @@ telemetry.clean <- function(data)
   # exit with warning on duplicate times
   
 }
-
-
-# read in a MoveBank csv file
-telemetry.csv <- function(file,timezone="GMT",projection=NULL,...)
-{
-  data <- utils::read.csv(file,...)
-  data <- telemetry.data.frame(data,timezone=timezone,projection=projection)
-  return(data)
-}
-
 
 ########################################
 # Suggest a good projection
@@ -183,23 +204,27 @@ zoom.telemetry <- function(x,fraction=1,...)
 #methods::setMethod("zoom",signature(x="telemetry",y="missing"), function(x,y,...) zoom.telemetry(x,...))
 #methods::setMethod("zoom",signature(x="telemetry",y="telemetry"), function(x,y,...) zoom.telemetry(list(x,y),...))
 #methods::setMethod("zoom",signature(x="telemetry",y="ctmm"), function(x,y,...) zoom.telemetry(x,model=y,...))
-#methods::setMethod("zoom",signature(x="telemetry",y="akde"), function(x,y,...) zoom.telemetry(x,akde=y,...))
+#methods::setMethod("zoom",signature(x="telemetry",y="UD"), function(x,y,...) zoom.telemetry(x,akde=y,...))
 #methods::setMethod("zoom",signature(x="telemetry"), function(x,...) zoom.telemetry(x,...))
 
 
 #######################################
 # PLOT TELEMETRY DATA
 #######################################
-plot.telemetry <- function(x,CTMM=NULL,AKDE=NULL,alpha.HR=0.05,alpha=0.05,CI=TRUE,PDF=TRUE,col="red",col.CI="black",col.PDF="blue",col.grid="grey",fraction=1,add=FALSE,xlim=NULL,ylim=NULL,...)
+plot.telemetry <- function(x,CTMM=NULL,UD=NULL,level.UD=0.95,level=0.95,DF="CDF",col="red",col.level="black",col.DF="blue",col.grid="grey",fraction=1,add=FALSE,xlim=NULL,ylim=NULL,...)
 {
+  alpha.UD <- 1-level.UD
+  alpha <- 1-level
+  
   # adjustments to CI-CIs to make them a bit diminished relatively
   trans <- c(0.5,1,0.5)
   lwd <- c(1,2,1)
+  names(trans) <- names(lwd) <- c("low","ML","high")
   
   # listify everything for generality
   if(class(x)=="telemetry" || class(x)=="data.frame") { x <- list(x)  }
   if(!is.null(CTMM)) { if(class(CTMM)=="ctmm") { CTMM <- list(CTMM) } }
-  if(!is.null(AKDE)) { if(class(AKDE)=="akde") { AKDE <- list(AKDE) } }
+  if(!is.null(UD)) { if(class(UD)=="UD") { UD <- list(UD) } }
   
   # median time step of data
   dt <- lapply(x,function(X){diff(X$t)})
@@ -216,20 +241,20 @@ plot.telemetry <- function(x,CTMM=NULL,AKDE=NULL,alpha.HR=0.05,alpha=0.05,CI=TRU
     ext.y <- min(sapply(x, function(d){ min(d$y) } ))
     ext.y[2] <- max(sapply(x, function(d){ max(d$y) } ))
     
-    # bounding locations from AKDEs
-    if(!is.null(AKDE))
+    # bounding locations from UDs
+    if(!is.null(UD))
     {
-      ext.x[1] <- min(c(ext.x[1], sapply(AKDE, function(a) { sapply(a[1:3], function(k) { k$x[1] }) })))
-      ext.x[2] <- max(c(ext.x[2], sapply(AKDE, function(a) { sapply(a[1:3], function(k) { last(k$x) }) })))
+      ext.x[1] <- min(c(ext.x[1], unlist(lapply(UD, function(a) { sapply(a, function(k) { k$x[1] }) }))))
+      ext.x[2] <- max(c(ext.x[2], unlist(lapply(UD, function(a) { sapply(a, function(k) { last(k$x) }) }))))
       
-      ext.y[1] <- min(c(ext.y[1], sapply(AKDE, function(a) { sapply(a[1:3], function(k) { k$y[1] }) })))
-      ext.y[2] <- max(c(ext.y[2], sapply(AKDE, function(a) { sapply(a[1:3], function(k) { last(k$y) }) })))
+      ext.y[1] <- min(c(ext.y[1], unlist(lapply(UD, function(a) { sapply(a, function(k) { k$y[1] }) }))))
+      ext.y[2] <- max(c(ext.y[2], unlist(lapply(UD, function(a) { sapply(a, function(k) { last(k$y) }) }))))
     }
     
     # bounding locations from Gaussian CTMM
     if(!is.null(CTMM))
     {
-      z <- sqrt(-2*log(alpha.HR))
+      z <- sqrt(-2*log(alpha.UD))
       
       for(i in 1:length(CTMM))
       {
@@ -297,6 +322,8 @@ plot.telemetry <- function(x,CTMM=NULL,AKDE=NULL,alpha.HR=0.05,alpha=0.05,CI=TRU
 
   # plot cm per unit of distance plotted (m or km)
   cmpkm <- 2.54*mean(graphics::par("fin")*diff(graphics::par("plt"))[-2]/diff(graphics::par("usr"))[-2])
+  # plot px per unit of distance plotted (m or km)
+  pxpkm <- mean(grDevices::dev.size("px")*diff(graphics::par("plt"))[-2]/diff(graphics::par("usr"))[-2])
   
   #########################
   # PLOT GAUSSIAN CONTOURS AND DENSITY
@@ -305,8 +332,8 @@ plot.telemetry <- function(x,CTMM=NULL,AKDE=NULL,alpha.HR=0.05,alpha=0.05,CI=TRU
     # number of CTMM objects
     
     # contours colour
-    col.CI <- array(col.CI,length(CTMM))
-    col.PDF <- array(col.PDF,length(CTMM))
+    col.level <- array(col.level,length(CTMM))
+    col.DF <- array(col.DF,length(CTMM))
     
     for(i in 1:length(CTMM))
     {
@@ -317,91 +344,84 @@ plot.telemetry <- function(x,CTMM=NULL,AKDE=NULL,alpha.HR=0.05,alpha=0.05,CI=TRU
       CTMM[[i]]$mu <- CTMM[[i]]$mu/dist.scale
       CTMM[[i]]$sigma <- CTMM[[i]]$sigma/dist.scale^2
       
-      # plot ML density function
-      if(PDF)
-      {
-        # look how lazy I am
-        pdf <- kde(list(x=CTMM[[i]]$mu[1],y=CTMM[[i]]$mu[2]),H=CTMM[[i]]$sigma)
-        plot.pdf(pdf,col=col.PDF[[i]],...)
-      }
+      # plot denisty function lazily reusing KDE code
+      pdf <- kde(list(x=CTMM[[i]]$mu[1],y=CTMM[[i]]$mu[2]),H=CTMM[[i]]$sigma,res=1000)
+      plot.df(pdf,DF=DF,col=col.DF[[i]],...)
       
-      # plot CIs
-      if(CI)
+      # plot ML estimate, regular style
+      plot.ctmm(CTMM[[i]],alpha.UD,col=col.level[[i]],lwd=lwd[2],...)
+      
+      # plot CIs dashed if present
+      if(!is.null(CTMM[[i]]$COV.tau))
       {
-        # plot ML estimate, regular style
-        plot.ctmm(CTMM[[i]],alpha.HR,col=col.CI[[i]],lwd=lwd[2],...)
+        CTMM[[i]]$COV.tau <- CTMM[[i]]$COV.tau/dist.scale^4 # don't care about tau, just sigma
         
-        # plot CIs dashed if present
-        if(!is.null(CTMM[[i]]$COV.tau))
+        # proportionality constants for outer CIs
+        const <- confint.ctmm(CTMM[[i]],alpha)[1,c(1,3)]/sqrt(det(CTMM[[i]]$sigma))
+        sigma <- CTMM[[i]]$sigma
+        
+        for(j in 1:2)
         {
-          CTMM[[i]]$COV.tau <- CTMM[[i]]$COV.tau/dist.scale^4 # don't care about tau, just sigma
-          
-          # proportionality constants for outer CIs
-          const <- confint.ctmm(CTMM[[i]],alpha)[1,c(1,3)]/sqrt(det(CTMM[[i]]$sigma))
-          sigma <- CTMM[[i]]$sigma
-          
-          for(j in 1:2)
-          {
-            CTMM[[i]]$sigma <- const[j]*sigma
-            plot.ctmm(CTMM[[i]],alpha.HR,col=translucent(col.CI[[i]],trans[1]),...)
-          }
+          CTMM[[i]]$sigma <- const[j]*sigma
+          plot.ctmm(CTMM[[i]],alpha.UD,col=grDevices::adjustcolor(col.level[[i]],alpha.f=trans[1]),...)
         }
       }
-    
     }
-        
+  
   }
 
   ##########################################
-  # PLOT akde CONTOURS... AND DENSITY
-  if(!is.null(AKDE))
+  # PLOT KDE CONTOURS... AND DENSITY
+  if(!is.null(UD))
   {
     # number of akde objects
     
     # contours colour
-    col.CI <- array(col.CI,length(AKDE))
-    col.PDF <- array(col.PDF,length(AKDE))
+    col.level <- array(col.level,length(UD))
+    col.DF <- array(col.DF,length(UD))
     
     # UNIT CONVERSIONS
-    for(i in 1:length(AKDE))
+    for(i in 1:length(UD))
     {
-      for(j in 1:3)
+      for(j in 1:length(UD[[i]]))
       {
         # unit conversion
-        AKDE[[i]][[j]]$x <- AKDE[[i]][[j]]$x / dist.scale
-        AKDE[[i]][[j]]$y <- AKDE[[i]][[j]]$y / dist.scale
-        AKDE[[i]][[j]]$PDF <- AKDE[[i]][[j]]$PDF * dist.scale^2
-        AKDE[[i]][[j]]$dA <- AKDE[[i]][[j]]$dA / dist.scale^2
-        AKDE[[i]][[j]]$H <- AKDE[[i]][[j]]$H / dist.scale^2
+        UD[[i]][[j]]$x <- UD[[i]][[j]]$x / dist.scale
+        UD[[i]][[j]]$y <- UD[[i]][[j]]$y / dist.scale
+        UD[[i]][[j]]$PDF <- UD[[i]][[j]]$PDF * dist.scale^2
+        UD[[i]][[j]]$dA <- UD[[i]][[j]]$dA / dist.scale^2
+        UD[[i]][[j]]$H <- UD[[i]][[j]]$H / dist.scale^2
       }
       
-      # ML DENSITY PLOT
-      if(PDF) { plot.pdf(AKDE[[i]]$ML,col=col.PDF[[i]],...) }
+      # ML DENSITY PLOTS
+      plot.df(UD[[i]]$ML,DF=DF,col=col.DF[[i]],...)
     }
     
     # CONTOURS
-    if(CI)
+    for(i in 1:length(UD))
     {
-      for(i in 1:length(AKDE))
+      N <- names(UD[[i]])
+      for(j in 1:length(UD[[i]]))
       {
-        for(j in 1:3)
-        {
-          plot.kde(AKDE[[i]][[j]],alpha=alpha.HR,col=translucent(col.CI[[i]],trans[j]),lwd=lwd[j],...)
-        }
+        # make sure that correct style is used for low,ML,high even in absence of lows and highs
+        plot.kde(UD[[i]][[j]],alpha=alpha.UD,col=grDevices::adjustcolor(col.level[[i]],alpha.f=trans[N[j]]),lwd=lwd[N[j]],...)
       }
     }
-          
+    
     # RESOLUTION GRID
     if(!add)
     {
-      dx <- sqrt(max(sapply( AKDE , function(a) { a$ML$H[1,1] } )))
-      dy <- sqrt(max(sapply( AKDE , function(a) { a$ML$H[2,2] } )))
+      dx <- sqrt(max(sapply( UD , function(a) { a$ML$H[1,1] } )))
+      dy <- sqrt(max(sapply( UD , function(a) { a$ML$H[2,2] } )))
       
-      # grid points per half
-      gp <- ceiling(buff/c(dx,dy))
-      col.grid <- translucent(col.grid,0.5)
-      graphics::abline(v=(mu[1]+i*dx*(-gp[1]:gp[1])), col=col.grid)
-      graphics::abline(h=(mu[2]+i*dy*(-gp[2]:gp[2])), col=col.grid)
+      if(dx>0 && dy>0)
+      {
+        # grid points per half
+        gp <- ceiling(buff/c(dx,dy))
+        col.grid <- grDevices::adjustcolor(col.grid,alpha.f=0.5)
+        graphics::abline(v=(mu[1]+i*dx*(-gp[1]:gp[1])), col=col.grid)
+        graphics::abline(h=(mu[2]+i*dy*(-gp[2]:gp[2])), col=col.grid)
+      }
     }
   }
   
@@ -417,25 +437,40 @@ plot.telemetry <- function(x,CTMM=NULL,AKDE=NULL,alpha.HR=0.05,alpha=0.05,CI=TRU
   cex <- 1
   if(p>1000) { cex <- 1000/p }
   
+  # minimum error
+  suppressWarnings(MIN <- min(sapply(x,function(X){min(X$error)})))
+  
   for(i in 1:length(x))
   { 
     r <- x[[i]][,c("x","y")]/dist.scale
     
-    # also plot velocity vectors at dt scale
-    if(all(c("vx","vy") %in% names(x[[i]])))
-    {
-      dr <- x[[i]][,c("vx","vy")]/dist.scale*dt
-      
-      arr.length <- dr^2
-      arr.length <- sqrt(arr.length[,1]+arr.length[,2])
-      arr.length <- 0.1*cmpkm*arr.length
-
-      shape::Arrows(x0=r$x, y0=r$y, x1=(r$x+dr$vx), y1=(r$y+dr$vy), col=col[[i]], code=2, segment=T, arr.adj=1, arr.length=arr.length, arr.type="curved")
-    }
-    else
+    if(is.null(x[[i]]$error))
     {
       graphics::points(r, cex=cex, col=col[[i]],...)
     }
+    else 
+    {
+      x[[i]]$error <- x[[i]]$error/dist.scale^2
+      # circle radius
+      circles <- sqrt(x[[i]]$error)
+      # color density proportional to true density
+      alpha <- (1/pxpkm)^2/(pi*x[[i]]$error)
+      bg <- sapply(alpha, function(a) grDevices::adjustcolor(col[[i]],alpha.f=a))
+      fg <- sapply(alpha, function(a) grDevices::adjustcolor(col[[i]],alpha.f=a/2))
+      graphics::symbols(x=r$x,y=r$y,circles=circles,fg=fg,bg=bg,inches=FALSE,add=TRUE,...)
+    }
+    
+    # also plot velocity vectors at dt scale
+    #     if(all(c("vx","vy") %in% names(x[[i]])))
+    #     {
+    #       dr <- x[[i]][,c("vx","vy")]/dist.scale*dt
+    #       
+    #       arr.length <- dr^2
+    #       arr.length <- sqrt(arr.length[,1]+arr.length[,2])
+    #       arr.length <- 0.1*cmpkm*arr.length
+    # 
+    #       shape::Arrows(x0=r$x, y0=r$y, x1=(r$x+dr$vx), y1=(r$y+dr$vy), col=col[[i]], code=2, segment=T, arr.adj=1, arr.length=arr.length, arr.type="curved")
+    #     }
   }
   
 }
@@ -443,17 +478,27 @@ plot.telemetry <- function(x,CTMM=NULL,AKDE=NULL,alpha.HR=0.05,alpha=0.05,CI=TRU
 #methods::setMethod("plot",signature(x="telemetry",y="missing"), function(x,y,...) plot.telemetry(x,...))
 #methods::setMethod("plot",signature(x="telemetry",y="telemetry"), function(x,y,...) plot.telemetry(list(x,y),...))
 #methods::setMethod("plot",signature(x="telemetry",y="ctmm"), function(x,y,...) plot.telemetry(x,model=y,...))
-#methods::setMethod("plot",signature(x="telemetry",y="akde"), function(x,y,...) plot.telemetry(x,akde=y,...))
+#methods::setMethod("plot",signature(x="telemetry",y="UD"), function(x,y,...) plot.telemetry(x,akde=y,...))
 #methods::setMethod("plot",signature(x="telemetry"), function(x,...) plot.telemetry(x,...))
 
 
 ##################################
 # plot PDF stored as KDE object
-plot.pdf <- function(kde,col="blue",...)
+plot.df <- function(kde,DF="CDF",col="blue",...)
 {
-  col <- translucent(col,alpha=(0:255)/255)
-  zlim <- c(0,max(kde$PDF))
-  graphics::image(kde$x,kde$y,kde$PDF,useRaster=TRUE,zlim=zlim,col=col,add=TRUE,...)
+  col <- sapply((0:255)/255,function(a) {grDevices::adjustcolor(col,alpha.f=a)})
+  
+  if(DF=="PDF")
+  {
+    zlim <- c(0,max(kde$PDF))
+  }
+  else if(DF=="CDF")
+  {
+    zlim <- c(0,1)
+    kde$CDF <- 1 - kde$CDF
+  }
+
+  graphics::image(kde$x,kde$y,kde[[DF]],useRaster=TRUE,zlim=zlim,col=col,add=TRUE,...)
 }
 
 

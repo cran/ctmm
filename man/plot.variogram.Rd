@@ -9,7 +9,7 @@ Plotting methods for variogram objects.
 Produces simple plots of \code{varigram} objects (semi-variance vs. time lag) and model semi-variance functions, with approximate confidence intervals around the semi-variance estimates.
 }
 \usage{
-\S3method{plot}{variogram}(x,CTMM=NULL,alpha=0.05,fraction=0.5,col="black",col.CTMM="red",...)
+\S3method{plot}{variogram}(x,CTMM=NULL,level=0.95,fraction=0.5,col="black",col.CTMM="red",...)
 
 \S3method{zoom}{variogram}(x,fraction=0.5,...)
 }
@@ -17,7 +17,7 @@ Produces simple plots of \code{varigram} objects (semi-variance vs. time lag) an
 \arguments{
   \item{x}{A \code{variogram} object calculated using \code{\link{variogram}}.}
   \item{CTMM}{A \code{ctmm} movement model object in the same format as the output of \code{ctmm.fit} or \code{variogram.fit}.}
-  \item{alpha}{Significance level of confidence bands (95\% default CIs). Can be an array.}
+  \item{level}{Confidence level of confidence bands (95\% default CIs). Can be an array.}
   \item{fraction}{
 The proportion of the variogram object, \code{variogram}, that will be plotted. By convention, half is shown. The tail end is generally garbage.
 }
@@ -52,10 +52,10 @@ data(buffalo)
 cilla <- buffalo[[1]]
 
 # Calculate variogram
-svf <- variogram(cilla)
+SVF <- variogram(cilla)
 
 # Plot the variogram
-plot(svf)
+plot(SVF)
 }
 
 % Add one or more standard keywords, see file 'KEYWORDS' in the

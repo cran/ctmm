@@ -15,26 +15,22 @@ In this vignette, we walk through data preparation, variogram analysis, and maxi
 # Data Preparation
 
 The first step is to import your MoveBank csv file:
-
 ```
 yourAnimals <- as.telemetry("yourAnimalsMoveBank.csv")
 ```
-
 Alternatively, if you want to clean your csv file first, you can import it as a data frame
-
 ```
 yourAnimalsDF <- read.csv("yourAnimalsMoveBank.csv")
 ```
-
 and then edit the data frame before converting it into a `telemetry` object for `ctmm` via
-
 ```
 yourAnimals <- as.telemetry(yourAnimalsDF)
 ```
+`as.telemetry` also works on `Move` objects, which can be useful as the `move` package interfaces directy with MoveBank through `R`.
 
 For most species, the default two-point equidistant projection will be fine, however you can provide any PROJ.4 formatted projection with the `projection` argument (see `help(as.telemetry)`). A single fixed projection should be used if you are going to plot groups of individuals that span multiple MoveBank files. This is done by default if multiple individuals are included in a single data frame.
 
-The output of `as.telemetry` will be an individual `telemetry` object or list of `telemetry` objects, depending on how many individual animals are in your csv file. `telemetry` objects contain the components `t` for time in seconds, and `x` and `y` for the projected locations in meters. Times in your MoveBank file should be sorted and non-repeating.
+The output of `as.telemetry` will be an individual `telemetry` object or list of `telemetry` objects, depending on how many individual animals are in your csv file. The basic structure of a `telemetry` object is a data frame with columns `t` for time in seconds, and `x` and `y` for the projected locations in meters.
 
 Our example buffalo data is already prepared into a list of `telemetry` objects.
 Let us look at the first buffalo and then every buffalo:
@@ -45,7 +41,7 @@ data("buffalo")
 cilla <- buffalo[[1]]
 plot(cilla)
 title("1 Buffalo")
-plot(buffalo,col=rainbow(length(buffalo)),alpha=c(0.5,0.05))
+plot(buffalo,col=rainbow(length(buffalo)))
 title("5 Buffalo")
 ```
 
@@ -58,10 +54,10 @@ These buffalo all look fairly range resident, and so we can move on to variogram
 Variograms are an unbiased way to visualize autocorrelation structure when migration, range shifting, drift, or other translations of the mean location are not happening. When drift occurs in the data, then the variogram represents a mixture of both the drift and the autocorrelation structure, each of which contains distinct movement behaviors. In the future, we will have models that can allow for drift, but the current models assume range residence, which we can check with the variogram.
 
 ```{r,  fig.show='hold'}
-svf <- variogram(cilla)
-plot(svf,fraction=0.005)
+SVF <- variogram(cilla)
+plot(SVF,fraction=0.005)
 title("zoomed in")
-plot(svf,fraction=0.65,alpha=c(0.5,0.05))
+plot(SVF,fraction=0.65,level=c(0.5,0.95))
 title("zoomed out")
 ```
 
@@ -75,9 +71,9 @@ The asymptote of our variogram is around 23 square km, and the fact that it take
 ```{r,  fig.show='hold'}
 m0 <- ctmm(sigma=23*1000^2) # 23 km^2 in m^2
 m1 <- ctmm(sigma=23*1000^2,tau=6*24*60^2) # and 6 days in seconds
-plot(svf,CTMM=m0,fraction=0.65,alpha=c(0.5,0.05),col.CTMM="red")
+plot(SVF,CTMM=m0,fraction=0.65,level=c(0.5,0.95),col.CTMM="red")
 title("m0")
-plot(svf,CTMM=m1,fraction=0.65,alpha=c(0.5,0.05),col.CTMM="purple")
+plot(SVF,CTMM=m1,fraction=0.65,level=c(0.5,0.95),col.CTMM="purple")
 title("m1")
 ```
 
@@ -87,18 +83,18 @@ The uncorrelated model `m0` is obviously incorrect and in the zoomed in plot we 
 
 ```{r,  fig.show='hold'}
 m2 <- ctmm(sigma=23*1000^2,tau=c(6*24*60^2,1*60^2)) # and 1 hour in seconds
-plot(svf,CTMM=m1,fraction=0.002,col.CTMM="purple")
+plot(SVF,CTMM=m1,fraction=0.002,col.CTMM="purple")
 title("m1")
-plot(svf,CTMM=m2,fraction=0.002,col.CTMM="blue")
+plot(SVF,CTMM=m2,fraction=0.002,col.CTMM="blue")
 title("m2")
 ```
 
 The confidence intervals at short lags are also very narrow, though both of these models look the same at coarser scales and so the discrepancy is only revealed by high resolution data.
 
 ```{r,  fig.show='hold'}
-plot(svf,CTMM=m1,fraction=0.65,alpha=c(0.5,0.05),col.CTMM="purple")
+plot(SVF,CTMM=m1,fraction=0.65,level=c(0.5,0.95),col.CTMM="purple")
 title("m1")
-plot(svf,CTMM=m2,fraction=0.65,alpha=c(0.5,0.05),col.CTMM="blue")
+plot(SVF,CTMM=m2,fraction=0.65,level=c(0.5,0.95),col.CTMM="blue")
 title("m2")
 ```
 
@@ -106,7 +102,7 @@ The model `m2` introduces an additional autocorrelation timescale for the animal
 
 The linear regime of the variogram (regular diffusion) is just as important as the asymptotic regime. In the linear regime it is reasonable to assume a Markovian model as with step selection functions (SSF) and Brownian bridges (BB). Therefore, the variogram has informed us as to how much we need to coarsen our data for it to be appropriate in many common analyses that neglect various aspects of movement.
 
-Finally, the R-studio function `variogram.fit(svf)` is much easier to use than guestimating the model parameters by hand as we did above. `variogram.fit` gives you sliders to choose the most visually appropriate parameters and save them to a global variable (`global.variogram.fit` by default).
+Finally, the R-studio function `variogram.fit(SVF)` is much easier to use than guestimating the model parameters by hand as we did above. `variogram.fit` gives you sliders to choose the most visually appropriate parameters and save them to a global variable (`global.variogram.fit` by default).
 
 ### Variogram Error is Autocorrelated
 
@@ -118,25 +114,25 @@ willa <- simulate(m2,t=cilla$t)
 plot(willa)
 title("simulation")
 # now calculate and plot its variogram
-svf2 <- variogram(willa)
-plot(svf2,CTMM=m2,fraction=0.65,alpha=c(0.5,0.05),col.CTMM="blue")
+SVF2 <- variogram(willa)
+plot(SVF2,CTMM=m2,fraction=0.65,level=c(0.5,0.95),col.CTMM="blue")
 title("simulation")
 ```
 
 ### Irregular Sampling Schedules
 
 Random gaps in the data are acceptable and fully accounted for in both variogram estimation and model fitting.
-However, if under any condition the sampling rate changes during data collection, then you will have to account for that in the varioram with the \code{dt} argument. In the followng example, the collar was programed to cycle between 1, 5, 25 hour sampling intervals
+However, if under any condition the sampling rate changes during data collection, then you will have to account for that in the varioram with the `dt` argument. In the followng example, the collar was programed to cycle between 1, 5, 25 hour sampling intervals
 
 ```{r, fig.show='hold'}
 data("gazelle")
-svf3 <- variogram(gazelle[[18]],fast=TRUE)
-plot(svf3,fraction=0.85,alpha=c(0.5,0.05))
+SVF3 <- variogram(gazelle[[18]])
+plot(SVF3,fraction=0.85,level=c(0.5,0.95))
 title("Default method")
 # 1, 5, 25 hour sampling intervals
 dt <- 60*60*c(1,5,25)
-svf3 <- variogram(gazelle[[18]],dt=dt,fast=TRUE)
-plot(svf3,fraction=0.85,alpha=c(0.5,0.05))
+SVF3 <- variogram(gazelle[[18]],dt=dt)
+plot(SVF3,fraction=0.85,level=c(0.5,0.95))
 title("Multi method")
 ```
 
@@ -148,15 +144,15 @@ If multiple individuals exhibit similar movement behaviors, then we can pool the
 # 1 hour sampling intervals
 dt = 60*60
 # buffalo 4 is bad
-svf4 <- lapply(buffalo[-4],function(b){ variogram(b,dt=dt,fast=TRUE) })
-svf4 <- mean(svf4)
-plot(svf4,fraction=0.35,alpha=c(0.5,0.05))
+SVF4 <- lapply(buffalo[-4],function(b){ variogram(b,dt=dt) })
+SVF4 <- mean(SVF4)
+plot(SVF4,fraction=0.35,level=c(0.5,0.95))
 title("Population variogram")
 ```
 
 ### Non-Stationarity in Stationary Variograms
 
-Non-stationary behaviors, like a seasonal change in variance, is averaged over in the variogram. Moreover, if we fit a stationary model to non-stationary data, we are estimating an average effect. For instance, if an animal rests at night and diffuses at some rate `D` during the day, then without modeling the rest behavior we estimate an average of zero and `D`. Its not terribly detrimental to average over frequently repeated non-stationarity, but if an animal migrates once in a dataset then this behavior really needs to be included in the model. These kinds of models will be included in future versions of `ctmm`.
+Non-stationary behaviors, like a seasonal change in variance, is averaged over in the variogram. Moreover, if we fit a stationary model to non-stationary data, we are estimating an average effect. For instance, if an animal rests at night and diffuses at some rate `D` during the day, then without modeling the rest behavior we estimate an average of zero and `D`. Its not terribly detrimental to average over frequently repeated non-stationarity, but if an animal migrates once in a dataset then this behavior really needs to be in the model. These kinds of models will be included in future versions of `ctmm`.
 
 ## More Models
 
@@ -176,9 +172,18 @@ points(1/4,1)
 title("Detector Array")
 ```
 
-The height of this initial discontinuity corresponds to the variance of uncorrelated location errors. You will soon be able to incorporate these kinds of errors into `ctmm` analysis.
+The height of this initial discontinuity corresponds to the variance of uncorrelated location errors. The second plot is the kind of initial discontinuity one has with detector array data. The end of the (slope) discontinuity is highlighted with a circle. This discontinuity is smooth because the movement and detection are correlated. The height of this initial discontinuity is also (at least roughly) the variance of the location errors.
 
-The second plot is a depiction of the kind of initial discontinuity one has with detector array data. The end of the (slope) discontinuity is highlighted with a circle. This discontinuity is smooth because the movement and detection are correlated. The height of this initial discontinuity is also (at least roughly) the variance of the location errors.
+If your tracking data is GPS and is annotated with a "DOP" column, then this information is automatically imported into the `telemetry` object and only has to be flagged in the `ctmm` model by setting `error=TRUE`. Because of some convenient mathematical relations, fitting without telemetry errors involves 1-3 fewer parameters and is, therefore, much faster than fitting with telemetry error. So if your data are not swamped by error and do not contain bursts of high-frequency fixes (which would also be relatively swamped by 5 meter GPS error), then you would want to apply a two stage fitting method:
+
+```{r, eval=FALSE}
+GUESS1$error <- FALSE
+GUESS2 <- ctmm.fit(DATA,GUESS1)
+GUESS2$error <- TRUE
+FIT <- ctmm.fit(DATA,GUESS2)
+```
+
+where your first `GUESS1` comes from `variogram.fit` and your second `GUESS2` is refined by fitting without errors. This ensures that `optim` gets to the best solution `FIT` within a reasonable amount of steps. On the other hand, if your data is swamped by telemetry errors, then you will need to prepare your best initial guess and fit once with `error=TRUE` flagged. If `isotropic=FALSE`, then you might want to take a few stabs at the orientation and eccentricity of `sigma` to make sure that `optim` has converged on the best solution.
 
 ### Cycles and Periodicities
 
@@ -218,14 +223,21 @@ TAB
 
 The fit parameter `DOF.mu` is the number of degrees of freedom worth of data we have to estimate the mean parameter `mu`, assuming that the model is correct. Notice that the uncorrelated model `M0` perceives thousands of independent data points, while the autocorrelated models `M1` and `M2` only see a handful of independent data points. This is why the uncorrelated model produced tiny confidence intervals on the predicted (Gaussian) area.
 
+If you have a complex model in mind, say `m2`, then you can perform model selection in a more convenient way with the `ctmm.select` function. `ctmm.select` considers the initial guess (hypothesis) and every simpler model to select the best model based upon an information criteria.
+
+```{r}
+FITS <- ctmm.select(cilla,M2,verbose=TRUE)
+summary(FITS)
+```
+
 ## Back to the Variogram
 
-Now its time to make sure that our selected model is explaining the most significant features of the animal's movement. Let us plot our variogram again with our fit models
+Now its time to make sure that our selected model is explaining the most significant features of the animal's movement. Let us plot the variogram again with our fit models
 
 ```{r,  fig.show='hold'}
-plot(svf,CTMM=list(M0,M1,M2),col.CTMM=c("red","purple","blue"),fraction=0.65,alpha=0.5)
+plot(SVF,CTMM=list(M0,M1,M2),col.CTMM=c("red","purple","blue"),fraction=0.65,level=0.5)
 title("zoomed out")
-plot(svf,CTMM=list(M0,M1,M2),col.CTMM=c("red","purple","blue"),fraction=0.002,alpha=0.5)
+plot(SVF,CTMM=list(M0,M1,M2),col.CTMM=c("red","purple","blue"),fraction=0.002,level=0.5)
 title("zoomed in")
 ```
 

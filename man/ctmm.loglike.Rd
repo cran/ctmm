@@ -56,7 +56,8 @@ data(buffalo)
 cilla <- buffalo[[1]]
 
 #Calculate likelihood of ~10 day range crossing time with discontinuous velocity
-ctmm.loglike(cilla,ctmm(tau=10*24*60*60),verbose=TRUE)
+MODEL <- ctmm(tau=10*24*60*60)
+ctmm.loglike(cilla,MODEL,verbose=TRUE)
 }
 
 % Add one or more standard keywords, see file 'KEYWORDS' in the
