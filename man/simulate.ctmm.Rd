@@ -8,17 +8,21 @@ Simulate a continuous-time movement model
 This function generates an \eqn{O(n)} hidden-Markov simulation of continuous-time movement models described in Fleming et al (2014) and Fleming et al (2015).
 }
 \usage{
-\S3method{simulate}{ctmm}(object,nsim=1,seed=NULL,t=c(0),...)
+\S3method{simulate}{ctmm}(object,nsim=1,seed=NULL,data=NULL,t=NULL,dt=NULL,res=1,...)
 }
 %- maybe also 'usage' for other objects documented here.
 \arguments{
   \item{object}{ A \code{ctmm} movement-model in the same format as the output of \code{\link{ctmm.fit}} or \code{\link{variogram.fit}}.}
-  \item{nsim}{Not supported.}
+  \item{nsim}{Not yet supported.}
   \item{seed}{Optional random seed to fix.}
+  \item{data}{Optional \code{telemetry} object on which the simulation will be conditioned.}
   \item{t}{Array of numeric time values over which the process will be simulated.}
+  \item{dt}{Timestep to run simulation over if \code{data} is specified.}
+  \item{res}{Average number of locations to simulate per \code{data} time.}
   \item{...}{Unused options.}
 }
 \details{
+The simulation can be conditioned off of \code{data}, if specified. Otherwise, the simulation will be Gaussian. 
 Details of the movement model parameters can be found in \code{\link{ctmm.fit}}.
 }
 

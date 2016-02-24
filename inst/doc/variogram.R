@@ -76,11 +76,20 @@ curve(3/4+x,1/4,5,xlab="Short time lag",ylab="Semi-variance",ylim=c(0,6),add=TRU
 points(1/4,1)
 title("Detector Array")
 
-## ---- eval=FALSE---------------------------------------------------------
-#  GUESS1$error <- FALSE
-#  GUESS2 <- ctmm.fit(DATA,GUESS1)
-#  GUESS2$error <- TRUE
-#  FIT <- ctmm.fit(DATA,GUESS2)
+## ------------------------------------------------------------------------
+DATA <- move::move(system.file("extdata","leroy.csv.gz",package="move"))
+DATA <- as.telemetry(DATA)
+# 1 hour and 1 day autocorrelation timescales
+GUESS <- ctmm(tau=c(1/4,24)*60^2)
+# first fit without telemetry error
+FITS <- list()
+FITS$CLEAN <- ctmm.fit(DATA,GUESS)
+# second fit based on first with telemetry error
+GUESS <- FITS$CLEAN
+GUESS$error <- TRUE
+FITS$ERROR <- ctmm.fit(DATA,GUESS)
+# model improvement
+summary(FITS)
 
 ## ----  fig.show='hold'---------------------------------------------------
 M0 <- ctmm.fit(cilla,m0)
@@ -101,7 +110,7 @@ rownames(TAB) <- c("M0","M1","M2")
 TAB
 
 ## ------------------------------------------------------------------------
-FITS <- ctmm.select(cilla,M2,verbose=TRUE)
+FITS <- ctmm.select(cilla,m2,verbose=TRUE)
 summary(FITS)
 
 ## ----  fig.show='hold'---------------------------------------------------

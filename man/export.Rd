@@ -11,33 +11,33 @@ Export ctmm data formats
 \description{Functions to export \code{ctmm} data formats into common \code{sp}, \code{raster}, and ESRI formats.}
 
 \usage{
-raster.UD(UD,DF="CDF",CI="ML")
+raster.UD(UD,DF="CDF")
 
 SpatialPoints.telemetry(data)
 
-SpatialPolygonsDataFrame.UD(UD,level.UD=0.95)
+SpatialPolygonsDataFrame.UD(UD,level.UD=0.95,level=0.95)
 
-writeShapefile.UD(UD,folder,file=UD@info$identity,level.UD=0.95,...)
+writeShapefile.UD(UD,folder,file=UD@info$identity,level.UD=0.95,level=0.95,...)
 }
 %- maybe also 'usage' for other objects documented here.
 \arguments{
   \item{UD}{ \code{UD} object. }
   \item{DF}{Rasterize the probability density function \code{"PDF"} or cumulative distribution function \code{"CDF"}.}
-  \item{CI}{Which confidence interval of the bandwidth uncertainty to use: the "ML" point estimate, "low" or "high".}
   \item{data}{ \code{telemetry} data object. }
   \item{level.UD}{ Confidence level of the UD area. I.e., the 50\% core home range would be given by \code{level.UD=0.50}. }
+  \item{level}{ Confidence level for the magnitude of the above area. I.e., the 95\% CI of the core home range area. }
   \item{folder}{Character name of folder for shapefile.}
   \item{file}{Character name of files for shapefile.}
   \item{...}{ Optional arguments passed to \code{\link[rgdal]{writeOGR}}.}
 }
 
-\details{\code{writeShapefile.UD} writes a shapefile to disk, with polygons corresponding to the low, ML, and high optimal-bandwidth AKDE home-range areas.}
+\details{\code{writeShapefile.UD} writes a shapefile to disk, with polygons corresponding to the low, ML, and high home-range area estimates.}
 
 \value{\code{raster.UD} returns a \code{raster} of the maximum likelihood (ML) probability density function.
 
 \code{SpatialPoints.telemetry} returns a \code{spatialPoints} object for the \code{x}-\code{y} locations.
 
-\code{SpatialPolygonsDataFrame.UD} returns a \code{SpatialPolygonsDataFrame} of the low, ML, and high optimal-bandwidth AKDE home-range areas, in the appropriate order for plotting.
+\code{SpatialPolygonsDataFrame.UD} returns a \code{SpatialPolygonsDataFrame} of the low, ML, and high home-range area estimates, in the appropriate order for plotting.
 }
 
 %\references{}

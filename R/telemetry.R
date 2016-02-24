@@ -13,26 +13,28 @@ subset.telemetry <- function(x,...)
 
 #######################
 # Generic import function
-as.telemetry <- function(CSV,timezone="GMT",projection=NULL,...) UseMethod("as.telemetry")
+as.telemetry <- function(CSV,timezone="GMT",projection=NULL,UERE=NULL,...) UseMethod("as.telemetry")
 
 # Move object
-as.telemetry.Move <- function(CSV,timezone="GMT",projection=NULL,...)
+as.telemetry.Move <- function(CSV,timezone="GMT",projection=NULL,UERE=NULL,...)
 {
   # clean this up to just dump idData into columns
   DATA <- data.frame(timestamp=CSV$timestamp,
                     location.long=CSV@coords[,1],
                     location.lat=CSV@coords[,2]
                     )
+  
   # possibly empty columns
   DATA$individual.local.identifier <- CSV@idData$individual.local.identifier
   DATA$eobs.horizontal.accuracy.estimate <- CSV$eobs.horizontal.accuracy.estimate
-
-  DATA <- as.telemetry.data.frame(DATA,timezone=timezone,projection=projection)
+  DATA$GPS.HDOP <- CSV$GPS.HDOP
+  
+  DATA <- as.telemetry.data.frame(DATA,timezone=timezone,projection=projection,UERE=UERE)
   return(DATA)
 }
   
 # this assumes a MoveBank data.frame
-as.telemetry.data.frame <- function(CSV,timezone="GMT",projection=NULL,...)
+as.telemetry.data.frame <- function(CSV,timezone="GMT",projection=NULL,UERE=NULL,...)
 {
   DATA <- data.frame(id=as.factor(CSV$individual.local.identifier),
                     timestamp=as.POSIXct(CSV$timestamp,tz=timezone),
@@ -40,9 +42,21 @@ as.telemetry.data.frame <- function(CSV,timezone="GMT",projection=NULL,...)
                     latitude=as.numeric(CSV$location.lat)
                     )
 
-  # possibly empty columns
-  DATA$error <-  CSV$eobs.horizontal.accuracy.estimate
-  if(!is.null(DATA$error)) { DATA$error <- DATA$error^2 }
+  # Import and use HDOP if available
+  error <- CSV$GPS.HDOP
+  if(!is.null(error))
+  { 
+    if(is.null(UERE))
+    { warning("HDOP values found but UERE of GPS device not specified") }
+    else
+    { DATA$error <- (error*UERE)^2/2 }
+  }
+  
+  # Import and use e-obs accuracy if available
+  error <- CSV$eobs.horizontal.accuracy.estimate
+  if(!is.null(error)) { DATA$error <- error^2 }
+  # I emailed them, but they didn't know if there needed to be a 1/2 factor here
+  # assuming this is a standard deviation for now, since its in meters and not square meters
   
   DATA <- stats::na.omit(DATA)
   DATA$t <- as.numeric(DATA$timestamp)
@@ -51,6 +65,7 @@ as.telemetry.data.frame <- function(CSV,timezone="GMT",projection=NULL,...)
   colnames(xy) <- c("x","y")
   
   if(is.null(projection)) { projection <- suggest.projection(DATA) }
+  else { validate.projection(projection) }
   xy <- rgdal::project(xy,projection)
   
   DATA$x <- xy[,1]
@@ -72,7 +87,7 @@ as.telemetry.data.frame <- function(CSV,timezone="GMT",projection=NULL,...)
     telist[[i]] <- telemetry.clean(telist[[i]])
         
     # combine data.frame with ancillary info
-    info <- list(identity=id[i], type="?GPS?", timezone=timezone, projection=projection)
+    info <- list(identity=id[i], timezone=timezone, projection=projection, UERE=UERE)
     telist[[i]] <- new.telemetry( telist[[i]] , info=info )
   }
   names(telist) <- id
@@ -82,10 +97,10 @@ as.telemetry.data.frame <- function(CSV,timezone="GMT",projection=NULL,...)
 }
 
 # read in a MoveBank CSV file
-as.telemetry.character <- function(CSV,timezone="GMT",projection=NULL,...)
+as.telemetry.character <- function(CSV,timezone="GMT",projection=NULL,UERE=NULL,...)
 {
   data <- utils::read.csv(CSV,...)
-  data <- as.telemetry.data.frame(data,timezone=timezone,projection=projection)
+  data <- as.telemetry.data.frame(data,timezone=timezone,projection=projection,UERE=UERE)
   return(data)
 }
 
@@ -168,6 +183,7 @@ suggest.projection <- function(data,datum="WGS84")
   proj <- paste("+proj=tpeqd +lon_1=",mu1[1]," +lat_1=",mu1[2]," +lon_2=",mu2[1]," +lat_2=",mu2[2]," +datum=",datum,sep="")
 
   return(proj)
+  #################
   #STOP HERE
   
   # NON-FUNCTIONAL NORTH ROTATION CODE
@@ -190,6 +206,15 @@ suggest.projection <- function(data,datum="WGS84")
   # abusing PROj4 small-angle rotation + rescaling = true rotation
   # this would ruin z data if we had any
   proj <- paste(proj," +towgs84=0,0,0,0,0,",tan(theta),",",cos(theta),sep="")
+}
+
+validate.projection <- function(projection)
+{
+  if(grepl("latlong",projection,fixed=TRUE) || grepl("latlong",projection,fixed=TRUE))
+  { stop("A projected coordinate system must be specified.") }
+     
+  if(grepl("units=",projection,fixed=TRUE) && !grepl("units=m",projection,fixed=TRUE))
+  { stop("Units of distance other than meters not supported.") }
 }
 
 ################################
@@ -216,11 +241,6 @@ plot.telemetry <- function(x,CTMM=NULL,UD=NULL,level.UD=0.95,level=0.95,DF="CDF"
   alpha.UD <- 1-level.UD
   alpha <- 1-level
   
-  # adjustments to CI-CIs to make them a bit diminished relatively
-  trans <- c(0.5,1,0.5)
-  lwd <- c(1,2,1)
-  names(trans) <- names(lwd) <- c("low","ML","high")
-  
   # listify everything for generality
   if(class(x)=="telemetry" || class(x)=="data.frame") { x <- list(x)  }
   if(!is.null(CTMM)) { if(class(CTMM)=="ctmm") { CTMM <- list(CTMM) } }
@@ -244,11 +264,11 @@ plot.telemetry <- function(x,CTMM=NULL,UD=NULL,level.UD=0.95,level=0.95,DF="CDF"
     # bounding locations from UDs
     if(!is.null(UD))
     {
-      ext.x[1] <- min(c(ext.x[1], unlist(lapply(UD, function(a) { sapply(a, function(k) { k$x[1] }) }))))
-      ext.x[2] <- max(c(ext.x[2], unlist(lapply(UD, function(a) { sapply(a, function(k) { last(k$x) }) }))))
+      ext.x[1] <- min(c(ext.x[1], sapply(1:length(UD),function(i){ UD[[i]]$x[1] }) ))
+      ext.x[2] <- max(c(ext.x[2], sapply(1:length(UD),function(i){ last(UD[[i]]$x) }) ))
       
-      ext.y[1] <- min(c(ext.y[1], unlist(lapply(UD, function(a) { sapply(a, function(k) { k$y[1] }) }))))
-      ext.y[2] <- max(c(ext.y[2], unlist(lapply(UD, function(a) { sapply(a, function(k) { last(k$y) }) }))))
+      ext.y[1] <- min(c(ext.y[1], sapply(1:length(UD),function(i){ UD[[i]]$y[1] }) ))
+      ext.y[2] <- max(c(ext.y[2], sapply(1:length(UD),function(i){ last(UD[[i]]$y) }) ))
     }
     
     # bounding locations from Gaussian CTMM
@@ -263,7 +283,7 @@ plot.telemetry <- function(x,CTMM=NULL,UD=NULL,level.UD=0.95,level=0.95,DF="CDF"
 
         # capture outer contour if present
         const <- 1
-        if(!is.null(CTMM[[i]]$COV.tau))
+        if(!is.null(CTMM[[i]]$COV))
         {
           K <- length(CTMM[[i]]$tau)
           const <- confint.ctmm(CTMM[[i]],alpha)[1,3]/sqrt(det(sigma))
@@ -345,16 +365,16 @@ plot.telemetry <- function(x,CTMM=NULL,UD=NULL,level.UD=0.95,level=0.95,DF="CDF"
       CTMM[[i]]$sigma <- CTMM[[i]]$sigma/dist.scale^2
       
       # plot denisty function lazily reusing KDE code
-      pdf <- kde(list(x=CTMM[[i]]$mu[1],y=CTMM[[i]]$mu[2]),H=CTMM[[i]]$sigma,res=1000)
+      pdf <- kde(list(x=CTMM[[i]]$mu[1,1],y=CTMM[[i]]$mu[1,2]),H=CTMM[[i]]$sigma,res=1000)
       plot.df(pdf,DF=DF,col=col.DF[[i]],...)
       
       # plot ML estimate, regular style
-      plot.ctmm(CTMM[[i]],alpha.UD,col=col.level[[i]],lwd=lwd[2],...)
+      plot.ctmm(CTMM[[i]],alpha.UD,col=col.level[[i]],lwd=2,...)
       
       # plot CIs dashed if present
-      if(!is.null(CTMM[[i]]$COV.tau))
+      if(!is.null(CTMM[[i]]$COV))
       {
-        CTMM[[i]]$COV.tau <- CTMM[[i]]$COV.tau/dist.scale^4 # don't care about tau, just sigma
+        CTMM[[i]]$COV <- CTMM[[i]]$COV/dist.scale^4 # don't care about tau, just sigma
         
         # proportionality constants for outer CIs
         const <- confint.ctmm(CTMM[[i]],alpha)[1,c(1,3)]/sqrt(det(CTMM[[i]]$sigma))
@@ -363,11 +383,10 @@ plot.telemetry <- function(x,CTMM=NULL,UD=NULL,level.UD=0.95,level=0.95,DF="CDF"
         for(j in 1:2)
         {
           CTMM[[i]]$sigma <- const[j]*sigma
-          plot.ctmm(CTMM[[i]],alpha.UD,col=grDevices::adjustcolor(col.level[[i]],alpha.f=trans[1]),...)
+          plot.ctmm(CTMM[[i]],alpha.UD,col=scales::alpha(col.level[[i]],0.5),...)
         }
       }
     }
-  
   }
 
   ##########################################
@@ -383,42 +402,44 @@ plot.telemetry <- function(x,CTMM=NULL,UD=NULL,level.UD=0.95,level=0.95,DF="CDF"
     # UNIT CONVERSIONS
     for(i in 1:length(UD))
     {
-      for(j in 1:length(UD[[i]]))
-      {
-        # unit conversion
-        UD[[i]][[j]]$x <- UD[[i]][[j]]$x / dist.scale
-        UD[[i]][[j]]$y <- UD[[i]][[j]]$y / dist.scale
-        UD[[i]][[j]]$PDF <- UD[[i]][[j]]$PDF * dist.scale^2
-        UD[[i]][[j]]$dA <- UD[[i]][[j]]$dA / dist.scale^2
-        UD[[i]][[j]]$H <- UD[[i]][[j]]$H / dist.scale^2
-      }
+      # unit conversion
+      UD[[i]]$x <- UD[[i]]$x / dist.scale
+      UD[[i]]$y <- UD[[i]]$y / dist.scale
+      UD[[i]]$PDF <- UD[[i]]$PDF * dist.scale^2
+      UD[[i]]$dA <- UD[[i]]$dA / dist.scale^2
+      UD[[i]]$H <- UD[[i]]$H / dist.scale^2
       
       # ML DENSITY PLOTS
-      plot.df(UD[[i]]$ML,DF=DF,col=col.DF[[i]],...)
+      plot.df(UD[[i]],DF=DF,col=col.DF[[i]],...)
     }
     
     # CONTOURS
     for(i in 1:length(UD))
     {
-      N <- names(UD[[i]])
-      for(j in 1:length(UD[[i]]))
+      if(!is.na(col.level[[i]]))
       {
         # make sure that correct style is used for low,ML,high even in absence of lows and highs
-        plot.kde(UD[[i]][[j]],alpha=alpha.UD,col=grDevices::adjustcolor(col.level[[i]],alpha.f=trans[N[j]]),lwd=lwd[N[j]],...)
+        plot.kde(UD[[i]],level=level.UD,col=scales::alpha(col.level[[i]],1),lwd=2,...)
+        
+        if(!is.null(UD[[i]]$DOF.H))
+        {
+          P <- CI.UD(UD[[i]],level.UD,level,P=TRUE)
+          plot.kde(UD[[i]],level=P[-2],labels=round(100*P[2]),col=scales::alpha(col.level[[i]],0.5),lwd=1,...)
+        }
       }
     }
     
     # RESOLUTION GRID
     if(!add)
     {
-      dx <- sqrt(max(sapply( UD , function(a) { a$ML$H[1,1] } )))
-      dy <- sqrt(max(sapply( UD , function(a) { a$ML$H[2,2] } )))
+      dx <- sqrt(max(sapply( 1:length(UD) , function(i) { UD[[i]]$H[1,1] } )))
+      dy <- sqrt(max(sapply( 1:length(UD) , function(i) { UD[[i]]$H[2,2] } )))
       
       if(dx>0 && dy>0)
       {
         # grid points per half
         gp <- ceiling(buff/c(dx,dy))
-        col.grid <- grDevices::adjustcolor(col.grid,alpha.f=0.5)
+        col.grid <- scales::alpha(col.grid,0.5)
         graphics::abline(v=(mu[1]+i*dx*(-gp[1]:gp[1])), col=col.grid)
         graphics::abline(h=(mu[2]+i*dy*(-gp[2]:gp[2])), col=col.grid)
       }
@@ -439,7 +460,8 @@ plot.telemetry <- function(x,CTMM=NULL,UD=NULL,level.UD=0.95,level=0.95,DF="CDF"
   
   # minimum error
   suppressWarnings(MIN <- min(sapply(x,function(X){min(X$error)})))
-  
+  MIN <- pi*MIN/dist.scale^2 / 2
+    
   for(i in 1:length(x))
   { 
     r <- x[[i]][,c("x","y")]/dist.scale
@@ -454,9 +476,9 @@ plot.telemetry <- function(x,CTMM=NULL,UD=NULL,level.UD=0.95,level=0.95,DF="CDF"
       # circle radius
       circles <- sqrt(x[[i]]$error)
       # color density proportional to true density
-      alpha <- (1/pxpkm)^2/(pi*x[[i]]$error)
-      bg <- sapply(alpha, function(a) grDevices::adjustcolor(col[[i]],alpha.f=a))
-      fg <- sapply(alpha, function(a) grDevices::adjustcolor(col[[i]],alpha.f=a/2))
+      alpha <- clamp(max((1/pxpkm)^2,MIN)/(pi*x[[i]]$error))
+      bg <- scales::alpha(col[[i]],alpha)
+      fg <- scales::alpha(col[[i]],alpha/2)
       graphics::symbols(x=r$x,y=r$y,circles=circles,fg=fg,bg=bg,inches=FALSE,add=TRUE,...)
     }
     
@@ -486,8 +508,8 @@ plot.telemetry <- function(x,CTMM=NULL,UD=NULL,level.UD=0.95,level=0.95,DF="CDF"
 # plot PDF stored as KDE object
 plot.df <- function(kde,DF="CDF",col="blue",...)
 {
-  col <- sapply((0:255)/255,function(a) {grDevices::adjustcolor(col,alpha.f=a)})
-  
+  col <- scales::alpha(col,(0:255)/255)
+
   if(DF=="PDF")
   {
     zlim <- c(0,max(kde$PDF))
@@ -504,9 +526,9 @@ plot.df <- function(kde,DF="CDF",col="blue",...)
 
 #############################
 # Plot a KDE object's contours
-plot.kde <- function(kde,alpha=0.05,col="black",...)
+plot.kde <- function(kde,level=0.95,labels=round(level*100),col="black",...)
 {
-  graphics::contour(x=kde$x,y=kde$y,z=kde$CDF,levels=1-alpha,labels=round((1-alpha)*100),labelcex=1,col=col,add=TRUE,...)
+  graphics::contour(x=kde$x,y=kde$y,z=kde$CDF,levels=level,labels=labels,labelcex=1,col=col,add=TRUE,...)
 }
 
 

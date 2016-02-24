@@ -1,6 +1,6 @@
 # akde object generator
 # list of kde objects with info slots
-new.UD <- methods::setClass("UD", representation(info="list",level="numeric"), contains="list")
+new.UD <- methods::setClass("UD", representation(info="list"), contains="list")
 
 
 # Slow lag counter
@@ -52,30 +52,19 @@ tab.lag.DOF <- function(data,fast=NULL,dt=NULL)
 ##################################
 # Bandwidth optimizer
 #lag.DOF is an unsupported option for end users
-akde.bandwidth <- function(data,CTMM,fast=NULL,dt=NULL)
+akde.bandwidth <- function(data,CTMM,fast=NULL,dt=NULL,verbose=FALSE)
 {
   lag.DOF <- tab.lag.DOF(data,fast=fast,dt=dt)
   # Extract lag data
   DOF <- lag.DOF$DOF
   lag <- lag.DOF$lag
   
-  tau <- CTMM$tau
-  tau <- tau[tau>0]
-  K <- length(tau)
-  
+  sigma <- methods::getDataPart(CTMM$sigma)
+
   # standardized SVF
-  if(K==0)
-  {
-    g <- Vectorize( function(t) { if(t==0) {0} else {1} } )
-  }
-  else if(K==1)
-  {
-    g <- Vectorize( function(t) { 1-exp(-t/tau) } )
-  }
-  else if(K==2)
-  {
-    g <- Vectorize( function(t) { 1-diff(tau*exp(-t/tau))/diff(tau) } )
-  }
+  CTMM$sigma <- covm(diag(1,2))
+  svf <- svf.func(CTMM)$svf
+  g <- Vectorize(function(t){ svf(t) })
   
   n <- length(data$t)
   
@@ -89,12 +78,19 @@ akde.bandwidth <- function(data,CTMM,fast=NULL,dt=NULL)
   h <- 1/n^(1/6) # User Silverman's rule of thumb to place lower bound
   h <- stats::optimize(f=MISE,interval=c(h/2,2))$minimum
   
-  H <- h^2*methods::getDataPart(CTMM$sigma)
+  H <- h^2
+  
+  DOF.H <- ( 1/(2*H)^2 - 1/(2+2*H)^2 ) / ( 1/(2+H)^2 - 1/(2+2*H)^2 )
+  
+  H <- H*sigma
   
   rownames(H) <- c("x","y")
   colnames(H) <- c("x","y")
   
-  return(H)
+  if(verbose)
+  { return(list(H=H,DOF.H=DOF.H)) }
+  else
+  { return(H) }
 }
 
 
@@ -108,66 +104,13 @@ homerange <- function(data,CTMM,method="AKDE",...)
 
 #######################################
 # wrap the kde function for our telemetry data format and CIs.
-akde <- function(data,CTMM,level=0.95,error=0.001,res=200,grid=NULL,...)
+akde <- function(data,CTMM,error=0.001,res=200,grid=NULL,...)
 {
-  alpha <- 1-level
-  #pb <- utils::txtProgressBar(min=-1,max=3,initial=-1,style=3)
-  
-  tau <- CTMM$tau
-  K <- length(tau)
-  
-  sigma <- CTMM$sigma
-  # covariance area/scale
-  GM.sigma <- sqrt(det(sigma))
-  # orientation matrix
-  R <- sigma/GM.sigma
+  KDE <- akde.bandwidth(data=data,CTMM=CTMM,verbose=TRUE,...)
 
-  # wrapper function to estimate bandwidth matrix
-  # par = c(sigma.GM,tau)
-  fn.H <- function(par)
-  {
-    CTMM.par <- CTMM
-    CTMM.par$sigma <- par[1]*R
-    if(K>0) { CTMM.par$tau <- par[-1] }
-    H <- akde.bandwidth(data=data,CTMM=CTMM.par,...)
-    return(H)
-  }
+  KDE <- c(KDE,kde(data,KDE$H,alpha=error,res=res,grid=grid))
 
-  # wrapper function to estimate bandwidth area
-  # par = c(sigma.GM,tau)
-  fn.GM.H <- function(par)
-  {
-    H <- fn.H(par)
-    GM.H <- sqrt(det(H))
-    return(GM.H)
-  }
-  # How strongly optimal bandwidth varries with parameter estimates
-  d.GM.H <- numDeriv::grad(fn.GM.H,c(GM.sigma,tau))
-  
-  # ML propagated curvature covariance
-  COV <- d.GM.H %*% CTMM$COV.tau %*% d.GM.H
-  # ML Bandwidth area
-  GM.H <- fn.GM.H(c(GM.sigma,tau))
-  # confidence intervals from chi^2
-  GM.H <- chisq.ci(GM.H,COV,alpha)
-
-  # data formatted for ks::kde
-  x <- cbind(data$x,data$y)
-  
-  # object to store crap
-  KDE <- list(low=0,ML=0,high=0)
-  
-  #utils::setTxtProgressBar(pb,0)
-  for(i in 1:3)
-  {
-    H <- GM.H[i]*R
-    KDE[[i]] <- kde(data,H,alpha=error,res=res,grid=grid)
-    KDE[[i]]$H <- H
-    #utils::setTxtProgressBar(pb,i)
-  }
-  #close(pb)
-  
-  KDE <- new.UD(KDE,info=attr(data,"info"),level=level)
+  KDE <- new.UD(KDE,info=attr(data,"info"))
   
   return(KDE)
 }
@@ -234,8 +177,6 @@ kde <- function(data,H,W=rep(1,length(data$x)),alpha=0.001,res=100,grid=NULL)
     c1 <- floor((y[i]-DY[i]-Y[1])/dy) + 1
     c2 <- ceiling((y[i]+DY[i]-Y[1])/dy) + 1
     
-    #if(i==2){ return(list(x=X[r1:r2],y=Y[c1:c2],CDF=pnorm2(X[r1:r2],Y[c1:c2],c(x[i],y[i]),H[i,,],dx,dy),mu=c(x[i],y[i]),sigma=H[i,,])) }
-    
     cdf[r1:r2,c1:c2] <- cdf[r1:r2,c1:c2] + W[i]*pnorm2(X[r1:r2]-x[i],Y[c1:c2]-y[i],H[i,,],dx,dy,alpha)
   }
 
@@ -253,8 +194,7 @@ kde <- function(data,H,W=rep(1,length(data$x)),alpha=0.001,res=100,grid=NULL)
   cdf <- array(cdf,DIM) # back in table form
   
   result <- list(PDF=pdf,CDF=cdf,x=X,y=Y,dA=dA)
-  class(result) <- "kde"
-  
+
   return(result)
 }
 
@@ -396,18 +336,18 @@ pnorm2 <- function(X,Y,sigma,dx=stats::mean(diff(X)),dy=stats::mean(diff(Y)),alp
 NewtonCotes <- function(X,Y,sigma,W,dx=mean(diff(X)),dy=mean(diff(Y)))
 {
   W <- W/sum(W)
-  
   n <- length(W)
   m <- n-1
   
-  # refined grid
-  x <- seq(X[1]-dx/2,last(X)+dx/2,dx/m)
-  y <- seq(Y[1]-dy/2,last(Y)+dy/2,dy/m)
-
+  # refined grid to have Simpson's rule in between X,Y points
+  # changed from to= to length.out= to avoid roundoff error
+  x <- seq(from=X[1]-dx/2,by=dx/m,length.out=length(X)*m+1)
+  y <- seq(from=Y[1]-dy/2,by=dy/m,length.out=length(Y)*m+1)
+  
   # weight arrays
-  w.x <- array(W[-n]*dx,length(x)) ; w.x[length(x)] <- w.x[1]
-  w.y <- array(W[-n]*dy,length(y)) ; w.y[length(y)] <- w.y[1]
-
+  w.x <- dx * array(W[-n],length(x))
+  w.y <- dy * array(W[-n],length(y))
+  
   # weight table
   W <- (w.x %o% w.y)
 
@@ -425,29 +365,44 @@ NewtonCotes <- function(X,Y,sigma,W,dx=mean(diff(X)),dy=mean(diff(Y)))
 
 #####################
 # gaussian pdf
-Gauss <- function(X,Y,sigma)
+Gauss <- function(X,Y,sigma=NULL,sigma.inv=solve(sigma),sigma.GM=sqrt(det(sigma)))
 {
-  sigma.inv <- solve(sigma)
-
   cdf <- outer(X^2*sigma.inv[1,1],Y^2*sigma.inv[2,2],"+")/2
   cdf <- cdf + (X %o% Y)*sigma.inv[1,2]
-  cdf <- exp(-cdf)/(2*pi*sqrt(det(sigma)))
+  cdf <- exp(-cdf)/(2*pi*sigma.GM)
   return(cdf)
+}
+
+
+#####################
+# AKDE CIs
+CI.UD <- function(object,level.UD=0.95,level=0.95,P=FALSE)
+{
+  # point estimate
+  area <- sum(object$CDF <= level.UD) * object$dA
+  
+  # chi square approximation of uncertainty
+  area <- chisq.ci(area,DOF=2*object$DOF.H,alpha=1-level)
+  
+  if(!P) { return(area) }
+  
+  # probabilities associated with these areas
+  P <- round(area / object$dA)
+  P <- sort(object$CDF,method="quick")[P]
+
+  P[2] <- level.UD
+  
+  return(P)
 }
 
 #######################
 # summarize details of akde object
-summary.UD <- function(object,level.UD=0.95,...)
+summary.UD <- function(object,level.UD=0.95,level=0.95,...)
 {
-  alpha.UD <- 1-level.UD
+  area <- CI.UD(object,level.UD,level)
   
-  area <- c(0,0,0)
-  for(i in 1:3)
-  {
-    area[i] <- sum(object[[i]]$CDF <= 1-alpha.UD) * object[[i]]$dA
-  }
-  
-  unit.info <- unit(area,"area")
+  # pretty units
+  unit.info <- unit(area[2],"area")
   name <- unit.info$name
   scale <- unit.info$scale
   
@@ -462,19 +417,18 @@ summary.UD <- function(object,level.UD=0.95,...)
 
 ################################
 # create a raster of the ML akde
-raster.UD <- function(UD,DF="CDF",CI="ML")
+raster.UD <- function(UD,DF="CDF")
 {
-  kde <- UD[[CI]]
-  dx <- kde$x[2]-kde$x[1]
-  dy <- kde$y[2]-kde$y[1]
+  dx <- UD$x[2]-UD$x[1]
+  dy <- UD$y[2]-UD$y[1]
   
-  xmn <- kde$x[1]-dx/2
-  xmx <- last(kde$x)+dx/2
+  xmn <- UD$x[1]-dx/2
+  xmx <- last(UD$x)+dx/2
   
-  ymn <- kde$y[1]-dy/2
-  ymx <- last(kde$y)+dy/2
+  ymn <- UD$y[1]-dy/2
+  ymx <- last(UD$y)+dy/2
   
-  Raster <- raster::raster(t(kde[[DF]][,dim(kde[[DF]])[2]:1]),xmn=xmn,xmx=xmx,ymn=ymn,ymx=ymx,crs=attr(UD,"info")$projection)
+  Raster <- raster::raster(t(UD[[DF]][,dim(UD[[DF]])[2]:1]),xmn=xmn,xmx=xmx,ymn=ymn,ymx=ymx,crs=attr(UD,"info")$projection)
   
   return(Raster)
 }
@@ -490,15 +444,17 @@ inside <- function(A,B)
 
 
 ##############
-SpatialPolygonsDataFrame.UD <- function(UD,level.UD=0.95)
+SpatialPolygonsDataFrame.UD <- function(UD,level.UD=0.95,level=0.95)
 {
-  ID <- paste(UD@info$identity," ",names(UD)," ",round(100*level.UD),"%",sep="")
+  P <- CI.UD(UD,level.UD,level,P=TRUE)
+  NAMES <- c("low","ML","high")
+  
+  ID <- paste(UD@info$identity," ",round(100*level.UD),"% ",NAMES,sep="")
 
   polygons <- list()
-  for(i in 1:length(UD))
+  for(i in 1:length(P))
   {
-    kde <- UD[[i]]
-    CL <- grDevices::contourLines(x=kde$x,y=kde$y,z=kde$CDF,levels=level.UD)
+    CL <- grDevices::contourLines(x=UD$x,y=UD$y,z=UD$CDF,levels=P[i])
     
     # create contour heirarchy matrix (half of it)
     H <- array(0,c(1,1)*length(CL))    
@@ -541,9 +497,9 @@ SpatialPolygonsDataFrame.UD <- function(UD,level.UD=0.95)
 
 
 ################
-writeShapefile.UD <- function(UD, folder, file=UD@info$identity, level.UD=0.95,  ...)
+writeShapefile.UD <- function(UD, folder, file=UD@info$identity, level.UD=0.95 ,level=0.95,  ...)
 {
-  SP <- SpatialPolygonsDataFrame.UD(UD,level.UD=level.UD)
+  SP <- SpatialPolygonsDataFrame.UD(UD,level.UD=level.UD,level=level)
   
   rgdal::writeOGR(SP, dsn=folder, layer=file, driver="ESRI Shapefile",...)
 }

@@ -1,19 +1,8 @@
-# is.installed <- function(pkg) is.element(pkg, installed.packages()[,1]) 
+#is.installed <- function(pkg) is.element(pkg, installed.packages()[,1]) 
 
 # worst case FFT functions
 FFT <- function(X) { stats::fft(X,inverse=FALSE) }
 IFFT <- function(X) { stats::fft(X,inverse=TRUE)/length(X) }
-
-# THIS SEEMS TO RUN FINE, BUT THEN CHECK FAILS
-# .onLoad <- function(libname, pkgname)
-# {
-#   # Use good FFT library if available
-#   if(is.installed("fftw"))
-#   {
-#     FFT <<- function(X) { fftw::FFT(as.numeric(X)) }
-#     IFFT <<- function(X) { fftw::IFFT(as.numeric(X)) }
-#   }
-# }
 
 zoom <- function(x,...) UseMethod("zoom") #S3 generic
 #setGeneric("zoom",function(x,...) standardGeneric("zoom"),package="ctmm") #S4 generic
@@ -90,20 +79,6 @@ Adj <- function(M) { t(Conj(M)) }
 # Hermitian part of matrix
 He <- function(M) { (M + Adj(M))/2 }
 
-# Positive definite part of matrix
-PDpart <- function(M)
-{ 
-  # singular value decomposition
-  M <- svd(M)
-  M$d <- clamp(M$d,max=Inf) # toss out small negative values
-  M$u <- (M$u + M$v)/2 # symmetrize
-  
-  M <- lapply(1:length(M$d),function(i){M$d[i]*(M$u[i,]%o%Conj(M$u[i,]))})
-  M <- Reduce("+",M)
-  
-  return(M)
-}
-
 # Positive definite solver
 PDsolve <- function(M)
 {
@@ -111,7 +86,7 @@ PDsolve <- function(M)
   M <- He(M)
   
   # rescale
-  W <- diag(M)
+  W <- abs(diag(M))
   W <- sqrt(W)
   W <- W %o% W
   
@@ -126,8 +101,56 @@ PDsolve <- function(M)
   return(M)
 }
 
-# COULD JUST MAKE A GENERAL PD-FUN OPERATION
 
+# generalized covariance from likelihood derivatives
+cov.loglike <- function(hess,grad)
+{
+  # if hessian is likely to be positive definite
+  if(all(diag(hess)>0))
+  {
+    COV <- try(PDsolve(hess))
+    if(class(COV)=="matrix") { return(COV) }
+  }
+  # one of the curvatures is negative
+  # return something sensible just in case we are on a boundary and this makes sense
+  
+  # normalize parameter scales by curvature or gradient (whatever is larger)
+  V <- abs(diag(hess))
+  V <- sqrt(V)
+  V <- sapply(1:length(grad), function(i) { max(V[i],abs(grad[i])) } )
+  W <- V %o% V
+  
+  grad <- grad/V
+  hess <- hess/W
+  
+  EIGEN <- eigen(hess)
+  values <- EIGEN$values
+  vectors <- EIGEN$vectors
+
+  # transform gradient to hess' coordinate system
+  grad <- t(vectors) %*% grad
+
+  # generalized Wald-like formula with zero-curvature limit
+  for(i in 1:length(values))
+  {
+    DET <- values[i]+grad[i]^2
+    
+    if(values[i]==0.0) # Wald limit of below
+    { values[i] <- 1/(2*grad[i])^2 }
+    else if(DET>=0.0) # Wald
+    { values[i] <- min(((c(1,-1)*sqrt(DET)-grad[i])/values[i])^2) }
+    else # minimum loglike? optim probably failed
+    {
+      warning("Likelihood has not been maximized.")
+      values[i] <- (grad[i]/values[i])^2
+    }
+  }
+  
+  COV <- vectors %*% diag(values,length(values)) %*% t(vectors)
+  COV <- COV/W
+    
+  return(COV)
+}
 
 # confidence interval functions
 CI.upper <- Vectorize(function(k,Alpha){qchisq(Alpha/2,k,lower.tail=FALSE)/k})
@@ -135,11 +158,8 @@ CI.lower <- Vectorize(function(k,Alpha){qchisq(Alpha/2,k,lower.tail=TRUE)/k})
 
 
 # calculate chi^2 confidence intervals from MLE and COV estimates
-chisq.ci <- function(MLE,COV,alpha)
-{
-  DOF <- 2*MLE^2/COV
-  CI <- MLE * c(CI.lower(DOF,alpha),1,CI.upper(DOF,alpha))
-}
+chisq.ci <- function(MLE,COV=NULL,alpha=0.05,DOF=2*MLE^2/COV)
+{ MLE * c(CI.lower(DOF,alpha),1,CI.upper(DOF,alpha)) }
 
 
 # last element of array
@@ -148,6 +168,32 @@ last <- function(vec) { vec[length(vec)] }
 
 # CLAMP A NUMBER
 clamp <- Vectorize(function(num,min=0,max=1) { if(num<min) {min} else if(num<max) {num} else {max} })
+
+
+# Positive definite part of matrix
+PDclamp <- function(M)
+{ 
+  
+  # singular value decomposition method
+  M <- svd(M)
+  M$d <- clamp(M$d,max=Inf) # toss out small negative values
+  M$u <- (M$u + M$v)/2 # symmetrize
+  
+  M <- lapply(1:length(M$d),function(i){M$d[i]*(M$u[i,]%o%Conj(M$u[i,]))})
+  M <- Reduce("+",M)
+  
+  return(M)
+
+  # simple method
+  M[1,1] <- clamp(M[1,1],0,Inf)
+  M[2,2] <- clamp(M[2,2],0,Inf)
+  m <- sqrt(M[1,1]*M[2,2])
+  M[1,2] <- clamp(M[1,2],-m,m)
+  M[2,1] <- M[1,2]
+  
+  return(M)
+  
+}
 
 
 # PAD VECTOR
@@ -163,43 +209,62 @@ pad <- function(vec,size,padding=0,side="right")
 }
 
 
+#remove rows and columns by name
+rm.name <- function(object,name)
+{
+  object[!rownames(object) %in% name,!colnames(object) %in% name] 
+}
+
+
 # CHOOSE BEST UNITS FOR A LIST OF DATA
-unit <- function(data,dimension,thresh=1)
+unit <- function(data,dimension,thresh=1,concise=FALSE)
 {
   if(dimension=="length")
   {
     name.list <- c("meters","kilometers")
+    abrv.list <- c("m","km")
     scale.list <- c(1,1000)
   }
   else if(dimension=="area")
   {
     name.list <- c("square meters","hectares","square kilometers")
+    abrv.list <- c("m^2","hm^2","km^2")
     scale.list <- c(1,100^2,1000^2) 
   }
   else if(dimension=="time")
   {
-    name.list <- c("seconds","minutes","hours","days","years")
-    scale.list <- c(1,60*c(1,60*c(1,24*c(1,365.24))))
+    name.list <- c("seconds","minutes","hours","days","months","years")
+    abrv.list <- c("sec","min","hr","day","mon","yr")
+    scale.list <- c(1,60*c(1,60*c(1,24*c(1,29.53059,365.24))))
   }
   else if(dimension=="speed")
   {
     name.list <- c("meters/day","kilometers/day")
+    abrv.list <- c("m/day","km/day")
     scale.list <- c(1,1000)/(60*60*24)
   }
-  
+  else if(dimension=="diffusion")
+  {
+    name.list <- c("square meters/day","hectares/day","square kilometers/day")
+    abrv.list <- c("m^2/day","hm^2/day","km^2/day")
+    scale.list <- c(1,100^2,1000^2)/(60*60*24)
+  }
+    
   max.data <- max(abs(data))
   
-  name <- name.list[1]
-  scale <- scale.list[1]
+  if(concise) { name.list <- abrv.list }
   
-  for(i in 2:length(name.list))
+  # choose most parsimonious units
+  I <- max.data > thresh * scale.list
+  if(any(I))
   {
-    if(max.data > thresh*scale.list[i])
-    {  
-      name <- name.list[i]
-      scale <- scale.list[i]
-    }
+    I <- (1:length(I))[I]
+    I <- last(I)
   }
+  else { I <- 1 }
+  
+  name <- name.list[I]
+  scale <- scale.list[I]
   
   return(list(scale=scale,name=name))
 }

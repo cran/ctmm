@@ -16,7 +16,7 @@ periodogram(data,CTMM=NULL,T=NULL,dt=NULL,res=1,fast=NULL)
 }
 %- maybe also 'usage' for other objects documented here.
 \arguments{
-  \item{data}{ \code{telemetry} data object of the 2D timeseries data. }
+  \item{data}{ \code{telemetry} data object or list of such objects. }
   \item{CTMM}{ An optional \code{ctmm} model object for specifying the mean. }
   \item{T}{Sampling period for frequency resolution.}
   \item{dt}{Sampling interval for frequency cutoff.}
@@ -35,6 +35,8 @@ If no \code{dt} is specified, the median sampling interval is used. This is typi
 The frequency grid interval is finally given by \code{1/(2*(T+dt)*res)} and the frequency cutoff is given by \code{1/(2*dt)}, both in accordance with the DFT periodogram. Increasing \code{res} beyond \code{res=1} will make for a smooth periodogram, but sequential frequencies will be highly correlated.
 
 If a \code{ctmm} argument is provided, the ML mean will be detrended from the data prior to calculating the periodogram. Otherwise, the sample mean will be detrended.
+
+If a list of \code{telemetry} objects are fed into \code{periodogram}, then a mean \code{periodogram} object will be returned with the default \code{T} and \code{dt} arguments selected on a worst case basis according to the method described by Péron et al (2016).
 }
 
 \value{

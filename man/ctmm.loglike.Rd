@@ -22,11 +22,9 @@ See \code{\link{ctmm.fit}} for a complete description of the parameter inputs.
 
 \value{
 By default, only the log-likelihood value is returned, given the specified model parameters and data.
-If \code{verbose=TRUE}, then a \code{ctmm} movement-model object list is returned with the following components:
+If \code{verbose=TRUE}, then a \code{ctmm} movement-model object list is returned with all of the components of \code{CTMM} plus following:
 \describe{
 \item{\code{loglike}}{The log-likelihood.}
-\item{\code{isotropic}}{A Boolean denoting whether or not the animal's covariance is circular or elliptical.}
-\item{\code{tau}}{The argument \code{CTMM$tau}.}
 \item{\code{sigma}}{The argument \code{CTMM$sigma} if specified, or the analytically profiled variance/covariance if not specified.}
 \item{\code{mu}}{The argument \code{CTMM$mu} if specified, or the analytically profiled stationary mean vector if not.}
 \item{\code{COV.mu}}{The covariance matrix of the vector \code{mu}, assuming that the point estimates \code{tau} and \code{sigma} are good.}

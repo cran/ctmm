@@ -12,13 +12,13 @@ Import, coerce, and summarize MoveBank data
 \description{Functions to import MoveBank csv files, \code{data.frame}, and \code{Move} objects, coerce them into \code{telemetry} objects, and summarize them.}
 
 \usage{
-as.telemetry(CSV,timezone="GMT",projection=NULL,...)
+as.telemetry(CSV,timezone="GMT",projection=NULL,UERE=NULL,...)
 
-\S3method{as.telemetry}{character}(CSV,timezone="GMT",projection=NULL,...)
+\S3method{as.telemetry}{character}(CSV,timezone="GMT",projection=NULL,UERE=NULL,...)
 
-\S3method{as.telemetry}{data.frame}(CSV,timezone="GMT",projection=NULL,...)
+\S3method{as.telemetry}{data.frame}(CSV,timezone="GMT",projection=NULL,UERE=NULL,...)
 
-\S3method{as.telemetry}{Move}(CSV,timezone="GMT",projection=NULL,...)
+\S3method{as.telemetry}{Move}(CSV,timezone="GMT",projection=NULL,UERE=NULL,...)
 
 \S3method{summary}{telemetry}(object,...)
 }
@@ -27,6 +27,7 @@ as.telemetry(CSV,timezone="GMT",projection=NULL,...)
   \item{CSV}{The file name of the MoveBank csv file, \code{data.frame} object from a MoveBank data CSV, or \code{Move} object.}
   \item{timezone}{Timezone argument for \code{\link{as.POSIXct}}.}
   \item{projection}{Optional PROJ.4 projection argument to be fed to \code{\link[rgdal]{project}}.}
+  \item{UERE}{"User equivalent range errors" needed to translate DOP values into location uncertainty.}
   \item{...}{Optional arguments to be fed to \code{\link{read.csv}}.}
   \item{object}{\code{telemetry} object to summarize.}
 }
@@ -35,8 +36,11 @@ as.telemetry(CSV,timezone="GMT",projection=NULL,...)
 If no projection argument is specified, a two-point equidistant projection is calculated that should be good for most range resident and migratory species.
 Global migrations that are not relatively geodesic (locally straight) will probably suffer distortion.
 
-The necessary MoveBank columns are \code{individual.local.identifier}, \code{timestamp}, \code{location.long}, \code{location.lat}, and the optional Movebank columns are \code{eobs.horizontal.accuracy.estimate}.
+The necessary MoveBank columns are \code{individual.local.identifier}, \code{timestamp}, \code{location.long} and \code{location.lat}, while the optional Movebank columns are \code{eobs.horizontal.accuracy.estimate} and \code{GPS.HDOP}.
 In the future, we will be supporting more GPS and ARGOS columns, including speed, heading, error classification, etc.
+
+The \code{GPS.HDOP} value requires the device's \code{UERE} value to be translated into telemetry errors. The \code{UERE} represents the RMS error given ideal satellite conditions. Therefore, if your device is purported to have an accuracy of 2-10 meters, then the \code{UERE} is likely around 2 meters. Consult your device manual and manufacturer for a specific value.
+In the future we will support UERE calibration.
 }
 
 \value{\code{as.telemetry} returns a single \code{telemetry} object or list of \code{telemetry} objects if multiple animals are identified.}

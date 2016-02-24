@@ -10,8 +10,8 @@ The methods are based on those introduced in Fleming et al. (2014-2015).
 \tabular{ll}{
 Package: \tab ctmm\cr
 Type: \tab Package\cr
-Version: \tab 0.3.0 \cr
-Date: \tab 2015-11-26 \cr
+Version: \tab 0.3.1 \cr
+Date: \tab 2015-02-23 \cr
 License: \tab GPL-3 \cr
 }
 }
@@ -38,8 +38,9 @@ C. H. Fleming and W. F. Fagan and T. Mueller and K. A. Olson and P. Leimgruber, 
 Rigorous home-range estimation with movement data: A new autocorrelated kernel-density estimator.
 \href{http://www.esajournals.org/doi/abs/10.1890/14-2010.1}{Ecology, 96(5), 1182-1188}.
 
-C. H. Fleming, W. F. Fagan, T. Mueller, K. A. Olson, P. Leimgruber, and J. M. Calabrese.
+C. H. Fleming, W. F. Fagan, T. Mueller, K. A. Olson, P. Leimgruber, and J. M. Calabrese. (2016).
 Estimating where and how animals travel: An optimal framework for path reconstruction from autocorrelated tracking data.
+\href{http://onlinelibrary.wiley.com/doi/10.1890/15-1607/full}{Ecology 10.1890/15-1607}.
 }
 
 %~~ Optionally other standard keywords, one per line, from file KEYWORDS in ~~

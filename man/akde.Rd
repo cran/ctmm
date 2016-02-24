@@ -8,13 +8,12 @@ Calculate an autocorrelated kernel density estimate
 This function calculates autocorrelated kernel density estimates of different confidence levels from \code{telemetry} data and a continuous-time movement model.
 }
 \usage{
-akde(data,CTMM,level=0.95,error=0.001,res=200,grid=NULL,...)
+akde(data,CTMM,error=0.001,res=200,grid=NULL,...)
 }
 %- maybe also 'usage' for other objects documented here.
 \arguments{
   \item{data}{ 2D timeseries telemetry data represented as a \code{telemetry} object. }
   \item{CTMM}{A \code{ctmm} movement model from the output of \code{ctmm.fit}.}
-  \item{level}{Confidence level for when propagating uncertainties in the \code{ctmm} parameter estimates.}
   \item{error}{Target error for kernel truncation.}
   \item{res}{Number of grid points along each axis.}
   \item{grid}{Optional grid specification with columns labeled \code{x} and \code{y}. Not yet supported.}
@@ -23,7 +22,7 @@ akde(data,CTMM,level=0.95,error=0.001,res=200,grid=NULL,...)
 
 %\details{}
 
-\value{Returns a \code{UD} object: a list with component objects \code{low}, \code{ML}, \code{high}, and the corresponding confidence \code{level} for the optimal bandwidth area. Each component object contains the sampled grid line locations \code{x} and \code{y}, the probability density and cumulative distribution functions evaluated on the sampled grid locations \code{PDF} & \code{CDF}, the optimal bandwidth matrix \code{H}, and the area of each grid cell \code{dA}.
+\value{Returns a \code{UD} object: a list with the sampled grid line locations \code{x} and \code{y}, the area of each grid cell \code{dA}, the probability density and cumulative distribution functions evaluated on the sampled grid locations \code{PDF} & \code{CDF}, the optimal bandwidth matrix \code{H}, and the effective sample size of the data in \code{DOF.H}.
 }
 
 \references{
@@ -36,7 +35,11 @@ Rigorous home-range estimation with movement data: A new autocorrelated kernel-d
 
 \author{ C. H. Fleming. }
 
-\note{ In the case of coarse grids, the value of \code{PDF} in a grid cell corresponds to the average probability density over the entire rectangular cell. }
+\note{ In the case of coarse grids, the value of \code{PDF} in a grid cell corresponds to the average probability density over the entire rectangular cell.
+
+Prior to \code{ctmm} v0.3.1, AKDEs included only errors due to autocorrelation uncertainty, which are insignificant in cases such as IID data.
+Starting in v0.3.1, \code{akde} calculates an effective sample size \code{DOF.H} and uses this to estimate area uncertainty under a chi-square approxmation.
+}
 
 %% ~Make other sections like Warning with \section{Warning }{....} ~
 

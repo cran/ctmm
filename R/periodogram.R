@@ -31,30 +31,37 @@ periodogram <- function(data,CTMM=NULL,T=NULL,dt=NULL,res=1,fast=NULL)
   }
   
   # default worst temporal resolution
-  if(is.null(dt)) { dt <- max(sapply(data,function(d) { stats::median(diff(d$t)) })) }
+  dts <- sapply(data,function(d) { stats::median(diff(d$t)) })
+  if(is.null(dt)) { dt <- max(dts) }
   
   # default best sampling period
-  if(is.null(T)) { T <- max(sapply(data,function(d) { last(d$t)-d$t[1] })) }
+  Ts <- sapply(data,function(d) { last(d$t)-d$t[1] })
+  if(is.null(T)) { T <- max(Ts) }
   n <- round(T/dt) + 1
   T <- (n-1)*dt
   
   if(fast)
-  {
-    lsp <- lapply(data,function(d) periodogram.fast(d,T=T,dt=dt,res=res))
-  }
+  { lsp <- lapply(data,function(d) periodogram.fast(d,T=T,dt=dt,res=res)) }
   else
-  { 
-    lsp <- lapply(data,function(d) periodogram.slow(d,T=T,dt=dt,res=res))
-  }
+  { lsp <- lapply(data,function(d) periodogram.slow(d,T=T,dt=dt,res=res)) }
+
+  f <- lsp[[1]]$f
+  
+  # DOF of one frequency in each LSP
+  DOF <- (dts/dt)*2*(sapply(data,function(d){length(data$t)})-1)/length(f)
 
   # average the periodograms if there are multiple
-  f <- lsp[[1]]$f
-  DOF <- rowSums( sapply(lsp,function(l){l$DOF}) )
-  LSP <- rowSums( sapply(lsp,function(l){l$DOF*l$LSP}) ) / DOF
-  SSP <- rowSums( sapply(lsp,function(l){l$DOF*l$SSP}) ) / DOF
+  LSP <- rowSums( sapply(1:length(lsp),function(i){DOF[i]*lsp[[i]]$LSP}) )
+  SSP <- rowSums( sapply(1:length(lsp),function(i){DOF[i]*lsp[[i]]$SSP}) )
+    
+  # DOF of one frequency in ave LSP
+  DOF <- sum(DOF)
   
+  LSP <- LSP/DOF
+  SSP <- SSP/DOF
+
   result <- data.frame(LSP=LSP,SSP=SSP,DOF=DOF,f=f)
-  result <- new.periodogram(result, info=mean.info(data))
+  result <- new.periodogram(result,info=mean.info(data))
   
   return(result)
 }
@@ -119,11 +126,10 @@ periodogram.fast <- function(data,T=NULL,dt=NULL,res=1)
   
   # Stop before Nyquist periodicity
   n <- length(f)+1
-  DOF <- 2*length(t)/n
   LSP <- LSP[2:n]
   SSP <- SSP[2:n]
   
-  result <- data.frame(LSP=LSP,SSP=SSP,DOF=DOF,f=f)
+  result <- data.frame(LSP=LSP,SSP=SSP,f=f)
 
   #sub sample for low-resolution request
   if(res<1)
@@ -132,9 +138,7 @@ periodogram.fast <- function(data,T=NULL,dt=NULL,res=1)
     SEQ <- round(SEQ)
     result <- result[SEQ,] 
   }
-    
-  result <- new.periodogram(result, info=attr(data,"info"))
-  
+
   return(result)
 }
 
@@ -176,12 +180,7 @@ periodogram.slow <- function(data,T=NULL,dt=NULL,res=1)
   SSP <- rowSums(COS)^2/rowSums(COS^2) + rowSums(SIN)^2/rowSums(SIN^2)
   SSP <- SSP/2
   
-  # effective number of degrees of freedom for evenly sampled data
-  # this is really just a placeholder for now
-  DOF <- 2*length(t)/(length(f)+1)
-  
-  result <- data.frame(LSP=LSP,SSP=SSP,DOF=DOF,f=f)
-  result <- new.periodogram(result, info=attr(data,"info"))
+  result <- data.frame(LSP=LSP,SSP=SSP,f=f)
   
   return(result)
 }
@@ -224,12 +223,12 @@ plot.periodogram <- function(x,diagnostic=FALSE,col="black",transparency=0.25,gr
   # diurnal periods
   ticker(1,24,"day")  
 
-  col <- sapply(f,function(freq) grDevices::adjustcolor(col,alpha.f=((f[1]/freq)^transparency)) )
+  col <- scales::alpha(col,alpha=((f[1]/f)^transparency))
   plot(1/f,LSP,log="x",xaxt="n",xlab="Period",ylab="Log Spectral Density",col=col,...)
 
   if(diagnostic)
   {
-    col <- sapply(f,function(freq) grDevices::adjustcolor("red",alpha.f=((f[1]/freq)^transparency)) )
+    col <- scales::alpha("red",alpha=((f[1]/f)^transparency))
     graphics::points(1/f,SSP,col=col,...)
   }
 

@@ -333,85 +333,116 @@ variogram.slow <- function(data,dt=NULL,CI="Markov")
 }
 
 
-##########
-plot.svf <- function(lag,model,alpha=0.05,col="red",type="l",...)
+#########
+# update to moment/cumulant with non-stationary mean
+svf.func <- function(CTMM,moment=FALSE)
 {
   # pull out relevant model parameters
-  tau <- model$tau
-  sigma <- model$sigma
-  COV <- model$COV.tau
+  tau <- CTMM$tau
+
+  # trace variance
+  sigma <- mean(diag(CTMM$sigma)) # now AM.sigma
+  ecc <- CTMM$sigma@par[2]
   
-  if(length(tau)>0 && tau[1]==Inf){ range <- FALSE }else{ range <- TRUE }
+  CPF <- CTMM$CPF
+  circle <- CTMM$circle
+
+  if(length(tau)>0 && tau[1]==Inf) { range <- FALSE } else { range <- TRUE }
   tau <- tau[tau>0]
   tau <- tau[tau<Inf]
   K <- length(tau)
   
-  # trace variance
-  GM.sigma <- sqrt(det(sigma))
-  sigma <- mean(diag(sigma)) # now AM.sigma
-  
   # parameter covariances
   # default to no error considered
-  if(is.null(COV)) { COV <- diag(0,K+1) }
+  COV <- CTMM$COV
+  if(is.null(COV)) { COV <- diag(0,K+1+(if(circle){1}else{0})) }
   
-  # transform parameterization
-  if(K>0 && range)
+  # FIRST CONSTRUCT STANDARD ACF AND ITS PARAMTER GRADIENTS
+  if(CPF) # Central place foraging
   {
-    f <- 1/tau
-    grad <- diag(c(1,-f^2),nrow=K+1)
-    COV <- grad %*% COV %*% t(grad)
+    nu <- 2*pi/tau[1]
+    f <- 1/tau[2]
+    acf <- function(t){ (cos(nu*t)+f/nu*sin(nu*t))*exp(-f*t) }
+    acf.grad <- function(t) { -c(2*pi,1)/tau^2 * c( (-(t+f/nu^2)*sin(nu*t)+f/nu*t*cos(nu*t))*exp(-f*t) , -t*acf(t) + 1/nu*sin(nu*t)*exp(-f*t) ) }
   }
-    
-  if(K==0 && range) # Bivariate Gaussian
+  else if(K==0 && range) # Bivariate Gaussian
   { 
-    svf <- function(t){ if(t==0) {0} else {sigma} }
-    grad.svf <- function(t){ svf(t)/GM.sigma }
+    acf <- function(t){ if(t==0) {1} else {0} }
+    acf.grad <- function(t){ NULL }
   }
   else if(K==0) # Brownian motion
   {
-    svf <- function(t){ sigma*t }
-    grad.svf <- function(t){ svf(t)/GM.sigma }
+    acf <- function(t){ 1-t }
+    acf.grad <- function(t){ NULL }
   }
   else if(K==1 && range) # OU motion
   {
-    svf <- function(t){ sigma*(1-exp(-t*f)) }
-    grad.svf <- function(t){ c( svf(t)/GM.sigma , sigma*(-t*exp(-t*f)) ) }
+    acf <- function(t){ exp(-t/tau) }
+    acf.grad <- function(t){ t/tau^2*acf(t) }
   }
   else if(K==1) # IOU motion
   {
-    svf <- function(t) { sigma*(t-tau*(1-exp(-t/tau))) }
-    grad.svf <- function(t){ c( svf(t)/GM.sigma , -sigma*(1-(1+t/tau)*exp(-t/tau)) ) }
+    acf <- function(t) { 1-(t-tau*(1-exp(-t/tau))) }
+    acf.grad <- function(t){ 1-(1+t/tau)*exp(-t/tau) }
   }
   else if(K==2) # OUF motion
   { 
-    svf <- function(t){ sigma*(1 - diff(tau*exp(-t/tau))/diff(tau)) } 
-    grad.svf <- function(t)
-    { c(
-      svf(t)/GM.sigma ,
-      -sigma*f[2]/diff(f)^2*((1+diff(f)*t)*exp(-f[1]*t)-exp(-f[2]*t)) ,
-      -sigma*f[1]/diff(f)^2*((1-diff(f)*t)*exp(-f[2]*t)-exp(-f[1]*t))
-    ) }
+    acf <- function(t){ diff(tau*exp(-t/tau))/diff(tau) } 
+    acf.grad <- function(t) { c(1,-1)*((1+t/tau)*exp(-t/tau)-acf(t))/diff(tau) }
   }
+  
+  # finish off svf function including circulation if present
+  if(!circle)
+  {
+    svf <- function(t) { sigma*(1-acf(t)) }
+    grad <- function(t) { c(svf(t)*cosh(ecc)/sigma, -sigma*acf.grad(t)) }
+  }
+  else
+  {
+    f <- 2*pi/circle
+    svf <- function(t) { sigma*(1-cos(f*t)*acf(t)) }
+    grad <- function(t) { c(svf(t)*cosh(ecc)/sigma, -sigma*cos(f*t)*acf.grad(t), -(f/circle)*sigma*t*sin(f*t)*acf(t)) }
+  }
+  
+  MEAN <- svf.mean(CTMM)
+  SVF <- function(t) { svf(t) + MEAN$svf(t) }
+  
+  # variance of SVF
+  VAR <- function(t)
+  {
+    g <- grad(t)
+    return( g %*% COV %*% g + MEAN$VAR(t) )
+  }
+  
+  # chi-square effective degrees of freedom
+  DOF <- function(t) { return( 2*SVF(t)^2/VAR(t) ) }
+  
+  return(list(svf=SVF,VAR=VAR,DOF=DOF))
+}
 
-  SVF <- Vectorize(function(t){svf(t)})
+
+##########
+plot.svf <- function(lag,CTMM,alpha=0.05,col="red",type="l",...)
+{
+  SVF <- svf.func(CTMM)
+  svf <- SVF$svf
+  DOF <- SVF$DOF
   
   # point estimate plot
+  SVF <- Vectorize(function(t){svf(t)})
   graphics::curve(SVF,from=0,to=lag,n=1000,add=TRUE,col=col,type=type,...)
   
   # confidence intervals if COV provided
-  if(any(diag(COV)>0))
+  if(any(diag(CTMM$COV)>0))
   {
     Lags <- seq(0,lag,lag/1000)
     
-    # efffective DOF of SVF if its chi square
-    DOF.svf <- function(t){ 2*svf(t)^2/( grad.svf(t) %*% COV %*% grad.svf(t) ) }
-    
     for(j in 1:length(alpha))
     {
-      svf.lower <- Vectorize(function(t){ svf(t) * CI.lower(DOF.svf(t),alpha[j]) })
-      svf.upper <- Vectorize(function(t){ svf(t) * CI.upper(DOF.svf(t),alpha[j]) })
+      svf.lower <- Vectorize(function(t){ svf(t) * CI.lower(DOF(t),alpha[j]) })
+      svf.upper <- Vectorize(function(t){ svf(t) * CI.upper(DOF(t),alpha[j]) })
       
-      graphics::polygon(c(Lags,rev(Lags)),c(svf.lower(Lags),rev(svf.upper(Lags))),col=grDevices::adjustcolor(col,alpha.f=0.1/length(alpha)),border=NA,...)
+      graphics::polygon(c(Lags,rev(Lags)),c(svf.lower(Lags),rev(svf.upper(Lags))),col=scales::alpha(col,0.1/length(alpha)),border=NA,...)
     }
   }
   
@@ -479,7 +510,7 @@ plot.variogram <- function(x, CTMM=NULL, level=0.95, fraction=0.5, col="black", 
       SVF.lower <- SVF * CI.lower(DOF,alpha[j])
       SVF.upper <- SVF * CI.upper(DOF,alpha[j])
       
-      graphics::polygon(c(lag,rev(lag)),c(SVF.lower,rev(SVF.upper)),col=grDevices::adjustcolor(col[[i]],alpha.f=0.1),border=NA)
+      graphics::polygon(c(lag,rev(lag)),c(SVF.lower,rev(SVF.upper)),col=scales::alpha(col[[i]],alpha=0.1),border=NA)
     }
   }
   
@@ -497,12 +528,14 @@ plot.variogram <- function(x, CTMM=NULL, level=0.95, fraction=0.5, col="black", 
     {
       # units conversion
       CTMM[[i]]$sigma <- CTMM[[i]]$sigma/SVF.scale
+      CTMM[[i]]$mu <- CTMM[[i]]$mu/sqrt(SVF.scale)
       if(length(CTMM[[i]]$tau)>0){ CTMM[[i]]$tau <- CTMM[[i]]$tau/lag.scale }
+      CTMM[[i]]$circle <- CTMM[[i]]$circle/lag.scale
       
-      K <- length(CTMM[[i]]$COV.tau[1,])
+      if(CTMM[[i]]$mean=="periodic")
+      { attr(CTMM[[i]]$mean,"par")$P <- attr(CTMM[[i]]$mean,"par")$P/lag.scale }
+      
       scale <- SVF.scale
-      if(K>1){ scale <- c(scale,rep(lag.scale,K-1)) }
-      
       # variance -> diffusion adjustment
       if(length(CTMM[[i]]$tau)>0 && max(CTMM[[i]]$tau)==Inf)
       {
@@ -510,10 +543,17 @@ plot.variogram <- function(x, CTMM=NULL, level=0.95, fraction=0.5, col="black", 
         scale[1] <- scale[1]/lag.scale
       }
       
-      if(K>0)
+      # unit convert uncertainties
+      if(!is.null(CTMM[[i]]$COV))
       {
+        CTMM[[i]]$COV.mu <- CTMM[[i]]$COV.mu/SVF.scale
+        
+        P <- nrow(CTMM[[i]]$COV)
+        if(P>1){ scale <- c(scale,rep(lag.scale,P-1)) }
+      
         scale <- diag(1/scale,length(scale))
-        CTMM[[i]]$COV.tau <- scale %*% CTMM[[i]]$COV.tau %*% scale
+        dimnames(scale) <- dimnames(CTMM[[i]]$COV)
+        CTMM[[i]]$COV <- scale %*% CTMM[[i]]$COV %*% scale
       }
       
       plot.svf(max.lag/lag.scale,CTMM[[i]],alpha=alpha,type=type,col=col[[i]])
@@ -561,24 +601,71 @@ zoom.variogram <- function(x, fraction=0.5, ...)
 ####################################
 # guess variogram model parameters #
 ####################################
-variogram.guess <- function(variogram,range=TRUE)
+variogram.guess <- function(variogram,CTMM=ctmm())
 {
-  n <- length(variogram$lag)
-  
-  sigma <- mean(variogram$SVF[2:n])
-  
-  # peak diffusion rate estimate
-  D <- max((variogram$SVF/variogram$lag)[2:n])
-  
-  # peak curvature estimate
-  v2 <- 2*max((variogram$SVF/variogram$lag^2)[2:n])
-  
-  # position, velocity timescale estimate
-  tau <- c(sigma/D,D/v2)
-  
-  if(!range) { sigma <- D ; tau[1] <- Inf }
-  
-  model <- ctmm(sigma=sigma,tau=tau,info=attr(variogram,"info"))
+  # guess at some missing parameters
+  if(is.null(CTMM$tau) || is.null(CTMM$sigma))
+  {
+    n <- length(variogram$lag)
+    
+    # variance estimate
+    sigma <- mean(variogram$SVF[2:n])
+    
+    # peak curvature estimate
+    # should occur at short lags
+    v2 <- 2*max((variogram$SVF/variogram$lag^2)[2:n])
+    
+    # free frequency
+    Omega2 <- v2/sigma
+    Omega <- sqrt(Omega2)
+    
+    # peak diffusion rate estimate
+    # should occur at intermediate lags
+    # diffusion parameters
+    D <- (variogram$SVF/variogram$lag)[2:n]
+    # index of max diffusion
+    tauD <- which.max(D)
+    # max diffusion
+    D <- D[tauD]
+    # time lag of max diffusion
+    tauD <- variogram$lag[tauD]
+    
+    # average f-rate
+    f <- -log(D/(sigma*Omega))/tauD
+    
+    CPF <- CTMM$CPF
+    if(CPF) # frequency, rate esitmate
+    {
+      omega2 <- Omega2 - f^2
+      if(f>0 && omega2>0)
+      { tau <- c(2*pi/sqrt(omega2),1/f) }
+      else # bad backup estimate
+      {
+        tau <- sqrt(2)/Omega   
+        tau <- c(2*pi*tau , tau)
+      }
+    }
+    else # position, velocity timescale estimate
+    { tau <- c(sigma/D,D/v2)}
+    
+    if(!CTMM$range) { sigma <- D ; tau[1] <- Inf }
+    
+    if(length(CTMM$tau)==0) { CTMM$tau <- tau }
+    
+    # preserve orientation and eccentricity if available
+    if(is.null(CTMM$sigma))
+    { CTMM$sigma <- sigma }
+    else
+    {
+      CTMM$sigma <- CTMM$sigma@par
+      CTMM$sigma[1] <- sigma / cosh(CTMM$sigma[2]/2)
+    }
+  }
+
+  # don't overwrite or lose ctmm parameters not considered here
+  model <- as.list(CTMM) # getDataPart deletes names()
+  model <- c(model,list(info=attr(variogram,"info")))
+  model <- do.call("ctmm",model)
   return(model)
 }
 
@@ -586,53 +673,113 @@ variogram.guess <- function(variogram,range=TRUE)
 ######################################################################
 # visual fit of the variogram
 ######################################################################
-variogram.fit <- function(variogram,range=TRUE,CTMM=NULL,name="variogram.fit.model",...)
+variogram.fit <- function(variogram,CTMM=ctmm(),name="GUESS",fraction=0.5,interactive=TRUE,...)
 {
-  # R CHECK CRAN BUG WORKAROUND
-  tau.v <- NULL
-  store <- NULL ; rm(store)
-  z <- NULL
+  if(interactive && !manipulate::isAvailable()) { interactive <- FALSE }
+  envir <- .GlobalEnv
   
-  m <- 3 # slider length relative to point guestimate
+  # R CHECK CRAN BUG WORKAROUNDS
+  z <- NULL
+  tau1 <- 1
+  tau2 <- 0
+  store <- NULL ; rm(store)
+  
+  m <- 2 # slider length relative to point guestimate
   n <- length(variogram$lag)
   
-  if(is.null(CTMM)) { CTMM <- variogram.guess(variogram,range=range) }
-  
-  sigma <- mean(diag(CTMM$sigma))
-  tau <- CTMM$tau
-  
-  # slider maxima
-  sigma.max <- m*sigma
-  tau.max <- m*tau
+  # fill in missing parameters non-destructively
+  CTMM <- variogram.guess(variogram,CTMM)
+  if(!interactive) { return(CTMM) }
   
   # parameters for logarithmic slider
   b <- 4
   min.step <- 10*variogram$lag[2]/variogram$lag[n]
   
   # manipulation controls
-  manlist <- list(z = manipulate::slider(1+log(min.step,b),1,initial=1+log(0.5,b),label="zoom"),
-                  sigma = manipulate::slider(0,sigma.max,initial=sigma,label="sigma variance (m^2)"),
-                  tau.r = manipulate::slider(0,tau.max[1],initial=tau[1],label="tau position (s)"),
-                  tau.v = manipulate::slider(0,tau.max[2],initial=tau[2],label="tau velocity (s)"),
-                  store = manipulate::button(paste("save to",name))
-  )
+  manlist <- list(z = manipulate::slider(1+log(min.step,b),1,initial=1+log(fraction,b),label="zoom"))
+
+  range <- CTMM$range
+  sigma <- mean(diag(CTMM$sigma))
+  if(range)
+  {
+    sigma.unit <- unit(sigma,"area",concise=TRUE)
+    sigma <- sigma / sigma.unit$scale
+    label <- paste("sigma variance (",sigma.unit$name,")",sep="")
+    manlist <- c(manlist, list(sigma = manipulate::slider(0,m*sigma,initial=sigma,label=label)))
+  }
+  else
+  {
+    sigma.unit <- unit(sigma,"diffusion",concise=TRUE)
+    sigma <- sigma / sigma.unit$scale
+    label <- paste("sigma diffusion (",sigma.unit$name,")",sep="")
+    manlist <- c(manlist, list(sigma = manipulate::slider(0,m*sigma,initial=sigma,label=label)))
+  }
+
+  CPF <- CTMM$CPF
+  tau <- CTMM$tau
+  tau1.unit <- unit(tau[1],"time",2,concise=TRUE)
+  tau2.unit <- unit(tau[2],"time",2,concise=TRUE)
+  tau[1] <- tau[1] / tau1.unit$scale
+  tau[2] <- tau[2] / tau2.unit$scale
+  if(CPF)
+  {
+    label <- paste("tau period (",tau1.unit$name,")",sep="")
+    manlist <- c(manlist, list(tau1 = manipulate::slider(0,m*tau[1],initial=tau[1],label=label)))
+
+    label <- paste("tau decay (",tau2.unit$name,")",sep="")
+    manlist <- c(manlist, list(tau2 = manipulate::slider(0,m*tau[2],initial=tau[2],label=label)))
+
+    tau2 <- NULL # not sure why necessary
+  }
+  else
+  { 
+    label <- paste("tau position (",tau1.unit$name,")",sep="")
+    manlist <- c(manlist, list(tau1 = manipulate::slider(0,m*tau[1],initial=tau[1],label=label)))
+
+    label <- paste("tau velocity (",tau2.unit$name,")",sep="")
+    manlist <- c(manlist, list(tau2 = manipulate::slider(0,m*tau[2],initial=tau[2],label=label)))
+  }
+  
+  circle <- CTMM$circle
+  if(circle)
+  {
+    circle.unit <- unit(circle,"time",concise=TRUE)
+    circle <- circle / circle.unit$scale
+    label <- paste("circulation (",circle.unit$name,")",sep="")
+    c1 <- min(0,m*circle)
+    c2 <- max(0,m*circle)
+    manlist <- c(manlist, list(circle = manipulate::slider(c1,c2,initial=circle,label=label)))
+  }
+  
+  manlist <- c(manlist, list(store = manipulate::button(paste("Save to",name))))
   
   if(!range)
   {
-    manlist[[2]] <- manipulate::slider(0,sigma.max,initial=sigma,label="sigma diffusion (m^2/s)")
-    manlist <- manlist[-3]
-    tau.r <- Inf
+    manlist$tau1 <- NULL
+    tau1 <- Inf
   }
   
+  # non-destructive parameter overwrite
   manipulate::manipulate(
     {
-      CTMM <- ctmm(sigma=sigma,tau=c(tau.r,tau.v),info=attr(variogram,"info"))
-      if(store) { eval(parse(text=paste(name," <<- CTMM"))) } 
-      plot.variogram(variogram,CTMM=CTMM,fraction=b^(z-1),...)
+      # store trace, but preserve angle & eccentricity
+      CTMM$sigma <- CTMM$sigma@par
+      CTMM$sigma[1] <- sigma * sigma.unit$scale / cosh(CTMM$sigma[2]/2)
+
+      CTMM$tau <- c(tau1*tau1.unit$scale, tau2*tau2.unit$scale)
+      if(circle) { CTMM$circle <- circle * circle.unit$scale }
+      
+      CTMM <- as.list(CTMM)
+      CTMM <- c(CTMM,list(info=attr(variogram,"info")))
+      CTMM <- do.call("ctmm",CTMM)
+      fraction <- b^(z-1)
+      if(store) { assign(name,CTMM,envir=envir) }
+      plot.variogram(variogram,CTMM=CTMM,fraction=fraction,...)
     },
     manlist
   )
 }
+
 
 # AVERAGE VARIOGRAMS
 mean.variogram <- function(x,...)

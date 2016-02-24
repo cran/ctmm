@@ -1,14 +1,66 @@
-use scales::alpha for transparency
+ctmm model comparison functions: equivalent (to within uncertainty), similar, ...
+step down on existence test
+ctmm model project or stepup function
+ctmm.select recycle=TRUE default for going down and up in parameters
+k-selection automation, debias needed for large k
+periodic ctmm.select
+
+periodic ctmm.guess, variogram.fit
+
+periodic simulate.telemetry
+
+generalize Gaussian area?
+homerange(method=normal)
+periodic plot.ctmm
+periodic akde
+
+DOF[k,k']?
+
+don't delete mean off of IOU and BM... need that to Krige I think
+IOU with drift not setup correctly
+
+test Tay
+
+model option vignette
+
+UERE estimator
+
+overlap estimator for two models/UDs
+
+AKDE debias: variance = SVF + bandwidth
+
+residual acf versus data acf with correct confidence intervals for no autocorrelation null hypothesis
+
+multi-scale variogram bias correction
+
+Fixed period parameters during fitting?
+
+population fitting without correlation
+
+dof function (data, model)
+vignette: DOF estimation
+
+IID, OU, OUF, (an)isotropic table in vignette
+
+general conversion function for CTMM, data, SVF?
+
+optional columns with NAs are being discarded
+or maybe report if NAs are discarded?
 
 plot.telemetry (with error) opacity tuner or bug fix
+
+More efficient sampler/smoother: 
+store propagator results for all time-lags
+store forecast/concurrent estimates
+call vectorized RNG
+
+Lapack GE solve -> Lapack PO/SY solve.
 
 as.telemetry option: minimal columns, maximum columns, specified columns to keep
 
 Make class representation fully S3 instead of a mixture of S3 & S4
 
-Include telemetry errors in simulation?
-rewrite simulate function to use krige and data template
-fix simulation to include errors
+Include telemetry errors in unconditional simulation?
 krige -> predict
 
 plot.UD without telemetry (generalize)
@@ -18,14 +70,11 @@ overload: print, subset, [, str
 
 MoveStack import to list of telemetry objects
 
-vignette: DOF estimation
-
-variogram: coarsening window method to avoid all bias
+variogram & periodogram: coarsening window method to avoid all bias
 
 proj4: email about making north up
 plot N vector in corner
 
-summary.ctmm CIs on boundary estimates with negative curvature
 profile CIs
 
 akde with user-specified grid (and projection)
@@ -38,7 +87,7 @@ Repeated times in variograms -- account for as error -- fix cap
 
 dplyr, rolling for loops
 
-fix mean parameter for boundary issues
+fixed mean parameter for boundary issues
 
 population fit of list
 population akde of lists

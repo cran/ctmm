@@ -6,12 +6,13 @@ Summarize a range distribution
 }
 \description{ This function returns a list of biologically interesting parameters in human readable format, as derived from an autocorrelated kernel density estimate.}
 \usage{
-\S3method{summary}{UD}(object,level.UD=0.95,...)
+\S3method{summary}{UD}(object,level.UD=0.95,level=0.95,...)
 }
 %- maybe also 'usage' for other objects documented here.
 \arguments{
   \item{object}{ An \code{akde} autocorrelated kernel-density estimate from the output of \code{akde}. }
-  \item{level.UD}{ Confidence level for the home-range area. }
+  \item{level.UD}{ Confidence level for the home-range area. E.g., the 50\% core area. }
+  \item{level}{ Confidence level for the above area estimate. E.g., the 95\% confidence interval of the 50\% core area.}
   \item{...}{Unused options.}
 }
 
@@ -20,7 +21,7 @@ Summarize a range distribution
 \value{
 A \code{matrix} with low, maximum likelihood, and high estimates for the following parameters:
 \describe{
-\item{\code{area}}{The home-range area with fraction of inclusion \code{level.UD}. E.g., the 50\% core home range is estimated with \code{level.UD=0.50}. The confidence intervals reported here reflect the uncertainty in optimal smoothing, and are set by the \code{level} option of \code{akde()} when generating its \code{UD} object. In the case of IID data, where the uncertainty in optimal bandwidth is much smaller than the maximum likelihood optimal bandwidth (depicted by gridlines in \code{plot.telemetry()}), then the confidence intervals reported here are not particularly informative.}
+\item{\code{area}}{The home-range area with fraction of inclusion \code{level.UD}. E.g., the 50\% core home range is estimated with \code{level.UD=0.50}, and 95\% confidence intervals are placed on that area estimate with \code{level=0.95}.}
 }
 }
 
@@ -32,7 +33,9 @@ Rigorous home-range estimation with movement data: A new autocorrelated kernel-d
 
 \author{ C. H. Fleming. }
 
-%\note{ }
+\note{ Prior to \code{ctmm} v0.3.1, AKDEs included only errors due to autocorrelation uncertainty, which are insignificant in cases such as IID data.
+Starting in v0.3.1, \code{akde} calculates an effective sample size \code{DOF.H} and uses this to estimate area uncertainty under a chi-square approxmation.
+ }
 
 %% ~Make other sections like Warning with \section{Warning }{....} ~
 

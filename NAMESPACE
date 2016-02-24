@@ -35,9 +35,11 @@ export(periodogram)
 S3method(plot,periodogram)
 
 #LIKELIHOOD/MODEL FUNCTIONS
-export(ctmm,ctmm.fit,ctmm.loglike,ctmm.select)
+export(ctmm,ctmm.guess,ctmm.fit,ctmm.loglike,ctmm.select)
 S3method(simulate,ctmm)
 S3method(summary,ctmm)
+
+#MEAN FUNCTIONS
 
 #AKDE FUNCTIONS
 export(akde,akde.bandwidth,homerange,raster.UD,SpatialPolygonsDataFrame.UD,writeShapefile.UD)

@@ -4,42 +4,120 @@ new.covm <- methods::setClass("covm", representation(par="numeric",isotropic="lo
 
 #######################################
 # convenience wrapper for new.ctmm
-ctmm <- function(tau=NULL,isotropic=FALSE,error=FALSE,...)
+ctmm <- function(tau=NULL,isotropic=FALSE,range=TRUE,circle=FALSE,CPF=FALSE,error=FALSE,...)
 {
   tau.names <- c("position","velocity","acceleration")
   dim.names <- c("x","y")
   List <- list(...)
+  List <- List[!sapply(List,is.null)]
   
   info <- List$info
   List$info <- NULL
   if(is.null(info)) { info=list() }
   
   List$error <- error
+  List$circle <- circle
   
   # put covariance into universal format
   if(!is.null(List$sigma)) { List$sigma <- covm(List$sigma,isotropic=isotropic) }
   List$isotropic <- isotropic
   
   # label spatial elements
-  if(!is.null(List$mu)) { List$mu <- as.numeric(List$mu) ; names(List$mu) <- dim.names }
-  if(!is.null(List$COV.mu)) { dimnames(List$COV.mu) <- list(dim.names,dim.names) }
+  # FIX THIS
+  #if(!is.null(List$mu)) { List$mu <- as.numeric(List$mu) ; names(List$mu) <- dim.names }
+  #if(!is.null(List$COV.mu)) { dimnames(List$COV.mu) <- list(dim.names,dim.names) }
   
   # label tau elements
   K <- length(tau)
-  if(length(tau)>0)
+  if(K && !CPF)
   {
     tau <- sort(tau,decreasing=TRUE)
     names(tau) <- tau.names[1:K]
     tau <- tau[tau>0]
   }
+  if(!length(tau)) { tau <- NULL } # NULL, NA, integer(0), ...
+  List$CPF <- CPF
+  if(CPF && length(tau)) { names(tau) <- c("period","decay") }
   List$tau <- tau
-  # label tau covariance
-  tau.names <- c("area",names(tau))
-  if(!is.null(List$COV.tau)) { dimnames(List$COV.tau) <- list(tau.names,tau.names) }
+  
+  # label parameter covariance matrix
+  cov.names <- c("area",names(tau))
+  if(circle) { cov.names <- c(cov.names,"circle") }
+  # List$COV can resolve to List$COV.mu apparently
+  if(!is.null(List[["COV"]])) { dimnames(List$COV) <- list(cov.names,cov.names) }
+  
+  if(length(tau))
+  {
+    if(tau[1]==Inf)
+    { range <- FALSE }
+    else
+    { range <- TRUE }
+  }  
+  List$range <- range
+
+  if(!range & circle) { stop("Inconsistent model options: range=FALSE, circle=TRUE.") }
+  
+  # default mean function
+  if(is.null(List$mean)) { List$mean <- "stationary" }
+  else if(List$mean=="periodic")
+  {
+    P <- attr(List$mean,"par")$P
+    if(is.null(P)) { attr(List$mean,"par")$P <- 24*60^2 }
+    # default k via Nyquist needs data
+  }
+  
+  # name mean parameters
+  if(!is.null(List$mu))
+  {
+    # format simple-style stationary mean properly
+    List$mu <- rbind(List$mu)
+    colnames(List$mu) <- c("x","y")
+    
+    if(List$mean=="periodic")
+    {
+       k <- (nrow(List$mu)-1)/2
+       K <- 1:k
+       K <- c( paste("cos",K) , paste("sin",K) )
+       K <- K[order(sequence(c(k,k)))]
+       K <- c("const",K)
+       rownames(List$mu) <- K
+    }
+    
+    if(List$mean=="polynomial")
+    {
+      k <- nrow(List$mu)-1
+      K <- 0:k
+      rownames(List$mu) <- K  
+    }
+
+    # List$COV can resolve to List$COV.mu apparently
+    if(!is.null(List[["COV.mu"]]))
+    {
+      if(length(dim(List$DOF.mu))==2)
+      { dimnames(List$DOF.mu) <- list(dim.names,dim.names) }
+      else if(length(dim(List$DOF.mu))==4)
+      { dimnames(List$DOF.mu) <- list(dim.names,K,K,dim.names) }
+      
+      if(length(dim(List$COV.mu))==2)
+      { dimnames(List$COV.mu) <- list(dim.names,dim.names) }
+      else
+      { dimnames(List$COV.mu) <- list(dim.names,K,K,dim.names) }
+    }
+  }
   
   result <- new.ctmm(List,info=info)
   
   return(result)
+}
+#print.ctmm <- function(x,...) { print.listof(x,...) }
+
+ctmm.ctmm <- function(CTMM)
+{
+  List <- methods::getDataPart(CTMM)
+  names(List) <- names(CTMM) # bug workaround
+  List$info <- attr(CTMM,"info")
+  CTMM <- do.call(ctmm,List)
+  return(CTMM)
 }
 
 # 2D covariance matrix universal format
@@ -180,6 +258,11 @@ ctmm.prepare <- function(data,CTMM)
   if(K==0) { K <- 1 ; CTMM$tau <- 0 }
   
   CTMM$range <- range
+  
+  # evaluate mean function for this data set if no vector is provided
+  if(is.null(CTMM$mean.vec))
+  { CTMM$mean.vec <- call.mean(CTMM,data$t) }
+  
   return(CTMM)
 }
 
@@ -201,6 +284,9 @@ ctmm.repair <- function(CTMM)
     CTMM$COV.mu <- NULL
     CTMM$DOF.mu <- NULL
   }
+  
+  # erase evaluated mean vector from ctmm.prepare
+  CTMM$mean.vec <- NULL
   
   return(CTMM)
 }
@@ -224,13 +310,21 @@ error.prepare <- function(DATA,CTMM)
   return(error)
 }
 
+# degree of continuity in the model
+continuity <- function(CTMM)
+{
+  K <- sum(CTMM$tau > 0)
+  return(K)
+}
+
 ###############################
 # Propagator/Green's function and Two-time correlation from Langevin equation for Kalman filter and simulations
 langevin <- function(dt,CTMM)
 {
   tau <- CTMM$tau
+  CPF <- CTMM$CPF
   sigma <- methods::getDataPart(CTMM$sigma)
-  K <- length(tau)
+  K <- continuity(CTMM)
   
   if(K==0)
   {
@@ -245,10 +339,18 @@ langevin <- function(dt,CTMM)
   }
   else if(K==2)
   {
-    # representation good when tau are close
     f <- 1/tau
-    Omega2 <- 1/prod(tau)
-    T <- sum(tau)
+    
+    if(CPF)
+    {
+      nu <- 2*pi*f[1]
+      f <- f[2]
+      Omega2 <- f^2 + nu^2
+    }
+    else
+    { Omega2 <- 1/prod(tau) }
+
+    T <- 2*mean(f)/Omega2
     
     if(dt==Inf) # make this numerically relative in future
     {
@@ -257,27 +359,24 @@ langevin <- function(dt,CTMM)
     }
     else
     {
-      if(tau[1]>tau[2])
+      if(CPF)
+      {
+        Exp <- exp(-f*dt)
+        SinE <- sin(nu*dt)*Exp
+        CosE <- cos(nu*dt)*Exp
+        
+        c0 <- CosE + (f/nu)*SinE
+        c1 <- -(Omega2/nu)*SinE
+        c2 <- -Omega2*(CosE - (f/nu)*SinE)
+      }
+      else
       {
         Exp <- exp(-dt/tau)/diff(tau)
         c0 <- diff(Exp*tau)
         c1 <- -diff(Exp)
         c2 <- diff(Exp/tau)
       }
-      else
-      {
-        nu <- (f[1]-f[2])/2
-        f <- (f[1]+f[2])/2
-        
-        Exp <- exp(-f*dt)
-        SinhE <- sinh(nu*dt)*Exp
-        CoshE <- cosh(nu*dt)*Exp
-        
-        c0 <- CoshE + (f/nu)*SinhE
-        c1 <- -(Omega2/nu)*SinhE
-        c2 <- -Omega2*(CoshE - (f/nu)*SinhE)
-      }
-        
+      
       Green <- rbind( c(c0,-c1/Omega2) , c(c1,-c2/Omega2) )
       Sigma <- -T*c1^2  #off-diagonal term
       Sigma <- rbind( c(1,0)-c(c0^2+c1^2/Omega2,Sigma) , c(0,Omega2)-c(Sigma,c1^2+c2^2/Omega2) )
@@ -292,19 +391,21 @@ langevin <- function(dt,CTMM)
 # Kalman filter/smoother for matrix P operator and multiple mean functions
 # this is a lower level function
 # more for generalizability/readability than speed at this point
-kalman <- function(z,dt,CTMM,error=rep(0,nrow(z)),smooth=FALSE)
+kalman <- function(z,u,dt,CTMM,error=rep(0,nrow(z)),smooth=FALSE,sample=FALSE)
 {
   n <- nrow(z)
   DATA <- 1:ncol(z)
   
-  # stationary mean function
-  u <- array(1,n)
+  # glob data and mean functions together for Kalman filter
   z <- cbind(z,u)
   VEC <- ncol(z)
   
+  # indices of mean functions
+  MEAN <- (last(DATA)+1):VEC
+
   tau <- CTMM$tau
   K <- length(tau)  # dimension of hidden state per spatial dimension
-  
+
   # observed dimensions
   OBS <- 1
   Id <- diag(OBS)
@@ -363,32 +464,43 @@ kalman <- function(z,dt,CTMM,error=rep(0,nrow(z)),smooth=FALSE)
     }
   }
   
-  # Profile stationary mean
-  mu <- sapply(1:VEC,function(i){sum(zRes[,,i]*zRes[,,VEC]/sRes)})
-  W <- mu[VEC]
-  mu <- mu[DATA]/W
-  
+  # general quadratic form, tracing over times
+  # hard-code weights for location observation only
+  M <- Adj(zRes[,1,]) %*% (zRes[,1,]/sRes[,1,1])
+
+  # estimate mean parameter
+  W <- as.matrix(M[MEAN,MEAN])
+  mu <- solve(W) %*% M[MEAN,DATA]
+
   # returned profiled mean
-  if(!smooth)
+  if(!smooth && !sample)
   {
-    # Detrend mean
-    zRes[,1,DATA] <- zRes[,1,DATA] - (zRes[,1,VEC] %o% mu)
+    # hard coded for position observations
+    sigma <- (M[DATA,DATA] - (Adj(mu) %*% W %*% mu))/n
+
+    # log det autocorrelation matrix == trace log autocorrelation matrix
+    logdet <- sum(log(sRes))
     
-    return(list(W=W,mu=mu,zRes=zRes,sRes=sRes))
+    return(list(mu=mu,W=W,sigma=sigma,logdet=logdet))
   }
-  
-  # NOW RUN SMOOTHER
-  # THIS NEEDS TO BE RE-WRITTEN FROM ERROR CHANGES
-  
   # delete residuals
   rm(zRes,sRes)
   
+  #####################
+  # KALMAN SMOOTHER
+  #####################
   # Finish detrending the effect of a stationary mean
-  MEAN <- zCon[,,VEC] ; dim(MEAN) <- c(n,K)
-  zCon[,,DATA] <- zCon[,,DATA,drop=FALSE] - (MEAN %o% mu)
-  MEAN <- zFor[,,VEC] ; dim(MEAN) <- c(n,K)
-  zFor[,,DATA] <- zFor[,,DATA,drop=FALSE] - (MEAN %o% mu)
+  MU <- zFor[,,MEAN]
+  dim(MU) <- c(n*K,length(MEAN))
+  MU <- MU %*% mu
+  dim(MU) <- c(n,K,length(DATA))
+  zFor[,,DATA] <- zFor[,,DATA,drop=FALSE] - MU
   # there has to be a better way to do this?
+  MU <- zCon[,,MEAN]
+  dim(MU) <- c(n*K,length(MEAN))
+  MU <- MU %*% mu
+  dim(MU) <- c(n,K,length(DATA))
+  zCon[,,DATA] <- zCon[,,DATA,drop=FALSE] - MU
   # why does R drop dimensions so randomly?
 
   # delete u(t)
@@ -408,13 +520,20 @@ kalman <- function(z,dt,CTMM,error=rep(0,nrow(z)),smooth=FALSE)
     
     # next time's propagator if necessary
     if(dt[i] != dt[i+1])
+    { Green <- langevin(dt=dt[i],CTMM=CTMM)$Green }
+    
+    #################
+    # RANDOM SAMPLER
+    #################
+    if(sample)
     {
-      Green <- langevin(dt=dt[i],CTMM=CTMM)$Green
+      zCon[i,,] <- sapply(DATA,function(d){MASS::mvrnorm(mu=zCon[i,,d],Sigma=sCon[i,,])})
+      sCon[i,,] <- array(0,c(K,K))
     }
   }
   
   # restore stationary mean to locations only
-  zCon[,1,] <- zCon[,1,] + (u %o% mu)
+  zCon[,1,] <- zCon[,1,] + (cbind(u) %*% mu)
   
   zname <- c("position")
   if(K>1) { zname <- c(zname,"velocity") }
@@ -432,119 +551,204 @@ kalman <- function(z,dt,CTMM,error=rep(0,nrow(z)),smooth=FALSE)
 ####################################
 # log likelihood function
 ####################################
-ctmm.loglike <- function(data,CTMM=NULL,verbose=FALSE)
+ctmm.loglike <- function(data,CTMM=ctmm(),verbose=FALSE)
 {
   n <- length(data$t)
   
   # prepare model for numerics
   CTMM <- ctmm.prepare(data,CTMM)
   
-  tau <- CTMM$tau
-  K <- length(tau)  # dimension of hidden state per spatial dimension
-  
-  sigma <- CTMM$sigma
   range <- CTMM$range
-  
-  ###DECONSTRUCT SIGMA AND TRANSFORM DATA
-  
-  if(is.null(CTMM$isotropic)) { isotropic <- FALSE }
-  else { isotropic <- CTMM$isotropic }
-  
-  t <- data$t
-  x <- data$x
-  y <- data$y
-  
-  n <- length(t)
-  
-  # time lags
-  dt <- c(Inf,diff(t))
-  
-  error <- error.prepare(data,CTMM)
-  
-  # do we have to diagonalize the variance?
-  if(!CTMM$error)
+  isotropic <- CTMM$isotropic
+
+  sigma <- CTMM$sigma
+  if(!is.null(sigma))
   {
-    CTMM$sigma <- 1
-    KALMAN <- kalman(cbind(x,y),dt=dt,CTMM=CTMM,error=error)
-    
-    zRes <- KALMAN$zRes
-    sRes <- KALMAN$sRes
-    ML.sigma <- mean(zRes[,,1]*zRes[,,2]/sRes)
-    ML.sigma <- cbind( c( mean(zRes[,,1]^2/sRes) , ML.sigma) , c(ML.sigma , mean(zRes[,,2]^2/sRes)) )
-    
-    # profile variance if sigma unspecified
-    if(is.null(sigma)) { sigma <- covm(ML.sigma,isotropic=isotropic) }
-    
-    mu <- KALMAN$mu
-    DOF.mu <- KALMAN$W
-    COV.mu <- methods::getDataPart(sigma)/DOF.mu
-    
-    loglike <- -sum(log(sRes)) -(n/2)*log(det(2*pi*sigma)) - (n/2)*sum(diag(ML.sigma %*% solve(sigma)))
-  }
-  else if(CTMM$isotropic)
-  {
-    CTMM$sigma <- sigma@par[1]
-    KALMAN <- kalman(cbind(x,y),dt=dt,CTMM=CTMM,error=error)
-    
-    mu <- KALMAN$mu
-    COV.mu <- diag(1/KALMAN$W,2)
-    DOF.mu <- KALMAN$W*CTMM$sigma
-    
-    zRes <- KALMAN$zRes
-    sRes <- KALMAN$sRes
-    ML.sigma <- mean(c(zRes[,,1]^2/sRes, zRes[,,2]^2/sRes))
-    
-    loglike <- -sum(log(sRes)) -(n)*log(2*pi) - (n)*ML.sigma
+    area <- sigma@par[1]
+    ecc <- sigma@par[2]
+    theta <- sigma@par[3]
   }
   else
   {
-    #diagonalize data and then run two 1D Kalman filters with separate means
-    z <- rbind(x,y)
-    GM <- sigma@par[1]
-    e <- sigma@par[2]
-    theta <- sigma@par[3]
-    R <- rotate(-theta)
-    z <- R %*% z
+    area <- NA
+    ecc <- 0
+    theta <- 0
+  }
+  
+  circle <- CTMM$circle
+  if(circle) { circle <- 2*pi/circle }
+  if(abs(circle) == Inf) { circle <- FALSE }
+
+  n <- length(data$t)
+
+  t <- data$t
+  # time lags
+  dt <- c(Inf,diff(t))
+  
+  # data z and mean vector u
+  z <- cbind(data$x,data$y)
+  u <- CTMM$mean.vec
+  M <- ncol(u) # number of linear parameters per spatial dimension
+
+  error <- error.prepare(data,CTMM)
+
+  # do we need to orient the data along the major an minor axes of sigma
+  ROTATE <- !isotropic && (CTMM$error || circle)
+  if(ROTATE) { z <- z %*% t(rotate(-theta)) }
+  
+  if(circle) # ONE KALMAN FILTER WITH COMPLEX SIGNAL
+  {
+    # proportional standardization from ellipse to circle
+    if(ecc)
+    {
+      z[,1] <- z[,1] * exp(-ecc/4)
+      z[,2] <- z[,2] * exp(+ecc/4)
+    }
+    z <- cbind(z[,1] + 1i*z[,2])
+    
+    # corotating frame
+    R <- exp(-1i*circle*(t-t[1]))
+    z <- R * z
+    u <- R * u
+    
+    if(!CTMM$error)
+    {
+      CTMM$sigma <- 1
+      KALMAN <- kalman(z,u,dt=dt,CTMM=CTMM,error=error)
+      
+      ML.area <- as.numeric(Re(KALMAN$sigma))/2
+      # profile variance if unspecified
+      if(is.na(area))
+      { 
+        area <- ML.area
+        sigma <- covm(c(area,ecc,theta),isotropic=isotropic)
+      }
+      
+      COV.mu <- area * solve(KALMAN$W)
+      DOF.mu <- KALMAN$W
+      
+      loglike <- -KALMAN$logdet -(n)*log(2*pi*area) - (n)*(ML.area/area)
+    }
+    else
+    {
+      CTMM$sigma <- area
+      KALMAN <- kalman(z,u,dt=dt,CTMM=CTMM,error=error)
+      
+      R.sigma <- KALMAN$sigma
+      
+      COV.mu <- solve(KALMAN$W)
+      DOF.mu <- area * KALMAN$W
+      
+      loglike <- -KALMAN$logdet - (n)*log(2*pi*1) - (n/2)*R.sigma
+    }
+
+    loglike <- Re(loglike)
+    # real array formatting
+    mu <- KALMAN$mu
+    mu <- cbind(Re(mu),Im(mu))
+    # complex correlations are x-y correlations
+    COV.mu <- array(c(Re(COV.mu),-Im(COV.mu),Im(COV.mu),Re(COV.mu)),c(M,M,2,2))
+    DOF.mu <- array(c(Re(DOF.mu),-Im(DOF.mu),Im(DOF.mu),Re(DOF.mu)),c(M,M,2,2))
+    
+    # de-standardization
+    R <- exp(c(+1,-1)*ecc/4)
+    mu <- t(R * t(mu))
+    COV.mu <- array(COV.mu,c(M^2*2,2))
+    COV.mu <- t(R * t(COV.mu))
+    COV.mu <- array(COV.mu,c(M,M,2,2))
+    COV.mu <- aperm(COV.mu,c(1,2,4,3))
+    COV.mu <- array(COV.mu,c(M^2*2,2))
+    COV.mu <- t(R * t(COV.mu))
+    COV.mu <- array(COV.mu,c(M,M,2,2))
+  }
+  else if(!CTMM$error) # ONE KALMAN FILTER WITH NO ERROR
+  {
+    CTMM$sigma <- 1
+    KALMAN <- kalman(z,u,dt=dt,CTMM=CTMM,error=error)
+    
+    ML.sigma <- KALMAN$sigma
+    # profile covariance if sigma unspecified
+    if(is.null(sigma)) { sigma <- covm(ML.sigma,isotropic=isotropic) }
+    
+    mu <- KALMAN$mu
+    COV.mu <- solve(KALMAN$W) %o% sigma
+    DOF.mu <- KALMAN$W %o% diag(2)
+    
+    loglike <- -KALMAN$logdet -(n/2)*log(det(2*pi*sigma)) - (n/2)*sum(diag(ML.sigma %*% solve(sigma)))
+  }
+  else if(isotropic) # ONE KALMAN FILTER WITH ERROR
+  {
+    CTMM$sigma <- area
+    KALMAN <- kalman(z,u,dt=dt,CTMM=CTMM,error=error)
+    
+    mu <- KALMAN$mu
+    COV.mu <- solve(KALMAN$W) %o% diag(2)
+    DOF.mu <- (area * KALMAN$W) %o% diag(2)
+    
+    # includes error and standardization
+    R.sigma <- KALMAN$sigma
+    R.sigma <- mean(diag(R.sigma))
+    
+    loglike <- -KALMAN$logdet -(n)*log(2*pi*1) -(n)*R.sigma
+  }
+  else # TWO KALMAN FILTERS WITH ERROR
+  {
+    # eigen variances
+    SIGMA <- area * exp(c(+1,-1)*ecc/2)
     
     # major axis likelihood
-    CTMM$sigma <- GM * exp(+e/2)
-    KALMAN <- kalman(cbind(z[1,]),dt=dt,CTMM=CTMM,error=error)
-
-    zRes <- KALMAN$zRes
-    sRes <- KALMAN$sRes
-    ML.sigma <- mean(zRes[,,1]^2/sRes)
-
-    mu <- KALMAN$mu
-    COV.mu <- 1/KALMAN$W
-    DOF.mu <- KALMAN$W*CTMM$sigma
-    
-    loglike <- -(1/2)*sum(log(sRes)) -(n/2)*log(2*pi) - (n/2)*ML.sigma
+    CTMM$sigma <- SIGMA[1]
+    KALMAN1 <- kalman(cbind(z[,1]),u,dt=dt,CTMM=CTMM,error=error)
     
     # minor axis likelihood
-    CTMM$sigma <- GM * exp(-e/2)
-    KALMAN <- kalman(cbind(z[2,]),dt=dt,CTMM=CTMM,error=error)
-
-    zRes <- KALMAN$zRes
-    sRes <- KALMAN$sRes
-    ML.sigma <- c(ML.sigma,mean(zRes[,,1]^2/sRes))
-
-    mu <- c(mu,KALMAN$mu)
-    COV.mu <- c(COV.mu,1/KALMAN$W)
-    DOF.mu <- c(DOF.mu,KALMAN$W*CTMM$sigma)
-
-    loglike <- loglike -(1/2)*sum(log(sRes)) -(n/2)*log(2*pi) - (n/2)*ML.sigma[2]
+    CTMM$sigma <- SIGMA[2]
+    KALMAN2 <- kalman(cbind(z[,2]),u,dt=dt,CTMM=CTMM,error=error)
     
-    # these quantities are diagonalized matrices
-    COV.mu <- diag(COV.mu,2)
-    DOF.mu <- diag(DOF.mu,2)
+    logdet <- KALMAN1$logdet + KALMAN2$logdet
+    R.sigma <- KALMAN1$sigma + KALMAN2$sigma # standardized residual variances
     
-    # transform results back
-    R <- rotate(+theta)
-    mu <- R %*% mu
-    COV.mu <- R %*% COV.mu %*% t(R)
-    DOF.mu <- R %*% DOF.mu %*% t(R)
+    mu <- cbind(KALMAN1$mu,KALMAN2$mu)
+    COV.mu <- array(c(solve(KALMAN1$W),diag(0,M),diag(0,M),solve(KALMAN2$W)),c(M,M,2,2)) # -1/Hessian
+    DOF.mu <- array(c(SIGMA[1]*KALMAN1$W,diag(0,M),diag(0,M),SIGMA[2]*KALMAN2$W),c(M,M,2,2))
+
+    loglike <- -(1/2)*logdet - (n)*log(2*pi*1) - (n/2)*R.sigma
   }
+  
+  # restructure indices from m,n,x,y to x,m,n,y
+  COV.mu <- aperm( COV.mu , c(3,1,2,4))
+  DOF.mu <- aperm( DOF.mu , c(3,1,2,4))
+  
+  # transform results back
+  if(ROTATE)
+  {
+    R <- rotate(+theta)
+    
+    mu <- mu %*% t(R)
+    
+    COV.mu <- array(COV.mu,c(2,M^2*2))
+    DOF.mu <- array(DOF.mu,c(2,M^2*2))
+    
+    COV.mu <- R %*% COV.mu
+    DOF.mu <- R %*% DOF.mu
+    
+    COV.mu <- array(COV.mu,c(2*M^2,2))
+    DOF.mu <- array(DOF.mu,c(2*M^2,2))
 
+    COV.mu <- COV.mu %*% t(R)
+    DOF.mu <- DOF.mu %*% t(R)
+    
+    COV.mu <- array(COV.mu,c(2,M,M,2))
+    DOF.mu <- array(DOF.mu,c(2,M,M,2))
+  }
+  
+  # should I drop the indices in COV.mu and DOF.mu if possible ?
+  COV.mu <- drop(COV.mu)
+  DOF.mu <- drop(DOF.mu)
+  
+  # isotropic reduction if possible
+  if(length(dim(DOF.mu))==2)
+  { if(DOF.mu[1,1]==DOF.mu[2,2] && DOF.mu[1,2]==0) { DOF.mu <- mean(diag(DOF.mu)) } }
+    
   if(verbose)
   {
     # assign variables
@@ -561,6 +765,7 @@ ctmm.loglike <- function(data,CTMM=NULL,verbose=FALSE)
     CTMM$loglike <- loglike
     attr(CTMM,"info") <- attr(data,"info")
 
+    CTMM <- ctmm.ctmm(CTMM)
     return(CTMM)
   }
   else  { return(loglike) }
@@ -569,48 +774,85 @@ ctmm.loglike <- function(data,CTMM=NULL,verbose=FALSE)
 
 ###########################################################
 # FIT MODEL WITH LIKELIHOOD FUNCTION (convenience wrapper to optim)
-ctmm.fit <- function(data,CTMM=ctmm(),control=list(),...)
+ctmm.fit <- function(data,CTMM=ctmm(),debias=TRUE,control=list(maxit=.Machine$integer.max),...)
 {
+  # basic info
   n <- length(data$t)
   tau <- CTMM$tau
+  K <- length(tau)
+  CPF <- CTMM$CPF
+  circle <- CTMM$circle
   sigma <- CTMM$sigma
+  if(!is.null(sigma)) { sigma <- sigma@par }
   CTMM$mu <- NULL # can always profile mu analytically
-
   isotropic <- CTMM$isotropic
   error <- CTMM$error
-  
-  K <- length(tau)
-  
-  # extra conditions for endlessly diffusing processes
-  if(K>0 && tau[1]==Inf){ range <- FALSE }
-  else { range <- TRUE }
+  range <- CTMM$range
 
+  # erase previous fitting info if present
+  CTMM$COV <- NULL
+  CTMM$COV.mu <- NULL
+  CTMM$DOF.mu <- NULL
+    
+  # evaluate mean function for this data set if no vector is provided
+  if(is.null(CTMM$mean.vec))
+  { CTMM$mean.vec <- call.mean(CTMM,data$t) }
+  
+  # CAVEATS
+  if(error && circle && !isotropic) { warning("error==TRUE & circle==TRUE & isotropic==FALSE distorts error circle for speed.") }
+  if(circle && !range) { stop("circle==TRUE & range==FALSE are incompatible.") }
+  
   # parameter indices for non-profiled parameters that we have to numerically optimize
-  if(error>0) 
-  { SIGMA <- 1:(if(isotropic){1}else{3}) }
+  # PARAMETERS THAT WE MAY OR MAY NOT DIFFERENTIATE WRT
+  if(error) # profile 1-3 parameters
+  {
+    SIGMA <- 1:(if(isotropic){1}else{3})
+    SIGMAV <- 1:(if(isotropic){1}else{3})
+  }
+  else if(circle) # profile 0-2 parameters
+  {
+    SIGMA <- (if(isotropic){NULL}else{1:2})
+    SIGMAV <- (if(isotropic){NULL}else{2:3})
+  }
   else
   { SIGMA <- NULL } 
 
+  # PARAMETERS THAT WE WILL DIFFERENTIATE WRT
+  NAMES <- NULL
   TAU <- NULL
+  CIRCLE <- NULL
   calPARS <- function()
   {
-    if(K+range==1) # UM, BM
+    NAMES <<- "sigma"
+    
+    if(K+range==1) # IID, BM
     { TAU <<- NULL }
     else
-    { TAU <<- length(SIGMA) + 1:(K-(1-range)) }
+    {
+      NAMES <<- c(NAMES,paste("tau",names(tau)[(1+(1-range)):K]))
+      TAU <<- length(SIGMA) + 1:(K-(1-range))
+    }
+    
+    if(circle)
+    {
+      NAMES <<- c(NAMES,"circle")
+      CIRCLE <<- length(SIGMA) + length(TAU) + 1 
+    }
   }
   calPARS()
 
+  # PARAMETERS THAT WE WILL NOT DIFFERENTIATE WRT
   # If error is an error estimate rather than TRUE, and if there is no error annotated, then we will fit error
   if(error>0 && !any(data$error>0))
-  { ERROR <- length(SIGMA) + length(TAU) + 1 }
+  { ERROR <- length(SIGMA) + length(TAU) + length(CIRCLE) + 1 }
   else
   { ERROR <- NULL }
   
   # numerically fit parameters
-  PARS <- length(SIGMA) + length(TAU) + length(ERROR)
+  PARS <- length(SIGMA) + length(TAU) + length(CIRCLE) + length(ERROR)
   # degrees of freedom, including the mean, variance/covariance, tau, and error model
-  k <- (if(range){2}else{0}) + (if(isotropic){1}else{3}) + length(TAU) + length(ERROR)
+  k.mean <- ncol(CTMM$mean.vec)
+  k <- 2*(k.mean - (if(range){0}else{1})) + (if(isotropic){1}else{3}) + length(TAU) + length(CIRCLE) + length(ERROR)
   
   # OPTIMIZATION GUESS (pars)
   # also construct reasonable parscale
@@ -624,15 +866,25 @@ ctmm.fit <- function(data,CTMM=ctmm(),control=list(),...)
     if(length(SIGMA)>0)
     {
       # need some initial guess...
-      if(is.null(sigma)) { sigma <<- covm(stats::cov(cbind(data$x,data$y)),isotropic=isotropic) }
-      pars <<- pars.covm(sigma)[SIGMA]
-      parscale <<- c(pars[1],1,pi/4)[SIGMA]
+      if(is.null(sigma)) { sigma <<- covm(stats::cov(cbind(data$x,data$y)),isotropic=isotropic)@par }
+      pars <<- sigma[SIGMAV]
+      parscale <<- c(sigma[1],1,pi/4)[SIGMAV]
+      
+      # can we profile the variance, if so delete the guess
+      if(!error) { sigma[1] <<- NA }
     }
     
     if(length(TAU)>0)
     {
       pars <<- c(pars,pars.tauv(tau))
       parscale <<- c(parscale,pars[TAU])
+    }
+
+    # use 1/T as circulation parameter
+    if(length(CIRCLE)>0)
+    {
+      pars <<- c(pars,1/circle)
+      parscale <<- c(parscale,1/abs(circle))
     }
     
     if(length(ERROR)>0)
@@ -654,16 +906,13 @@ ctmm.fit <- function(data,CTMM=ctmm(),control=list(),...)
     else
     {
       # write over inherited sigma with any specified parameters
-      sigma <- pars.covm(sigma)
-      sigma[SIGMA] <- p[SIGMA]
+      sigma[SIGMAV] <- p[SIGMA]
       
       # enforce positivity
-      sigma[SIGMA[-3]] <- abs(sigma[SIGMA[-3]])
-      
-      sigma <- covm(sigma,isotropic)
+      sigma[-3] <- abs(sigma[-3])
       
       # for some reason optim jumps to crazy big parameters
-      if(sigma@par[1]*exp(abs(sigma@par[2])/2)==Inf) { return(Inf) }
+      if(!is.na(sigma[1]) && sigma[1]*exp(abs(sigma[2])/2)==Inf) { return(Inf) }
     }
     
     # fix tau from par
@@ -678,11 +927,15 @@ ctmm.fit <- function(data,CTMM=ctmm(),control=list(),...)
       
       # enforce positivity
       tau <- abs(tau)
-      tau <- sort(tau,decreasing=TRUE)
+      
+      if(!CPF) { tau <- sort(tau,decreasing=TRUE) }
       
       if(!range) { tau <- c(Inf,tau) }
     }
     
+    # fix circulation from par
+    if(length(CIRCLE)>0) { circle <- 1/p[CIRCLE] }
+
     # fix error from par
     if(length(ERROR)>0)
     {
@@ -692,7 +945,12 @@ ctmm.fit <- function(data,CTMM=ctmm(),control=list(),...)
       error <- abs(error)
     }
 
-    CTMM <- ctmm(tau=tau,sigma=sigma,isotropic=isotropic,error=error)
+    # overwrite modified parameters inside this function's environment only
+    CTMM$tau <- tau
+    CTMM$circle <- circle
+    CTMM$sigma <- covm(sigma,isotropic=isotropic)
+    CTMM$error <- error
+    
     return(-ctmm.loglike(data,CTMM))
   }
   
@@ -706,7 +964,7 @@ ctmm.fit <- function(data,CTMM=ctmm(),control=list(),...)
     else { DOF <- n-1 }
     
     GM <- CTMM$sigma@par[1]
-    CTMM$COV.tau <- rbind(if(isotropic) { GM^2/DOF } else { GM^2/DOF/2 })
+    CTMM$COV <- rbind(if(isotropic) { GM^2/DOF } else { GM^2/DOF/2 })
   }
   else # all further cases require optimization
   {
@@ -717,7 +975,7 @@ ctmm.fit <- function(data,CTMM=ctmm(),control=list(),...)
       ATTEMPT <- stats::optim(par=pars,fn=fn,method="Brent",lower=0,upper=10*pars)
       RESULT <- rbind(RESULT,c(ATTEMPT$par,ATTEMPT$value))
       # log scale backup that can't capture zero boundary
-      ATTEMPT <- stats::nlm(function(p){f=fn(pars*exp(p))},p=0,stepmax=log(10))
+      ATTEMPT <- stats::nlm(function(p){f=fn(pars*exp(p))},p=0,stepmax=log(10),iterlim=control$maxit)
       RESULT <- rbind(RESULT,c(pars*exp(ATTEMPT$estimate),ATTEMPT$minimum))
       # choose the better estimate
       MIN <- sort(RESULT[,2],index.return=TRUE)$ix[1]
@@ -733,15 +991,22 @@ ctmm.fit <- function(data,CTMM=ctmm(),control=list(),...)
     tau <- abs(pars[TAU])
     if(!range){ tau <- c(Inf,tau) }
     
-    # save sigma if numerically optimized
-    if(error>0)
+    # save circulation if numerically optimized
+    if(circle)
     {
-      sigma <- pars[SIGMA]
-      # expand to all parameters
-      sigma <- pars.covm(covm(sigma))
+      if(pars[CIRCLE])
+      { circle <- 1/pars[CIRCLE] }
+      else
+      { circle <- FALSE }
+      # In case ML circulation is zero, deactivate it in the model
+    }
+    
+    # save sigma if numerically optimized
+    if(length(SIGMA))
+    {
+      sigma[SIGMAV] <- pars[SIGMA]
       # enforce positivity
       sigma[-3] <- abs(sigma[-3])
-      sigma <- covm(sigma,isotropic=isotropic)
     }
     else
     { sigma <- NULL }
@@ -750,22 +1015,54 @@ ctmm.fit <- function(data,CTMM=ctmm(),control=list(),...)
     if(length(ERROR)>0)
     { error <- abs(pars[ERROR]) }
     
+    CTMM$tau <- tau
+    CTMM$circle <- circle
+    CTMM$sigma <- covm(sigma,isotropic=isotropic)
+    CTMM$error <- error
+    
     # verbose ML information
-    CTMM <- ctmm(tau=tau,sigma=sigma,isotropic=isotropic,error=error)
     CTMM <- ctmm.loglike(data,CTMM,verbose=TRUE)
-    sigma <- CTMM$sigma
     
     # calculate area-tau uncertainty
+    sigma <- CTMM$sigma@par
     SIGMA <- 1
+    SIGMAV <- 1
     calPARS()
     ERROR <- NULL
     calpars()
-    COV.tau <- numDeriv::hessian(fn,pars)
-    COV.tau <- PDsolve(COV.tau) # robust inverse
-    CTMM$COV.tau <- COV.tau
+    
+    hess <- numDeriv::hessian(fn,pars)
+    grad <- numDeriv::grad(fn,pars,side=sign(pars))
+    # robust covariance calculation
+    CTMM$COV <- cov.loglike(hess,grad)
+    # convert from circulation frequency to circulation period
+    if(circle)
+    { 
+      g <- -circle^2
+      CTMM$COV[CIRCLE,] <- g*CTMM$COV[CIRCLE,]
+      CTMM$COV[,CIRCLE] <- g*CTMM$COV[,CIRCLE]
+    }
+    dimnames(CTMM$COV) <- list(NAMES,NAMES)
   }
   
+  CTMM$mean.vec <- NULL
+  
   CTMM$AICc <- (2*k-2*CTMM$loglike) + 2*k*(k+1)/(n-k-1)
+
+  # fix for range==FALSE
+  if(debias)
+  {
+    A <- n/(n-k.mean)
+    
+    sigma <- methods::getDataPart(CTMM$sigma)
+    sigma <- A * sigma
+    CTMM$sigma <- covm(sigma)
+    
+    CTMM$COV.mu <- A^2 * CTMM$COV.mu
+    CTMM$COV[1,] <- A * CTMM$COV[1,]
+    CTMM$COV[,1] <- A * CTMM$COV[,1]
+  }
+  
   return(CTMM)
 }
 
@@ -793,78 +1090,9 @@ newton.ctmm <- function(data,CTMM)
 }
 
 
-##############################################
-# SIMULATE DATA over time array t
-simulate.ctmm <- function(object,nsim=1,seed=NULL,t=c(0),...)
-{
-  if(!is.null(seed)){ set.seed(seed) }
-  
-  if(is.null(object$sigma))
-  { object$sigma <- diag(1,2) }
-
-  object <- ctmm.prepare(list(t=t),object)
-  
-  tau <- object$tau
-  if(is.null(tau)) { tau = 0 }
-  K <- length(tau)
-  
-  sigma <- object$sigma
-  
-  mu <- object$mu
-  if(is.null(mu)) { mu <- c(0,0) }
-  
-  # recast as explicitly positive-definite matrix
-  sigma <- Matrix::Matrix(sigma,sparse=FALSE,doDiag=FALSE)
-  sigma <- as(sigma,"dppMatrix")
-  # had to do that so sqrtm doesn't complain
-  Lambda <- expm::sqrtm(sigma)
-  
-  K <- length(tau)
-  
-  n <- length(t)
-  dt <- c(Inf,diff(t)) # time lags
-  
-  # where we will store the data
-  x <- rep(0,times=n)
-  y <- rep(0,times=n)
-  
-  # initial hidden state, for standardized process
-  Hx <- rep(0,times=K)
-  Hy <- rep(0,times=K)
-  
-  object$sigma <- 1
-  for(i in 1:n)
-  {
-    # tabulate propagators if necessary
-    if((i==1)||(dt[i]!=dt[i-1]))
-    {
-      Langevin <- langevin(dt=dt[i],CTMM=object)
-      Green <- Langevin$Green
-      Sigma <- Langevin$Sigma
-    }
-    
-    # standardized process
-    Hx <- MASS::mvrnorm(n=1,mu=as.vector(Green %*% Hx),Sigma=Sigma)
-    Hy <- MASS::mvrnorm(n=1,mu=as.vector(Green %*% Hy),Sigma=Sigma)
-    
-    # un-standardize the process
-    r <- as.vector( Lambda %*% c(Hx[1],Hy[1]) ) + mu
-    
-    x[i] <- r[1]
-    y[i] <- r[2]
-  }
-  
-  data <- data.frame(t=t, x=x, y=y)
-  data <- new.telemetry(data,info=attr(object,"info"))
-  
-  return(data)
-}
-#methods::setMethod("simulate",signature(object="ctmm"), function(object,...) simulate.ctmm(object,...))
-
-
 ###################################################
 # Calculate good CIs for other functions
-confint.ctmm <- function(model, alpha=0.05)
+confint.ctmm <- function(model,alpha=0.05)
 {
   # z-values for low, ML, high estimates
   z <- stats::qnorm(1-alpha/2)
@@ -873,33 +1101,60 @@ confint.ctmm <- function(model, alpha=0.05)
   tau <- tau[tau<Inf]
   K <- length(tau)
   
-  COV <- model$COV.tau
+  COV <- model$COV
   
   par <- NULL
+  NAME <- NULL
   
   # timescale uncertainty: can hit 0 and Inf
-  if(K>0){
+  if(K>0)
+  {
     for(k in 1:K)
     {
-      par <- rbind(par,c(0,tau[k],0))
-      
-      # tau normal for lower CI
-      par[k,1] <- max(0,tau[k] - z*sqrt(COV[k+1,k+1]))
-      
-      # lower CI of f==1/tau normal for upper CI of tau
-      par[k,3] <- 1/max(0,(1/tau[k] - z*sqrt(COV[k+1,k+1]/tau[k]^4)))
+      NAME <- c(NAME,paste("tau",names(tau[k])))
+      par <- rbind(par,confint.tau(tau[k],COV[k+1,k+1],z))
     }
   }
   
+  # circulation period
+  circle <- model$circle
+  if(circle)
+  {
+    NAME <- c(NAME,"circle")
+    par <- rbind(par,confint.tau(circle,COV["circle","circle"],z,min=-Inf))
+  }  
+    
   # standard area uncertainty: chi-square
   GM.sigma <- sqrt(det(model$sigma))
   COV <- COV[1,1] 
   # effective DOF derived from ML curvature
   DOF <- 2*GM.sigma^2/COV
   
+  NAME <- c("area",NAME)
   par <- rbind(chisq.ci(GM.sigma,COV,alpha),par)
   
+  rownames(par) <- NAME
+  
   return(par)
+}
+
+# timescale uncertainty: can hit 0 and Inf
+confint.tau <- function(tau,COV,z,min=0,max=Inf)
+{
+  # tau normal for lower CI
+  CI <- tau + c(1,-1)*z*sqrt(COV)
+  
+  # lower CI of f==1/tau normal for upper CI of tau
+  CI <- c(CI, (1/tau + c(1,-1)*z*sqrt(COV/tau^4))^-1)
+
+  # take most conservative estimates
+  CI <- range(CI)
+  
+  # enforce constraints
+  CI <- c(max(CI[1],min),min(CI[2],max))
+  
+  CI <- c(CI[1],tau,CI[2])
+  return(CI)
 }
 
 summary.ctmm <- function(object,level=0.95,level.UD=0.95,...)
@@ -922,15 +1177,19 @@ summary.ctmm.single <- function(object, level=0.95, level.UD=0.95, ...)
   # z-values for low, ML, high estimates
   z <- stats::qnorm(1-alpha/2)*c(-1,0,1)
   
+  CPF <- object$CPF
+  circle <- object$circle
   tau <- object$tau
-  if(length(tau)>0 && tau[1]==Inf){ range <- FALSE }else{ range <- TRUE }
+  if(length(tau)>0 && tau[1]==Inf) { range <- FALSE } else { range <- TRUE }
   tau <- tau[tau<Inf]
   K <- length(tau)
   
   AM.sigma <- mean(diag(object$sigma))
   GM.sigma <- sqrt(det(object$sigma))
+  ecc <- object$sigma@par[2]
   
-  COV <- object$COV.tau
+  COV <- object$COV
+  P <- nrow(COV)
   
   # where to store unit information
   name <- rep("",K+1)
@@ -947,56 +1206,94 @@ summary.ctmm.single <- function(object, level=0.95, level.UD=0.95, ...)
   scale[1] <- unit.list$scale
   
   # pretty time units
-  if(K>0)
+  P <- nrow(par)
+  if(P>1)
   {
-    for(r in 1:K)
+    for(i in 2:P)
     {
-      unit.list <- unit(par[r+1,2],"time")
-      name[r+1] <- unit.list$name
-      scale[r+1] <- unit.list$scale
+      unit.list <- unit(par[i,2],"time")
+      name[i] <- unit.list$name
+      scale[i] <- unit.list$scale
     }
   }
   
-  # will be improved after telemetry errors incorporated
+  # can we estimate speed?
   if(K>1 || (!range && K>0))
   {
     # RMS velocity
-    log.rms <- log(AM.sigma/prod(tau))/2
-    VAR.log.rms <- 1/4 * (1/c(GM.sigma,-tau)) %*% COV %*% (1/c(GM.sigma,-tau))
-    log.rms <- log.rms + z*sqrt(VAR.log.rms)
-    rms <- exp(log.rms) # meters/second
+    if(CPF)
+    {
+      Omega2 <- sum(c(2*pi,1)^2/tau^2)
+      grad <- -2*c(2*pi,1)^2/tau^3
+    }
+    else
+    {
+      Omega2 <- 1/prod(tau)
+      grad <- -Omega2/tau
+    }
+
+    # contribution from circulation
+    omega2 <- 0
+    if(circle)
+    {
+      omega2 <- (2*pi/circle)^2
+      grad <- c(grad,-2*omega2/circle)
+    }
+    
+    # contribution from sigma
+    # GM.sigma <- cosh(ecc)*AM.sigma
+    ms <- AM.sigma*(Omega2+omega2)
+    grad <- c(cosh(ecc)*(Omega2+omega2), AM.sigma*grad)
+    var.ms <- (grad) %*% COV %*% (grad)
+    # include mean
+    MSPEED <- mspeed(object)
+    ms <- ms + MSPEED$MS
+    var.ms <- var.ms + MSPEED$VAR
+    # root mean square velocity
+    rms <- sqrt(ms)
+    var.rms <- var.ms * (1/2/rms)^2
     
     # pretty units
-    unit.list <- unit(rms[2],"speed")
+    unit.list <- unit(rms,"speed")
     name <- c(name,unit.list$name)
     scale <- c(scale,unit.list$scale)
     
-    par <- rbind(par,rms)  
+    log.rms <- log(rms)
+    var.log.rms <- var.rms * (1/rms)^2
+    
+    log.rms <- log.rms + z*sqrt(var.log.rms)
+    rms <- exp(log.rms)
+    
+    par <- rbind(par,rms)
+    rownames(par)[P+1] <- "speed"
   }
   
   # Fix unit choice
   par <- par/scale
   
-  par.names <- "area"
-  
-  tau.names <- c("position","velocity","acceleration")
-  if(!range){ tau.names <- tau.names[-1] }
-  if(K>0){ par.names <- c(par.names,paste("tau",tau.names[1:K])) }
-  if(K>1 || (!range && K>0)){ par.names <- c(par.names,"speed") }
-  
-  rownames(par) <- paste(par.names," (",name,")",sep="")
+  # affix units
+  rownames(par) <- paste(rownames(par)," (",name,")",sep="")
   
   colnames(par) <- c("low","ML","high")
 
-  if(!range) { par <- par[-1,] } # delete off "area"
+  if(!range) { par <- par[-1,] } # delete off "area" (really diffusion)
   
   return(par)
 }
 #methods::setMethod("summary",signature(object="ctmm"), function(object,...) summary.ctmm(object,...))
 
-summary.ctmm.list <- function(object, level=0.95, level.UD=0.95, ...)
+
+sort.ctmm <- function(x, decreasing=FALSE, IC="AICc", ...)
 {
-  IC <- attr(object,"IC")
+  ICS <- sapply(x,function(m){m[[IC]]})
+  IND <- sort(ICS,method="quick",index.return=TRUE,decreasing=decreasing)$ix
+  x <- x[IND]
+}
+
+
+summary.ctmm.list <- function(object, IC="AICc", ...)
+{
+  object <- sort.ctmm(object,IC=IC)
   ICS <- sapply(object,function(m){m[[IC]]})
   ICS <- ICS - ICS[[1]]
   ICS <- array(ICS,c(length(ICS),1))
@@ -1005,7 +1302,53 @@ summary.ctmm.list <- function(object, level=0.95, level.UD=0.95, ...)
   return(ICS)
 }
 
+###################################################
+# fit a bunch of models and select the best one
 ctmm.select <- function(data,CTMM,verbose=FALSE,IC="AICc",...)
+{
+  MODELS <- list()
+
+  # listify model guesses
+  if(class(CTMM)=="ctmm") { CTMM <- list(CTMM) }
+  
+  for(i in 1:length(CTMM))
+  {  
+    if(CTMM[[i]]$CPF)
+    { MODELS <- c(MODELS,ctmm.select.cpf(data,CTMM[[i]])) }
+    else
+    { MODELS <- c(MODELS,ctmm.select.ouf(data,CTMM[[i]])) }
+  }
+  
+  # fit models
+  MODELS <- lapply(MODELS,function(M) { ctmm.fit(data,M,...) })
+  
+  # sort models by AICc
+  MODELS <- sort.ctmm(MODELS,IC=IC)
+  
+  # return everything
+  if(verbose) { return(MODELS) }
+  else { return(MODELS[[1]]) }
+}
+
+
+ctmm.select.cpf <- function(data,CTMM)
+{
+  MODELS <- list()
+  
+  MOD <- CTMM
+  MODELS <- c(MODELS,ctmm.select.isotropy(data,MOD,"CPF"))
+
+  MOD$tau <- CTMM$tau[2]
+  MODELS <- c(MODELS,ctmm.select.isotropy(data,MOD,"OU"))
+
+  MOD <- CTMM$tau <- NULL
+  MODELS <- c(MODELS,ctmm.select.isotropy(data,MOD,"IID"))
+
+  return(MODELS)  
+}
+
+
+ctmm.select.ouf <- function(data,CTMM)
 {
   MODELS <- list()
   NAMES <- c("IID","OU","OUF")
@@ -1018,31 +1361,63 @@ ctmm.select <- function(data,CTMM,verbose=FALSE,IC="AICc",...)
     # fix K
     if(K == 0) { MOD$tau <- NULL } else { MOD$tau <- MOD$tau[1:K] }
 
-    # name model
-    NAME <- paste(NAMES[K+1],"anisotropic")
-    
-    # fit model
-    MODELS[[NAME]] <- ctmm.fit(data,MOD,...)
-    
-    # step down in isotropy
-    if(CTMM$isotropic==FALSE)
-    {
-      MOD$isotropic <- TRUE
-      MOD$sigma <- covm(MOD$sigma,isotropic=TRUE)
-      NAME <- paste(NAMES[K+1],"isotropic")
-      MODELS[[NAME]] <- ctmm.fit(data,MOD)
-    }
+    MODELS <- c(MODELS,ctmm.select.isotropy(data,MOD,NAMES[K+1]))
   }
 
-  # sort models by AICc
-  ICS <- sapply(MODELS,function(m){m[[IC]]})
-  IND <- sort(ICS,method="quick",index.return=TRUE)$ix
-  MODELS <- MODELS[IND]
-  attr(MODELS,"IC") <- IC
+  return(MODELS)
+}
+
+
+ctmm.select.isotropy <- function(data,CTMM,NAME=NULL)
+{
+  MODELS <- list()
+  MOD <- CTMM
   
-  # return everything
-  if(verbose) { return(MODELS) }
-  else { return(MODELS[[1]]) }
+  # name model
+  if(MOD$isotropic)
+  { name <- paste(NAME,"isotropic") }
+  else
+  { name <- paste(NAME,"anisotropic") } 
+  
+  # given model
+  MODELS <- c(MODELS,ctmm.select.circle(data,MOD,name))
+  
+  # step down in isotropy
+  if(CTMM$isotropic==FALSE)
+  {
+    MOD$isotropic <- TRUE
+    MOD$sigma <- covm(MOD$sigma,isotropic=TRUE)
+    name <- paste(NAME,"isotropic")
+    MODELS <- c(MODELS,ctmm.select.circle(data,MOD,name))
+  }
+  
+  return(MODELS)
+}
+
+
+ctmm.select.circle <- function(data,CTMM,NAME=NULL)
+{
+  MODELS <- list()
+  MOD <- CTMM
+  
+  if(length(CTMM$tau)==0 || CTMM$tau==0)
+  { CTMM$circle <- FALSE }
+  
+  # given model
+  if(MOD$circle)
+  { name <- paste(NAME,"circle") }
+  else
+  { name <- NAME }
+  MODELS[[name]] <- MOD
+  
+  #simpler alternative
+  if(MOD$circle)
+  {
+    MOD$circle <- FALSE
+    MODELS[[NAME]] <- MOD
+  }
+  
+  return(MODELS)
 }
 
 
@@ -1112,4 +1487,46 @@ ctmm.loglike.slow <- function(data,CTMM)
   CTMM <- ctmm(loglike=loglike,tau=tau,sigma=sigma,mu=mu,COV.mu=COV.mu,DOF.mu=W,info=attr(data,"info"))
     
   return(CTMM)
+}
+
+
+###################
+# general parameter guessing function
+###################
+ctmm.guess <- function(data,variogram=NULL,CTMM=ctmm(),name="GUESS",interactive=TRUE)
+{
+  if(is.null(variogram)) { variogram = variogram(data) }
+  
+  mu <- c(mean(data$x),mean(data$y))
+  
+  z <- cbind(data$x - mu[1], data$y - mu[2])
+  sigma <- t(z) %*% z
+  
+  # remove error from variability
+  if(CTMM$error & !is.null(data$error)) { sigma <- sigma - sum(data$error) * diag(2) }
+  
+  n <- length(data$t)
+  sigma <- sigma / (n-1)  
+
+  CTMM$mu <- mu
+  CTMM$sigma <- covm(sigma)
+  
+  # estimate circulation period
+  if(CTMM$circle==1)
+  {
+    # velocities
+    v <- cbind(diff(z[,1]),diff(z[,2])) / diff(data$t)
+    # midpoint locations during velocity v
+    z <- cbind(z[-1,1]+z[-n,1],z[-1,2]+z[-n,2])/2
+
+    # average angular momentum
+    L <- (z[,1]%*%v[,2] - z[,2]%*%v[,1]) / (n-1)
+    
+    circle <- L / mean(diag(sigma))
+    circle <- 2*pi/circle
+    
+    CTMM$circle <- circle
+  }
+  
+  variogram.fit(variogram,CTMM=CTMM,name=name,interactive=interactive)
 }

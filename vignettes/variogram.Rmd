@@ -4,8 +4,8 @@ author: "Chris H. Fleming and Justin M. Calabrese"
 date: "`r Sys.Date()`"
 output: rmarkdown::html_vignette
 vignette: >
-  %\VignetteKeyword{variogram}
   %\VignetteIndexEntry{Variograms and Model Selection}
+  %\VignetteKeyword{variogram}
   %\VignetteEngine{knitr::rmarkdown}
   \usepackage[utf8]{inputenc}
 ---
@@ -14,7 +14,9 @@ In this vignette, we walk through data preparation, variogram analysis, and maxi
 
 # Data Preparation
 
-The first step is to import your MoveBank csv file:
+We highly recommend that you get your data onto [Movebank](http://www.movebank.org/).
+This will help ensure that your data are of the correct format for `ctmm`, and you can keep your data completely private if you wish.
+The next step is then to import your MoveBank csv file:
 ```
 yourAnimals <- as.telemetry("yourAnimalsMoveBank.csv")
 ```
@@ -102,7 +104,7 @@ The model `m2` introduces an additional autocorrelation timescale for the animal
 
 The linear regime of the variogram (regular diffusion) is just as important as the asymptotic regime. In the linear regime it is reasonable to assume a Markovian model as with step selection functions (SSF) and Brownian bridges (BB). Therefore, the variogram has informed us as to how much we need to coarsen our data for it to be appropriate in many common analyses that neglect various aspects of movement.
 
-Finally, the R-studio function `variogram.fit(SVF)` is much easier to use than guestimating the model parameters by hand as we did above. `variogram.fit` gives you sliders to choose the most visually appropriate parameters and save them to a global variable (`global.variogram.fit` by default).
+Finally, the R-studio function `variogram.fit(SVF)` is much easier to use than guestimating the model parameters by hand as we did above. `variogram.fit` gives you sliders to choose the most visually appropriate parameters and save them to a global variable (`GUESS` by default).
 
 ### Variogram Error is Autocorrelated
 
@@ -174,16 +176,23 @@ title("Detector Array")
 
 The height of this initial discontinuity corresponds to the variance of uncorrelated location errors. The second plot is the kind of initial discontinuity one has with detector array data. The end of the (slope) discontinuity is highlighted with a circle. This discontinuity is smooth because the movement and detection are correlated. The height of this initial discontinuity is also (at least roughly) the variance of the location errors.
 
-If your tracking data is GPS and is annotated with a "DOP" column, then this information is automatically imported into the `telemetry` object and only has to be flagged in the `ctmm` model by setting `error=TRUE`. Because of some convenient mathematical relations, fitting without telemetry errors involves 1-3 fewer parameters and is, therefore, much faster than fitting with telemetry error. So if your data are not swamped by error and do not contain bursts of high-frequency fixes (which would also be relatively swamped by 5 meter GPS error), then you would want to apply a two stage fitting method:
+If your tracking data is GPS and is annotated with a "DOP" column, then this information is automatically imported into the `telemetry` object and only has to be flagged in the `ctmm` model by setting `error=TRUE`. Because of some convenient mathematical relations, fitting without telemetry errors involves 1-3 fewer parameters and is, therefore, faster and more reliable than fitting with telemetry error. So if your data are not swamped by error and do not contain bursts of high-frequency fixes (which would also be relatively swamped by 5 meter GPS error), then you might want to apply a two stage fitting method, first from the variogram guess without telemetry error and then from that output with telemetry error. Here we demonstrate this method with Leroy the fisher cat from the `move` package:
 
-```{r, eval=FALSE}
-GUESS1$error <- FALSE
-GUESS2 <- ctmm.fit(DATA,GUESS1)
-GUESS2$error <- TRUE
-FIT <- ctmm.fit(DATA,GUESS2)
+```{r}
+DATA <- move::move(system.file("extdata","leroy.csv.gz",package="move"))
+DATA <- as.telemetry(DATA)
+# 1 hour and 1 day autocorrelation timescales
+GUESS <- ctmm(tau=c(1/4,24)*60^2)
+# first fit without telemetry error
+FITS <- list()
+FITS$CLEAN <- ctmm.fit(DATA,GUESS)
+# second fit based on first with telemetry error
+GUESS <- FITS$CLEAN
+GUESS$error <- TRUE
+FITS$ERROR <- ctmm.fit(DATA,GUESS)
+# model improvement
+summary(FITS)
 ```
-
-where your first `GUESS1` comes from `variogram.fit` and your second `GUESS2` is refined by fitting without errors. This ensures that `optim` gets to the best solution `FIT` within a reasonable amount of steps. On the other hand, if your data is swamped by telemetry errors, then you will need to prepare your best initial guess and fit once with `error=TRUE` flagged. If `isotropic=FALSE`, then you might want to take a few stabs at the orientation and eccentricity of `sigma` to make sure that `optim` has converged on the best solution.
 
 ### Cycles and Periodicities
 
@@ -226,9 +235,15 @@ The fit parameter `DOF.mu` is the number of degrees of freedom worth of data we 
 If you have a complex model in mind, say `m2`, then you can perform model selection in a more convenient way with the `ctmm.select` function. `ctmm.select` considers the initial guess (hypothesis) and every simpler model to select the best model based upon an information criteria.
 
 ```{r}
-FITS <- ctmm.select(cilla,M2,verbose=TRUE)
+FITS <- ctmm.select(cilla,m2,verbose=TRUE)
 summary(FITS)
 ```
+
+The isotropic and anisotropic (`isotropic=FALSE`) flags correspond to circular and elliptical covariances respectively---an option we did not consider above.
+The Ornstein-Uhlenbeck-F (OUF) model is continuous in position in velocity (`M2`),
+the Ornstein-Uhlenbeck (OU) model is continuous in position only (`M1`),
+and the independent and identically distributed (IID) model has no autocorrelation (`M0`).
+See `help("ctmm")` for more options.
 
 ## Back to the Variogram
 
