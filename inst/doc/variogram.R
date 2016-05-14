@@ -77,8 +77,7 @@ points(1/4,1)
 title("Detector Array")
 
 ## ------------------------------------------------------------------------
-DATA <- move::move(system.file("extdata","leroy.csv.gz",package="move"))
-DATA <- as.telemetry(DATA)
+DATA <- as.telemetry(system.file("extdata","leroy.csv.gz",package="move"))
 # 1 hour and 1 day autocorrelation timescales
 GUESS <- ctmm(tau=c(1/4,24)*60^2)
 # first fit without telemetry error
@@ -104,18 +103,16 @@ M2 <- ctmm.fit(cilla,m2)
 summary(M2)
 
 ## ----  fig.show='hold'---------------------------------------------------
-TAB <- rbind( c(M0$AICc,M0$DOF.mu) , c(M1$AICc,M1$DOF.mu) , c(M2$AICc,M2$DOF.mu) )
-colnames(TAB) <- c("AICc","DOF(mu)")
-rownames(TAB) <- c("M0","M1","M2")
-TAB
-
-## ------------------------------------------------------------------------
-FITS <- ctmm.select(cilla,m2,verbose=TRUE)
+FITS <- list(M0=M0,M1=M1,M2=M2)
 summary(FITS)
 
+## ------------------------------------------------------------------------
+FITZ <- ctmm.select(cilla,m2,verbose=TRUE,level=1)
+summary(FITZ)
+
 ## ----  fig.show='hold'---------------------------------------------------
-plot(SVF,CTMM=list(M0,M1,M2),col.CTMM=c("red","purple","blue"),fraction=0.65,level=0.5)
+plot(SVF,CTMM=FITS,col.CTMM=c("red","purple","blue"),fraction=0.65,level=0.5)
 title("zoomed out")
-plot(SVF,CTMM=list(M0,M1,M2),col.CTMM=c("red","purple","blue"),fraction=0.002,level=0.5)
+plot(SVF,CTMM=FITS,col.CTMM=c("red","purple","blue"),fraction=0.002,level=0.5)
 title("zoomed in")
 

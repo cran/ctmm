@@ -217,10 +217,13 @@ fill.data <- function(data,CTMM=ctmm(tau=Inf),verbose=FALSE,t=NULL,dt=NULL,res=1
 # cor.min is roughly the correlation required between locations to bridge them
 # dt.max is (alternatively) the maximum gap allowed between locations to bridge them
 #################################
-occurrence <- function(data,CTMM,H=diag(0,2),res.time=20,res.space=1000,grid=NULL,cor.min=0.5,dt.max=NULL)
+occurrence <- function(data,CTMM,H=0,res.time=20,res.space=1,grid=NULL,cor.min=0.5,dt.max=NULL)
 {
+  if(length(H)==1) { H <- diag(H,2) }
+  
   info <- attr(data,"info")
   CTMM <- ctmm.prepare(data,CTMM)
+  MIN.ERR <- suppressWarnings(min(data$error))
   
   # format data to be relatively evenly spaced with missing observations
   data <- fill.data(data,CTMM,verbose=TRUE,res=res.time,cor.min=cor.min,dt.max=dt.max)
@@ -235,9 +238,9 @@ occurrence <- function(data,CTMM,H=diag(0,2),res.time=20,res.space=1000,grid=NUL
   GRID <- c( where(data$t %in% t.grid) , where(data$t %in% t.grid[where(diff(t.grid)==0)]) )
   GRID <- sort.int(GRID,method="quick")
 
-#  GRID <- data$t %in% t.grid
+  # GRID <- data$t %in% t.grid
   
-#  t <- state$t[GRID]
+  # t <- state$t[GRID]
   R <- state$R[GRID,]
   COV <- state$COV[GRID,,]
   n <- length(R[,1])
@@ -269,8 +272,28 @@ occurrence <- function(data,CTMM,H=diag(0,2),res.time=20,res.space=1000,grid=NUL
   }
   # there is probably a faster way to do that
   
+  # estimate size of data blob
+  dt <- stats::median(dt.grid)
+  dr <- diag(CTMM$sigma)
+  if(CTMM$range)
+  {
+    if(length(CTMM$tau)==1) #OU
+    { dr <- dt/4 * dr/CTMM$tau[1] }
+    else if(length(CTMM$tau)==2) #OUF
+    { dr <- dt^2/24 * dr/prod(CTMM$tau)}
+  }
+  else # these sigmas are var/tau[1] diffusion limits
+  {
+    if(length(CTMM$tau)==1) #BM
+    { dr <- dt/4 * dr }
+    else if(length(CTMM$tau)==2) #IOU
+    { dr <- dt^2/24 * dr/CTMM$tau[2] }
+  }
+  if(CTMM$error){ dr <- dr + MIN.ERR }
+  dr <- sqrt(dr)
+  
   # using the same data format as AKDE, but with only the ML estimate (alpha=1)
-  KDE <- kde(data,H=H,W=w.grid,res=res.space)
+  KDE <- kde(data,H=H,W=w.grid,dr=dr)
   KDE$H <- diag(0,2)
   KDE <- new.UD(KDE,info=info)
   return(KDE)
@@ -300,8 +323,8 @@ simulate.ctmm <- function(object,nsim=1,seed=NULL,data=NULL,t=NULL,dt=NULL,res=1
     if(is.null(sigma)) { sigma <- diag(1,2) }
     
     # I cannot figure out how to make this "Note" go away!
-    sigma <- Matrix::Matrix(sigma,sparse=FALSE,doDiag=FALSE)
-    Lambda <- expm::sqrtm(sigma)
+    # sigma <- Matrix::Matrix(sigma,sparse=FALSE,doDiag=FALSE)
+    suppressWarnings(Lambda <- expm::sqrtm(sigma))
     
     K <- length(tau)
     

@@ -34,8 +34,9 @@ Rigorous home-range estimation with movement data: A new autocorrelated kernel-d
 \author{ C. H. Fleming. }
 
 \note{ Prior to \code{ctmm} v0.3.1, AKDEs included only errors due to autocorrelation uncertainty, which are insignificant in cases such as IID data.
-Starting in v0.3.1, \code{akde} calculates an effective sample size \code{DOF.H} and uses this to estimate area uncertainty under a chi-square approxmation.
- }
+Starting in v0.3.1, \code{akde} calculated an effective sample size \code{DOF.H} and used this to estimate area uncertainty under a chi-square approxmation.
+Starting in v0.3.2, this method was improved to use \code{DOF.area} in the Gaussian reference function approximation.
+}
 
 %% ~Make other sections like Warning with \section{Warning }{....} ~
 

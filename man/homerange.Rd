@@ -36,7 +36,7 @@ homerange(data,CTMM,method="AKDE",...)
 
 %% ~Make other sections like Warning with \section{Warning }{....} ~
 
-\seealso{ \code{\link{akde}}, \code{\link{raster.UD}} }
+\seealso{ \code{\link{akde}}, \code{\link{raster,UD-method}} }
 
 %\examples{\donttest{
 %# Load package and data

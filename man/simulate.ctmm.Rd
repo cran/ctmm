@@ -1,4 +1,5 @@
 \name{simulate.ctmm}
+\alias{simulate}
 \alias{simulate.ctmm}
 %- Also NEED an '\alias' for EACH other topic documented here.
 \title{
@@ -8,6 +9,8 @@ Simulate a continuous-time movement model
 This function generates an \eqn{O(n)} hidden-Markov simulation of continuous-time movement models described in Fleming et al (2014) and Fleming et al (2015).
 }
 \usage{
+simulate(object,nsim=1,seed=NULL,...)
+
 \S3method{simulate}{ctmm}(object,nsim=1,seed=NULL,data=NULL,t=NULL,dt=NULL,res=1,...)
 }
 %- maybe also 'usage' for other objects documented here.

@@ -1,19 +1,87 @@
-#is.installed <- function(pkg) is.element(pkg, installed.packages()[,1]) 
+# existing S4 generic functions
+methods::setGeneric("raster", getGeneric("raster", package="raster"))
+methods::setGeneric("zoom", getGeneric("zoom", package="raster"))
 
-# worst case FFT functions
-FFT <- function(X) { stats::fft(X,inverse=FALSE) }
-IFFT <- function(X) { stats::fft(X,inverse=TRUE)/length(X) }
+# existing functions -> S4 generics
+# this doesn't work
+#methods::setGeneric("SpatialPoints",package="sp",signature=signature("coords",...))
+#methods::setGeneric("SpatialPolygonsDataFrame",package="sp",signature="Sr")
 
-zoom <- function(x,...) UseMethod("zoom") #S3 generic
-#setGeneric("zoom",function(x,...) standardGeneric("zoom"),package="ctmm") #S4 generic
+# existing funtions -> S3 generics
+# this works but is masked if you load sp
+#SpatialPoints <- function(object,...) UseMethod("SpatialPoints")
+#SpatialPoints.matrix <- function(object,...) sp::SpatialPoints(coords=object,...)
+#SpatialPoints.data.frame <- function(object,...) sp::SpatialPoints(coords=object,...)
+
+#SpatialPolygonsDataFrame <- function(object,...) UseMethod("SpatialPolygonsDataFrame")
+#SpatialPolygonsDataFrame.SpatialPolygons <- function(object,...) sp::SpatialPolygonsDataFrame(Sr=object,...)
+
+# new S3 generic functions
+writeShapefile <- function(object,...) UseMethod("writeShapefile")
+
+
+# is a package installed?
+is.installed <- function(pkg) is.element(pkg, utils::installed.packages()[,1]) 
+
+# generic FFT functions
+FFT <- function(X,inverse=FALSE)
+{
+  if(is.null(ncol(X)))
+  { 
+    if(!inverse) { X <- stats::fft(X) }
+    else { X <- stats::fft(X,inverse=TRUE)/length(X) }
+  }
+  else
+  {
+    if(!inverse) { X <- mvfft(X) }
+    else { X <- stats::mvfft(X,inverse=TRUE)/nrow(X) }
+  }
+  
+  return(X)
+}
+
+# fastest FFT functions... don't use on integers
+FFTW <- function(X,inverse=FALSE)
+{
+  if(is.null(ncol(X)))
+  { 
+    if(!inverse) { X <- fftw::FFT(X) }
+    else { X <- fftw::IFFT(X) }
+  }
+  else
+  {
+    if(!inverse) { X <- sapply(1:ncol(X),function(j){ fftw::FFT(X[,j]) }) }
+    else { X <- sapply(1:ncol(X),function(j){ fftw::IFFT(X[,j]) }) }
+  }
+  
+  return(X)
+}
+
+# choose FFTW if installed
+.onLoad <- function(...)
+{
+  if(is.installed("fftw")) { utils::assignInMyNamespace("FFT", FFTW) }
+
+  #if(!isNamespaceLoaded("raster")) { assign("zoom",function(x,...) UseMethod("zoom"),envir=envir) }
+}
+.onAttach <- .onLoad
+
+IFFT <- function(X,plan=NULL) { FFT(X,inverse=TRUE) }
+
+composite <- function(n) { 2^ceiling(log(n,2)) }
+
+##### det shouldn't fail because R dropped indices
+det.numeric <- function(x,...) { x }
+
 
 # forwarding function for list of a particular datatype
 zoom.list <- function(x,...)
 {
   CLASS <- class(x[[1]])
-  utils::getS3method("zoom",CLASS)(x,...)
+  #utils::getS3method("zoom",CLASS)(x,...)
+  methods::getMethod("zoom",signature=CLASS)(x,...)
 }
-#methods::setMethod("zoom",signature(x="list"), function(x,...) zoom.list(x,...))
+methods::setMethod("zoom",signature(x="list"), function(x,...) zoom.list(x,...))
 
 
 # forwarding function for list of a particular datatype
@@ -159,7 +227,40 @@ CI.lower <- Vectorize(function(k,Alpha){qchisq(Alpha/2,k,lower.tail=TRUE)/k})
 
 # calculate chi^2 confidence intervals from MLE and COV estimates
 chisq.ci <- function(MLE,COV=NULL,alpha=0.05,DOF=2*MLE^2/COV)
-{ MLE * c(CI.lower(DOF,alpha),1,CI.upper(DOF,alpha)) }
+{
+  CI <- MLE * c(CI.lower(DOF,alpha),1,CI.upper(DOF,alpha))
+  names(CI) <- c("low","ML","high")
+  return(CI)
+}
+
+# normal confidence intervals
+norm.ci <- function(MLE,COV,alpha=0.05)
+{
+  # z-values for low, ML, high estimates
+  z <- stats::qnorm(1-alpha/2)*c(-1,0,1)
+  
+  # normal ci
+  CI <- MLE + z*sqrt(COV)
+  
+  names(CI) <- c("low","ML","high")
+  return(CI)
+}
+
+# calculate log-normal confidence intervals from MLE and COV estimates
+lognorm.ci <- function(MLE,COV,alpha=0.05)
+{
+  # log transform of variance
+  COV <- COV/MLE^2
+  # log transform of point estimate
+  MLE <- log(MLE)
+  
+  CI <- norm.ci(MLE,COV,alpha=alpha)
+  
+  # transform back
+  CI <- exp(CI)
+
+  return(CI)
+}
 
 
 # last element of array
@@ -201,13 +302,30 @@ pad <- function(vec,size,padding=0,side="right")
 {
   # this is now the pad length instead of total length
   size <- size - length(vec)
+  padding <- array(padding,size)
   
   if(side=="right"||side=="r")
-  { return(c(vec,rep(padding,size))) }
+  { vec <- c(vec,padding) }
   else if(side=="left"||side=="l")
-  { return(c(rep(padding,size),vec)) }
+  { vec <- c(padding,vec) }
+  
+  return(vec)
 }
 
+# row pad for data frames / matrices
+rpad <- function(mat,size,padding=0,side="right")
+{
+  size <- size - nrow(mat)
+  COL <- ncol(mat)
+  padding <- array(padding,c(size,COL))
+    
+  if(side=="right"||side=="r")
+  { mat <- rbind(mat,padding) }
+  else if(side=="left" || side=="l")
+  { mat <- rbind(padding,mat) }
+  
+  return(mat)
+}
 
 #remove rows and columns by name
 rm.name <- function(object,name)
@@ -326,4 +444,72 @@ setUnits <- function(arg1,arg2)
   {
     if(name %in% alias[[i]]) { return(num*scale[i]^pow) }
   }
+}
+
+
+## rescale the units of dimensionful parameters
+unit.ctmm <- function(CTMM,length=1,time=1)
+{
+  if(length(CTMM$tau)>0){ CTMM$tau <- CTMM$tau/time }
+  CTMM$circle <- CTMM$circle/time
+  
+  # all means scale with length the same way... but not time
+  CTMM$mu <- CTMM$mu/length
+  drift <- get(CTMM$mean)
+  CTMM <- drift@scale(CTMM,time)
+  
+  CTMM$sigma <- CTMM$sigma/length^2
+  CTMM$sigma@par["area"] <- CTMM$sigma@par["area"]/length^2
+  
+  # variance -> diffusion adjustment
+  if(!CTMM$range)
+  {
+    CTMM$sigma <- CTMM$sigma*time
+    CTMM$sigma@par["area"] <- CTMM$sigma@par["area"]*time
+  }
+  
+  if(!is.null(CTMM$COV))
+  {
+    CTMM$COV.mu <- CTMM$COV.mu/length^2
+    
+    CTMM$COV["area",] <- CTMM$COV["area",]/length^2
+    CTMM$COV[,"area"] <- CTMM$COV[,"area"]/length^2
+    
+    if(!CTMM$range)
+    {
+      CTMM$COV["area",] <- CTMM$COV["area",]*time
+      CTMM$COV[,"area"] <- CTMM$COV[,"area"]*time
+    }
+    
+    tau <- CTMM$tau
+    tau <- tau[tau<Inf]
+    if(length(tau))
+    {
+      tau <- names(tau)
+      tau <- paste("tau",tau)
+
+      CTMM$COV[tau,] <- CTMM$COV[tau,]/time
+      CTMM$COV[,tau] <- CTMM$COV[,tau]/time
+    }
+    
+    if(CTMM$circle)
+    {
+      CTMM$COV["circle",] <- CTMM$COV["circle",]/time
+      CTMM$COV[,"circle"] <- CTMM$COV[,"circle"]/time
+    }
+  }
+
+  return(CTMM)
+}
+
+######################
+unit.UD <- function(UD,length=1)
+{
+  UD$x <- UD$x / length
+  UD$y <- UD$y / length
+  UD$PDF <- UD$PDF * length^2
+  UD$dA <- UD$dA / length^2
+  UD$H <- UD$H / length^2
+  
+  return(UD)
 }

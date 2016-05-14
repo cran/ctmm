@@ -5,10 +5,10 @@
 \title{
 Visually fit a movement model to a variogram
 }
-\description{This function plots a \code{variogram} object overlayed with a continuous-time movement model guesstimated from the variogram's shape. Sliders are given to adjust the parameter guesstimates and the result can be saved to a global variable. The intention of this function is to facilitate good starting guesses for \code{ctmm.fit}, starting with a prototype hypothesis argument \code{CTMM}, which can contain features such as \code{isotropic}, \code{range}, \code{circle}, \code{CPF}, etc..}
+\description{This function plots a \code{variogram} object overlayed with a continuous-time movement model guesstimated from the variogram's shape. Sliders are given to adjust the parameter guesstimates and the result can be saved to a global variable. The intention of this function is to facilitate good starting guesses for \code{ctmm.fit}, starting with a prototype hypothesis argument \code{CTMM}, which can contain features such as \code{isotropic}, \code{range}, \code{circle}, etc..}
 
 \usage{
-ctmm.guess(data,variogram=NULL,CTMM=ctmm(),name="GUESS",interactive=TRUE)
+ctmm.guess(data,CTMM=ctmm(),variogram=NULL,name="GUESS",interactive=TRUE)
 
 variogram.fit(variogram,CTMM=ctmm(),name="GUESS",fraction=0.5,interactive=TRUE,...)
 }

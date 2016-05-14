@@ -11,6 +11,21 @@ subset.telemetry <- function(x,...)
    return(x)
 }
 
+`[.telemetry` <- function(x,...)
+{
+  info <- attr(x,"info")
+  x <- utils::getS3method("[","data.frame")(x,...)
+  if(class(x)=="data.frame") { x <- new.telemetry(x,info=info) }
+  return(x)
+}
+
+extract.telemetry <- function(data,axes)
+{
+  z <- "[.data.frame"(data,axes)
+  z <- as.matrix(z)
+  return(z)
+}
+
 #######################
 # Generic import function
 as.telemetry <- function(CSV,timezone="GMT",projection=NULL,UERE=NULL,...) UseMethod("as.telemetry")
@@ -26,8 +41,10 @@ as.telemetry.Move <- function(CSV,timezone="GMT",projection=NULL,UERE=NULL,...)
   
   # possibly empty columns
   DATA$individual.local.identifier <- CSV@idData$individual.local.identifier
+  DATA$tag.local.identifier <- CSV@idData$tag.local.identifier
   DATA$eobs.horizontal.accuracy.estimate <- CSV$eobs.horizontal.accuracy.estimate
   DATA$GPS.HDOP <- CSV$GPS.HDOP
+  DATA$height.above.ellipsoid <- CSV$height.above.ellipsoid
   
   DATA <- as.telemetry.data.frame(DATA,timezone=timezone,projection=projection,UERE=UERE)
   return(DATA)
@@ -36,7 +53,11 @@ as.telemetry.Move <- function(CSV,timezone="GMT",projection=NULL,UERE=NULL,...)
 # this assumes a MoveBank data.frame
 as.telemetry.data.frame <- function(CSV,timezone="GMT",projection=NULL,UERE=NULL,...)
 {
-  DATA <- data.frame(id=as.factor(CSV$individual.local.identifier),
+  # choose id strings from what's present
+  id <- as.factor(CSV$individual.local.identifier)
+  if(is.null(id)) { id <- as.factor(CSV$tag.local.identifier) }
+  
+  DATA <- data.frame(id=id,
                     timestamp=as.POSIXct(CSV$timestamp,tz=timezone),
                     longitude=as.numeric(CSV$location.long),
                     latitude=as.numeric(CSV$location.lat)
@@ -47,7 +68,10 @@ as.telemetry.data.frame <- function(CSV,timezone="GMT",projection=NULL,UERE=NULL
   if(!is.null(error))
   { 
     if(is.null(UERE))
-    { warning("HDOP values found but UERE of GPS device not specified") }
+    {
+      warning("HDOP values found but UERE not specified. See help(\"uere\").")
+      DATA$HDOP <- error
+    }
     else
     { DATA$error <- (error*UERE)^2/2 }
   }
@@ -56,7 +80,13 @@ as.telemetry.data.frame <- function(CSV,timezone="GMT",projection=NULL,UERE=NULL
   error <- CSV$eobs.horizontal.accuracy.estimate
   if(!is.null(error)) { DATA$error <- error^2 }
   # I emailed them, but they didn't know if there needed to be a 1/2 factor here
-  # assuming this is a standard deviation for now, since its in meters and not square meters
+  # Do I assume this is a sigma_H ?
+  # Do I assume this is an x-y standard deviation?
+  
+  # Import third axis if available
+  DATA$z <- CSV$height.above.ellipsoid
+  # need to now uncertainty (VDOP)
+  # need to know where the ground is too
   
   DATA <- stats::na.omit(DATA)
   DATA$t <- as.numeric(DATA$timestamp)
@@ -84,7 +114,7 @@ as.telemetry.data.frame <- function(CSV,timezone="GMT",projection=NULL,UERE=NULL
     telist[[i]]$id <- NULL
     
     # clean through duplicates, etc..
-    telist[[i]] <- telemetry.clean(telist[[i]])
+    telist[[i]] <- telemetry.clean(telist[[i]],id=id[i])
         
     # combine data.frame with ancillary info
     info <- list(identity=id[i], timezone=timezone, projection=projection, UERE=UERE)
@@ -106,19 +136,32 @@ as.telemetry.character <- function(CSV,timezone="GMT",projection=NULL,UERE=NULL,
 
 #################
 # clean up data
-telemetry.clean <- function(data)
+telemetry.clean <- function(data,id)
 {  
   # sort in time
-  data <- data[sort.list(data$t,na.last=NA,method="quick"),]
+  ORDER <- sort.list(data$t,na.last=NA,method="quick")
+  data <- data[ORDER,]
+  if(any(ORDER != 1:length(ORDER))) { warning("Times out of order in ",id," sorted") }
   
   # remove duplicate observations
+  ORDER <- length(data$t)
   data <- unique(data)
+  if(ORDER != length(data$t)) { warning("Duplicate data in ",id," removed") }
+  
+  # exit with warning on duplicate times
+  if(anyDuplicated(data$t)) { stop("Duplicate times in ",id) }
   
   # remove old level information
   data <- droplevels(data)
   
-  # exit with warning on duplicate times
+  dt <- diff(data$t)
+  v <- sqrt(diff(data$x)^2+diff(data$y)^2)/dt
+  v <- max(v)
+  message("Maximum speed of ",v," m/s observed in ",id)
+  dt <- min(dt)
+  message("Minimum sampling interval of ",dt," s in ",id)
   
+  return(data)
 }
 
 ########################################
@@ -222,53 +265,49 @@ validate.projection <- function(projection)
 zoom.telemetry <- function(x,fraction=1,...)
 {
   manipulate::manipulate(
-  { plot.telemetry(x,fraction=fraction,...) },
-  fraction = manipulate::slider(0, 1.0,initial=fraction)
+  { plot(x,fraction=fraction,...) },
+  fraction = manipulate::slider(0, 2.0,initial=fraction,step=1/100)
   ) 
 }
-#methods::setMethod("zoom",signature(x="telemetry",y="missing"), function(x,y,...) zoom.telemetry(x,...))
-#methods::setMethod("zoom",signature(x="telemetry",y="telemetry"), function(x,y,...) zoom.telemetry(list(x,y),...))
-#methods::setMethod("zoom",signature(x="telemetry",y="ctmm"), function(x,y,...) zoom.telemetry(x,model=y,...))
-#methods::setMethod("zoom",signature(x="telemetry",y="UD"), function(x,y,...) zoom.telemetry(x,akde=y,...))
-#methods::setMethod("zoom",signature(x="telemetry"), function(x,...) zoom.telemetry(x,...))
+methods::setMethod("zoom",signature(x="telemetry"), function(x,fraction=1,...) zoom.telemetry(x,fraction=fraction,...))
+methods::setMethod("zoom",signature(x="UD"), function(x,fraction=1,...) zoom.telemetry(x,fraction=fraction,...))
 
-
-#######################################
-# PLOT TELEMETRY DATA
-#######################################
-plot.telemetry <- function(x,CTMM=NULL,UD=NULL,level.UD=0.95,level=0.95,DF="CDF",col="red",col.level="black",col.DF="blue",col.grid="grey",fraction=1,add=FALSE,xlim=NULL,ylim=NULL,...)
+new.plot <- function(data=NULL,CTMM=NULL,UD=NULL,level.UD=0.95,level=0.95,fraction=1,add=FALSE,xlim=NULL,ylim=NULL,...)
 {
   alpha.UD <- 1-level.UD
   alpha <- 1-level
   
-  # listify everything for generality
-  if(class(x)=="telemetry" || class(x)=="data.frame") { x <- list(x)  }
-  if(!is.null(CTMM)) { if(class(CTMM)=="ctmm") { CTMM <- list(CTMM) } }
-  if(!is.null(UD)) { if(class(UD)=="UD") { UD <- list(UD) } }
-  
-  # median time step of data
-  dt <- lapply(x,function(X){diff(X$t)})
-  dt <- stats::median(unlist(dt))
-  
-  dist.name <- "meters"
-  dist.scale <- 1
+  dist <- list()
+  dist$name <- "meters"
+  dist$scale <- 1
+
   if(!add)
   {
-    # bounding locations from data
-    ext.x <- min(sapply(x, function(d){ min(d$x) } ))
-    ext.x[2] <- max(sapply(x, function(d){ max(d$x) } ))
+    ext.x <- NULL
+    ext.y <- NULL
     
-    ext.y <- min(sapply(x, function(d){ min(d$y) } ))
-    ext.y[2] <- max(sapply(x, function(d){ max(d$y) } ))
+    # bounding locations from data
+    if(!is.null(data))
+    {
+      ext.x <- range(sapply(data, function(d){ range(d$x) } ))
+      ext.y <- range(sapply(data, function(d){ range(d$y) } ))
+    }
     
     # bounding locations from UDs
     if(!is.null(UD))
     {
-      ext.x[1] <- min(c(ext.x[1], sapply(1:length(UD),function(i){ UD[[i]]$x[1] }) ))
-      ext.x[2] <- max(c(ext.x[2], sapply(1:length(UD),function(i){ last(UD[[i]]$x) }) ))
-      
-      ext.y[1] <- min(c(ext.y[1], sapply(1:length(UD),function(i){ UD[[i]]$y[1] }) ))
-      ext.y[2] <- max(c(ext.y[2], sapply(1:length(UD),function(i){ last(UD[[i]]$y) }) ))
+      for(i in 1:length(UD))
+      {
+        EXT <- rowSums(UD[[i]]$PDF) > 0
+        EXT <- UD[[i]]$x[EXT]
+        EXT <- c(EXT[1],last(EXT))
+        ext.x <- range(ext.x,EXT)
+        
+        EXT <- colSums(UD[[i]]$PDF) > 0
+        EXT <- UD[[i]]$y[EXT]
+        EXT <- c(EXT[1],last(EXT))
+        ext.y <- range(ext.y,EXT)
+      }
     }
     
     # bounding locations from Gaussian CTMM
@@ -280,7 +319,7 @@ plot.telemetry <- function(x,CTMM=NULL,UD=NULL,level.UD=0.95,level=0.95,DF="CDF"
       {
         # proportionality constants for outer CIs
         sigma <- CTMM[[i]]$sigma
-
+        
         # capture outer contour if present
         const <- 1
         if(!is.null(CTMM[[i]]$COV))
@@ -288,7 +327,7 @@ plot.telemetry <- function(x,CTMM=NULL,UD=NULL,level.UD=0.95,level=0.95,DF="CDF"
           K <- length(CTMM[[i]]$tau)
           const <- confint.ctmm(CTMM[[i]],alpha)[1,3]/sqrt(det(sigma))
         }
-
+        
         buff <- z*sqrt(const*diag(sigma))
         
         ext.x[1] <- min(ext.x[1], CTMM[[i]]$mu[1] - buff[1])
@@ -318,28 +357,48 @@ plot.telemetry <- function(x,CTMM=NULL,UD=NULL,level.UD=0.95,level=0.95,DF="CDF"
       { ylim <- mu[2] + max.diff }
       else if(is.null(xlim))
       { xlim <- mu[1] + max.diff }
-
+      
       ext.x <- xlim
       ext.y <- ylim
     }
     
     # Get best unit scale
     dist <- unit(abs(c(ext.x,ext.y)),"length")
-    dist.name <- dist$name
-    dist.scale <- dist$scale
+
+    xlab <- paste("x ", "(", dist$name, ")", sep="")
+    ylab <- paste("y ", "(", dist$name, ")", sep="")
     
-    xlab <- paste("x ", "(", dist.name, ")", sep="")
-    ylab <- paste("y ", "(", dist.name, ")", sep="")
+    mu <- mu/dist$scale
     
-    mu <- mu/dist.scale
-    
-    ext.x <- ext.x/dist.scale
-    ext.y <- ext.y/dist.scale
+    ext.x <- ext.x/dist$scale
+    ext.y <- ext.y/dist$scale
     
     # empty base layer plot
     plot(ext.x,ext.y, xlab=xlab, ylab=ylab, col=grDevices::rgb(1,1,1,0), asp=1, ...)
   }
+  
+  return(dist)
+}
 
+#######################################
+# PLOT TELEMETRY DATA
+#######################################
+plot.telemetry <- function(x,CTMM=NULL,UD=NULL,level.UD=0.95,level=0.95,DF="CDF",col="red",col.level="black",col.DF="blue",col.grid="grey",fraction=1,add=FALSE,xlim=NULL,ylim=NULL,cex=1,lwd=1,...)
+{
+  alpha.UD <- 1-level.UD
+  alpha <- 1-level
+  
+  # listify everything for generality
+  if(class(x)=="telemetry" || class(x)=="data.frame") { x <- list(x)  }
+  if(!is.null(CTMM)) { if(class(CTMM)=="ctmm") { CTMM <- list(CTMM) } }
+  if(!is.null(UD)) { if(class(UD)=="UD") { UD <- list(UD) } }
+  
+  # median time step of data
+  dt <- lapply(x,function(X){diff(X$t)})
+  dt <- stats::median(unlist(dt))
+  
+  dist <- new.plot(data=x,CTMM=CTMM,UD=UD,level.UD=level.UD,level=level,fraction=fraction,add=add,xlim=xlim,ylim=ylim,...)
+  
   # plot cm per unit of distance plotted (m or km)
   cmpkm <- 2.54*mean(graphics::par("fin")*diff(graphics::par("plt"))[-2]/diff(graphics::par("usr"))[-2])
   # plot px per unit of distance plotted (m or km)
@@ -349,41 +408,34 @@ plot.telemetry <- function(x,CTMM=NULL,UD=NULL,level.UD=0.95,level=0.95,DF="CDF"
   # PLOT GAUSSIAN CONTOURS AND DENSITY
   if(!is.null(CTMM))
   {
-    # number of CTMM objects
-    
     # contours colour
     col.level <- array(col.level,length(CTMM))
     col.DF <- array(col.DF,length(CTMM))
     
     for(i in 1:length(CTMM))
     {
-      tau <- CTMM[[i]]$tau
-      K <- length(tau)
-      
-      # scale coordinates
-      CTMM[[i]]$mu <- CTMM[[i]]$mu/dist.scale
-      CTMM[[i]]$sigma <- CTMM[[i]]$sigma/dist.scale^2
+      # scale units
+      CTMM[[i]] <- unit.ctmm(CTMM[[i]],dist$scale)
       
       # plot denisty function lazily reusing KDE code
-      pdf <- kde(list(x=CTMM[[i]]$mu[1,1],y=CTMM[[i]]$mu[1,2]),H=CTMM[[i]]$sigma,res=1000)
+      pdf <- kde(list(x=CTMM[[i]]$mu[1,1],y=CTMM[[i]]$mu[1,2]),H=methods::getDataPart(CTMM[[i]]$sigma),res=500)
       plot.df(pdf,DF=DF,col=col.DF[[i]],...)
       
       # plot ML estimate, regular style
-      plot.ctmm(CTMM[[i]],alpha.UD,col=col.level[[i]],lwd=2,...)
+      plot.ctmm(CTMM[[i]],alpha.UD,col=col.level[[i]],lwd=lwd,...)
       
       # plot CIs dashed if present
       if(!is.null(CTMM[[i]]$COV))
       {
-        CTMM[[i]]$COV <- CTMM[[i]]$COV/dist.scale^4 # don't care about tau, just sigma
-        
         # proportionality constants for outer CIs
-        const <- confint.ctmm(CTMM[[i]],alpha)[1,c(1,3)]/sqrt(det(CTMM[[i]]$sigma))
+        const <- confint.ctmm(CTMM[[i]],alpha)["area",]
+        const <- const[c(1,3)]/const[2]
         sigma <- CTMM[[i]]$sigma
         
         for(j in 1:2)
         {
           CTMM[[i]]$sigma <- const[j]*sigma
-          plot.ctmm(CTMM[[i]],alpha.UD,col=scales::alpha(col.level[[i]],0.5),...)
+          plot.ctmm(CTMM[[i]],alpha.UD,col=scales::alpha(col.level[[i]],0.5),lwd=lwd/2,...)
         }
       }
     }
@@ -393,57 +445,8 @@ plot.telemetry <- function(x,CTMM=NULL,UD=NULL,level.UD=0.95,level=0.95,DF="CDF"
   # PLOT KDE CONTOURS... AND DENSITY
   if(!is.null(UD))
   {
-    # number of akde objects
-    
-    # contours colour
-    col.level <- array(col.level,length(UD))
-    col.DF <- array(col.DF,length(UD))
-    
-    # UNIT CONVERSIONS
-    for(i in 1:length(UD))
-    {
-      # unit conversion
-      UD[[i]]$x <- UD[[i]]$x / dist.scale
-      UD[[i]]$y <- UD[[i]]$y / dist.scale
-      UD[[i]]$PDF <- UD[[i]]$PDF * dist.scale^2
-      UD[[i]]$dA <- UD[[i]]$dA / dist.scale^2
-      UD[[i]]$H <- UD[[i]]$H / dist.scale^2
-      
-      # ML DENSITY PLOTS
-      plot.df(UD[[i]],DF=DF,col=col.DF[[i]],...)
-    }
-    
-    # CONTOURS
-    for(i in 1:length(UD))
-    {
-      if(!is.na(col.level[[i]]))
-      {
-        # make sure that correct style is used for low,ML,high even in absence of lows and highs
-        plot.kde(UD[[i]],level=level.UD,col=scales::alpha(col.level[[i]],1),lwd=2,...)
-        
-        if(!is.null(UD[[i]]$DOF.H))
-        {
-          P <- CI.UD(UD[[i]],level.UD,level,P=TRUE)
-          plot.kde(UD[[i]],level=P[-2],labels=round(100*P[2]),col=scales::alpha(col.level[[i]],0.5),lwd=1,...)
-        }
-      }
-    }
-    
-    # RESOLUTION GRID
-    if(!add)
-    {
-      dx <- sqrt(max(sapply( 1:length(UD) , function(i) { UD[[i]]$H[1,1] } )))
-      dy <- sqrt(max(sapply( 1:length(UD) , function(i) { UD[[i]]$H[2,2] } )))
-      
-      if(dx>0 && dy>0)
-      {
-        # grid points per half
-        gp <- ceiling(buff/c(dx,dy))
-        col.grid <- scales::alpha(col.grid,0.5)
-        graphics::abline(v=(mu[1]+i*dx*(-gp[1]:gp[1])), col=col.grid)
-        graphics::abline(h=(mu[2]+i*dy*(-gp[2]:gp[2])), col=col.grid)
-      }
-    }
+    UD <- lapply(UD,function(ud){ unit.UD(ud,length=dist$scale) })
+    plot.UD(UD,level.UD=level.UD,level=level,DF=DF,col.level=col.level,col.DF=col.DF,col.grid=col.grid,fraction=fraction,add=TRUE,xlim=xlim,ylim=ylim,cex=cex,lwd=lwd,...)
   }
   
   #########################
@@ -453,18 +456,20 @@ plot.telemetry <- function(x,CTMM=NULL,UD=NULL,level.UD=0.95,level=0.95,DF="CDF"
   col <- array(col,length(x))
   
   # automagic the plot point size
-  # need to change this to telemetry error size
   p <- sum(sapply(x, function(d) { length(d$t) } ))
-  cex <- 1
-  if(p>1000) { cex <- 1000/p }
+  if(p>1000) { cex <- 1000/p * cex }
   
   # minimum error
   suppressWarnings(MIN <- min(sapply(x,function(X){min(X$error)})))
-  MIN <- pi*MIN/dist.scale^2 / 2
-    
+  MIN <- pi*MIN/dist$scale^2 / 2
+  
+  # scale error to level.UD radius
+  z2 <- -2*log(alpha.UD)
+  MIN <- z2*MIN
+  
   for(i in 1:length(x))
   { 
-    r <- x[[i]][,c("x","y")]/dist.scale
+    r <- x[[i]][,c("x","y")]/dist$scale
     
     if(is.null(x[[i]]$error))
     {
@@ -472,7 +477,7 @@ plot.telemetry <- function(x,CTMM=NULL,UD=NULL,level.UD=0.95,level=0.95,DF="CDF"
     }
     else 
     {
-      x[[i]]$error <- x[[i]]$error/dist.scale^2
+      x[[i]]$error <- z2*x[[i]]$error/dist$scale^2
       # circle radius
       circles <- sqrt(x[[i]]$error)
       # color density proportional to true density
@@ -485,7 +490,7 @@ plot.telemetry <- function(x,CTMM=NULL,UD=NULL,level.UD=0.95,level=0.95,DF="CDF"
     # also plot velocity vectors at dt scale
     #     if(all(c("vx","vy") %in% names(x[[i]])))
     #     {
-    #       dr <- x[[i]][,c("vx","vy")]/dist.scale*dt
+    #       dr <- x[[i]][,c("vx","vy")]/dist$scale*dt
     #       
     #       arr.length <- dr^2
     #       arr.length <- sqrt(arr.length[,1]+arr.length[,2])
@@ -503,6 +508,101 @@ plot.telemetry <- function(x,CTMM=NULL,UD=NULL,level.UD=0.95,level=0.95,DF="CDF"
 #methods::setMethod("plot",signature(x="telemetry",y="UD"), function(x,y,...) plot.telemetry(x,akde=y,...))
 #methods::setMethod("plot",signature(x="telemetry"), function(x,...) plot.telemetry(x,...))
 
+
+##############
+plot.UD <- function(x,level.UD=0.95,level=0.95,DF="CDF",col.level="black",col.DF="blue",col.grid="grey",fraction=1,add=FALSE,xlim=NULL,ylim=NULL,cex=1,lwd=1,...)
+{
+  if(!is.null(x)) { if(class(x)=="UD") { x <- list(x) } }
+  
+  dist <- new.plot(UD=x,fraction=fraction,add=add,xlim=xlim,ylim=ylim,...)
+  
+  # contours colour
+  col.level <- array(col.level,length(x))
+  col.DF <- array(col.DF,length(x))
+  col.grid <- array(col.grid,length(x))
+  
+  # UNIT CONVERSIONS
+  for(i in 1:length(x))
+  {
+    # unit conversion
+    x[[i]] <- unit.UD(x[[i]],length=dist$scale)
+    
+    # ML DENSITY PLOTS
+    plot.df(x[[i]],DF=DF,col=col.DF[[i]],...)
+  }
+  
+  # CONTOURS
+  for(i in 1:length(x))
+  {
+    if(!is.na(col.level[[i]]))
+    {
+      # make sure that correct style is used for low,ML,high even in absence of lows and highs
+      plot.kde(x[[i]],level=level.UD,col=scales::alpha(col.level[[i]],1),lwd=lwd,...)
+      
+      if(!is.null(x[[i]]$DOF.H))
+      {
+        P <- CI.UD(x[[i]],level.UD,level,P=TRUE)
+        plot.kde(x[[i]],level=P[-2],labels=round(100*P[2]),col=scales::alpha(col.level[[i]],0.5),lwd=lwd/2,...)
+      }
+    }
+  }
+  
+  # plot grid
+  for(i in 1:length(x))
+  {
+    if(!is.null(x[[i]]$DOF.H))
+    {    
+      H <- covm(x[[i]]$H)
+      theta <- H@par["angle"]
+      ecc <- H@par["eccentricity"]
+      sigma <- H@par["area"]
+      
+      X <- x[[i]]$x
+      Y <- x[[i]]$y
+      
+      COS <- cos(theta)
+      SIN <- sin(theta)
+      
+      # grid spacing
+      du <- sqrt(sigma*exp(+ecc/2))
+      dv <- sqrt(sigma*exp(-ecc/2))
+      
+      # bandwidth axes
+      u <- outer(+X*COS,+Y*SIN,"+")
+      v <- outer(-X*SIN,+Y*COS,"+")
+      
+      # extent of data
+      B <- (x[[i]]$PDF > 0)
+      u <- u[B]
+      v <- v[B]
+      
+      ex.u <- range(u)
+      ex.v <- range(v)
+      
+      mu.u <- mean(ex.u)
+      mu.v <- mean(ex.v)
+      
+      # grid numbers
+      n.u <- diff(ex.u)/du
+      n.v <- diff(ex.v)/dv
+      
+      n.u <- ceiling(n.u/2)
+      n.v <- ceiling(n.v/2)
+     
+      # grid nodes
+      u <- mu.u + du*(-n.u):n.u
+      v <- mu.v + dv*(-n.v):n.v
+      
+      # transform back
+      X <- outer(u*COS,-v*SIN,"+")
+      Y <- outer(u*SIN,+v*COS,"+")
+      
+      for(j in 1:length(u)) { graphics::segments(x0=X[j,1],y0=Y[j,1],x1=last(X[j,]),y1=last(Y[j,]),col=col.grid[i],...) }
+      for(j in 1:length(v)) { graphics::segments(x0=X[1,j],y0=Y[1,j],x1=last(X[,j]),y1=last(Y[,j]),col=col.grid[i],...) }
+    }
+  }
+  
+}
 
 ##################################
 # plot PDF stored as KDE object
@@ -528,7 +628,16 @@ plot.df <- function(kde,DF="CDF",col="blue",...)
 # Plot a KDE object's contours
 plot.kde <- function(kde,level=0.95,labels=round(level*100),col="black",...)
 {
+  # record current option
+  # MAX <- getOption("max.contour.segments")
+
+  # do something that works
+  options(max.contour.segments=.Machine$integer.max)
   graphics::contour(x=kde$x,y=kde$y,z=kde$CDF,levels=level,labels=labels,labelcex=1,col=col,add=TRUE,...)
+  
+  # reinstate initial option (or default if was NULL--can't set back to NULL???)
+  # if(is.null(MAX)) { MAX <- 25000 }
+  # options(max.contour.segments=MAX)
 }
 
 
@@ -588,29 +697,31 @@ summary.telemetry <- function(object,...)
 
 #########################
 # convert to spatialpoints object
-SpatialPoints.telemetry <- function(data)
+SpatialPoints.telemetry <- function(object,...)
 {
+  data <- object
+  
   if(class(data)=="telemetry" || class(data)=="data.frame")
   {
-    return( sp::SpatialPoints( data[c("x","y")], proj4string=sp::CRS(attr(data,"info")$projection) ) )
+    return( sp::SpatialPoints( "[.data.frame"(data,c("x","y")), proj4string=sp::CRS(attr(data,"info")$projection) ) )
   }
   else if(class(data)=="list")
   {
-    SPL <- lapply( data, function(d) { sp::SpatialPoints( d[c("x","y")], proj4string=sp::CRS(attr(d,"info")$projection) ) } )
+    SPL <- lapply( data, function(d) { sp::SpatialPoints( "[.data.frame"(d,c("x","y")), proj4string=sp::CRS(attr(d,"info")$projection) ) } )
     return(SPL)
   }
 }
-#methods::setMethod("SpatialPoints",signature(coords="telemetry"), function(coords,...) SpatialPoints.telemetry(coords,...))
+#methods::setMethod("SpatialPoints",signature(coords="telemetry"), function(coords) SpatialPoints.telemetry(coords))
 
 
 ##############
 # BUFFALO DATA
 ##############
 # buffalo <- as.telemetry("../Data/buffalo/Kruger African Buffalo, GPS tracking, South Africa.csv")
-## this point is way off
+## some bad data points
 # buffalo[[6]] <- ctmm:::new.telemetry(buffalo[[6]][-5720,],info=attr(buffalo[[6]],"info"))
-## this time is duplicated and much less likely than the first
 # buffalo[[5]] <- ctmm:::new.telemetry(buffalo[[5]][-869,],info=attr(buffalo[[5]],"info"))
+# buffalo[[4]] <- ctmm:::new.telemetry(buffalo[[4]][-606,],info=attr(buffalo[[4]],"info"))
 # save(buffalo,file="data/buffalo.rda",compress="xz")
 
 

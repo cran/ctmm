@@ -1,13 +1,57 @@
+0.3.2 2016-05-12
+
+  * New function overlap for stationary Gaussian distributions and KDEs
+
+  * New function uere calculates UERE from calibration data
+  
+  * akde debias argument removes most bias from area estimtes, now default
+  
+  * akde CIs further improved
+
+  * variogram, periodogram generalized to arbitrary dimensions
+  
+  * periodic mean function option for ctmm, ctmm.fit, ctmm.select, plot.variogram, summary (not yet documented)
+  
+  * New method residuals for ctmm objects
+
+  * ctmm.select now only considers likely model modifications
+  
+  * DOFs now returned in summary
+
+  * New methods [.telemetry, [.variogram, [.periodogram, subset.periodogram
+  
+  * Methods for zoom, raster, writeShapefile now properly assigned to generics
+
+  * new plot.periodogram option max
+  
+  * new periodogram option res.time (with Lagrange interpolation). Old option res renamed to res.freq.
+
+  * tag.local.identifier now used as backup to individual.local.identifier in as.telemetry
+
+  * akde res argument is now relative to the bandwidth
+  
+  * occurrence res.space argument is now relative to the average diffusion
+
+  * plot.telemetry with data error now uses level.UD for error radius instead of one standard deviation
+  
+  * gridding function for fast=TRUE variogram and periodogram now always fast
+  
+  * bad location removed from buffalo "Pepper"
+
 0.3.1 2016-02-23
 
   * variogram.fit now stores global variables of any name
+
   * variogram.fit sliders now use pretty units
+
   * variogram.fit range argument depreciated in favor of a more general CTMM prototype argument
 
   * akde UD CIs significantly improved for high quality datasets
+
   * akde bugfix: subscript out of bounds
 
   * circulatory model introduced via circle ctmm argument
+
   * oscillatory CPF model introduced via CPF ctmm argument
 
   * as.telemetry now imports GPS.HDOP columns with a UERE argument
@@ -21,15 +65,18 @@
 0.3.0 2015-11-26
 
   * New function "occurrence" to estimate occurrence distributions
+  
   * "akde" & "occurrence" class objects generalized to "UD" class
+
   * alpha & alpha.HR arguments simplified and generalized to level & level.UD
+
   * AKDE= and *.HR= arguments generalized to UD= and *.UD=
 
   * New basic telemetry error functionality in ctmm, ctmm.fit
 
   * New function ctmm.select
 
-  * New function subset.telemetry
+  * New methods subset.telemetry and subset.variogram
 
   * Fixed a bug in the uncertainty report of uncorrelated processes
   

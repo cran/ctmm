@@ -8,7 +8,7 @@ Calculate a Kriged occurrence disribution estimate
 This function calculates an occurrence distribution from \code{telemetry} data and a continuous-time movement model.
 }
 \usage{
-occurrence(data,CTMM,H=diag(0,2),res.time=20,res.space=1000,grid=NULL,
+occurrence(data,CTMM,H=0,res.time=20,res.space=1,grid=NULL,
 cor.min=0.5,dt.max=NULL)
 }
 %- maybe also 'usage' for other objects documented here.
@@ -17,7 +17,7 @@ cor.min=0.5,dt.max=NULL)
   \item{CTMM}{A \code{ctmm} movement model from the output of \code{ctmm.fit}.}
   \item{H}{Optional additional banwidth matrix for future use.}
   \item{res.time}{Number of temporal grid points per median timestep.}
-  \item{res.space}{Number of grid points along each axis.}
+  \item{res.space}{Number of grid points along each axis, relative to the average diffusion from a stationary point.}
   \item{grid}{Optional grid specification with columns labeled \code{x} and \code{y}. Not yet supported.}
   \item{cor.min}{Minimum amount of correlation required between locations for Kriging.}
   \item{dt.max}{Maximum time interval allowed between locations for Kriging.}
@@ -38,7 +38,7 @@ C. H. Fleming and W. F. Fagan and T. Mueller and K. A. Olson and P. Leimgruber a
 
 %% ~Make other sections like Warning with \section{Warning }{....} ~
 
-\seealso{ \code{\link{akde}}, \code{\link{raster.UD}} }
+\seealso{ \code{\link{akde}}, \code{\link{raster,UD-method}} }
 
 \examples{\donttest{
 # Load package and data

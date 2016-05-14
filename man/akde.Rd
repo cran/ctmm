@@ -8,14 +8,15 @@ Calculate an autocorrelated kernel density estimate
 This function calculates autocorrelated kernel density estimates of different confidence levels from \code{telemetry} data and a continuous-time movement model.
 }
 \usage{
-akde(data,CTMM,error=0.001,res=200,grid=NULL,...)
+akde(data,CTMM,debias=TRUE,error=0.001,res=10,grid=NULL,...)
 }
 %- maybe also 'usage' for other objects documented here.
 \arguments{
   \item{data}{ 2D timeseries telemetry data represented as a \code{telemetry} object. }
   \item{CTMM}{A \code{ctmm} movement model from the output of \code{ctmm.fit}.}
+  \item{debias}{Debias the distribution for area estimation.}
   \item{error}{Target error for kernel truncation.}
-  \item{res}{Number of grid points along each axis.}
+  \item{res}{Number of grid points along each axis, relative to the bandwidth.}
   \item{grid}{Optional grid specification with columns labeled \code{x} and \code{y}. Not yet supported.}
   \item{...}{Arguments passed to all instances of \code{\link{akde.bandwidth}}.}
 }
@@ -37,13 +38,17 @@ Rigorous home-range estimation with movement data: A new autocorrelated kernel-d
 
 \note{ In the case of coarse grids, the value of \code{PDF} in a grid cell corresponds to the average probability density over the entire rectangular cell.
 
+Prior to \code{ctmm} v0.3.2, the default AKDE method was the autocorrelated Gaussian reference function bandwidth.
+Starting in v0.3.2, the default AKDE method is the autocorrelated Gaussian reference function bandwidth with debiased area.
+
 Prior to \code{ctmm} v0.3.1, AKDEs included only errors due to autocorrelation uncertainty, which are insignificant in cases such as IID data.
-Starting in v0.3.1, \code{akde} calculates an effective sample size \code{DOF.H} and uses this to estimate area uncertainty under a chi-square approxmation.
+Starting in v0.3.1, \code{akde} calculated an effective sample size \code{DOF.H} and used this to estimate area uncertainty under a Gaussian reference function approxmation.
+In v0.3.2, this method was further improved to use \code{DOF.area} from the Gaussian reference function approximation.
 }
 
 %% ~Make other sections like Warning with \section{Warning }{....} ~
 
-\seealso{ \code{\link{akde.bandwidth}}, \code{\link{raster.UD}} }
+\seealso{ \code{\link{akde.bandwidth}}, \code{\link{raster,UD-method}} }
 
 \examples{\donttest{
 # Load package and data

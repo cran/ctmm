@@ -1,14 +1,19 @@
 # akde object generator
 # list of kde objects with info slots
-new.UD <- methods::setClass("UD", representation(info="list"), contains="list")
+new.UD <- methods::setClass("UD", representation("list",info="list"))
 
 
 # Slow lag counter
-tab.lag.DOF <- function(data,fast=NULL,dt=NULL)
+tab.lag.DOF <- function(data,fast=NULL,dt=NULL,w=NULL)
 {
   t <- data$t
   # intelligently select algorithm
   n <- length(t)
+
+  # uniform weights
+  # if(is.null(w)) { w <- rep(1,n)/n }
+  # finish this....
+  
   if(is.null(fast))
   {
     if(n<100) { fast <- FALSE }
@@ -18,7 +23,7 @@ tab.lag.DOF <- function(data,fast=NULL,dt=NULL)
   # calculate lag,n(lag) vectors
   if(fast)
   {
-    lag.DOF <- variogram.fast(data,dt=dt,CI="IID") # count all lag pairs
+    lag.DOF <- variogram.fast(data,dt=dt,CI="IID",axes="t") # count all lag pairs
     lag.DOF$SVF <- NULL
     
     # lag==0 should not be doubled
@@ -54,17 +59,17 @@ tab.lag.DOF <- function(data,fast=NULL,dt=NULL)
 #lag.DOF is an unsupported option for end users
 akde.bandwidth <- function(data,CTMM,fast=NULL,dt=NULL,verbose=FALSE)
 {
+  
   lag.DOF <- tab.lag.DOF(data,fast=fast,dt=dt)
   # Extract lag data
   DOF <- lag.DOF$DOF
   lag <- lag.DOF$lag
   
   sigma <- methods::getDataPart(CTMM$sigma)
-
   # standardized SVF
   CTMM$sigma <- covm(diag(1,2))
-  svf <- svf.func(CTMM)$svf
-  g <- Vectorize(function(t){ svf(t) })
+  svf <- svf.func(CTMM,moment=FALSE)$svf
+  g <- Vectorize(svf)
   
   n <- length(data$t)
   
@@ -86,13 +91,31 @@ akde.bandwidth <- function(data,CTMM,fast=NULL,dt=NULL,verbose=FALSE)
   
   rownames(H) <- c("x","y")
   colnames(H) <- c("x","y")
+
+  CTMM$sigma <- covm(sigma)
+  bias <- akde.bias(CTMM,H=H,lag=lag,DOF=DOF)
   
   if(verbose)
-  { return(list(H=H,DOF.H=DOF.H)) }
+  { return(list(H=H,DOF.H=DOF.H,bias=bias,DOF.area=DOF.area(CTMM))) }
   else
   { return(H) }
 }
 
+# bias of Gaussian Reference function AKDE
+# generalize to non-stationary mean
+akde.bias <- function(CTMM,H,lag,DOF)
+{
+  sigma <- methods::getDataPart(CTMM$sigma)
+  
+  # weighted correlation
+  ACF <- Vectorize( svf.func(CTMM,moment=FALSE)$ACF )
+  COV <- sum(ACF(lag)*DOF)/DOF[1]^2
+  
+  # area inflation factor      
+  bias <- sqrt( det( (1-COV)*sigma + H )/det(sigma) )
+  
+  return(bias)
+}
 
 ###################
 # homerange wrapper function
@@ -104,11 +127,16 @@ homerange <- function(data,CTMM,method="AKDE",...)
 
 #######################################
 # wrap the kde function for our telemetry data format and CIs.
-akde <- function(data,CTMM,error=0.001,res=200,grid=NULL,...)
+akde <- function(data,CTMM,debias=TRUE,error=0.001,res=10,grid=NULL,...)
 {
+  # calculate optimal bandwidth and some other information
   KDE <- akde.bandwidth(data=data,CTMM=CTMM,verbose=TRUE,...)
+  if(debias) { debias <- KDE$bias }
 
-  KDE <- c(KDE,kde(data,KDE$H,alpha=error,res=res,grid=grid))
+  # absolute resolution
+  dr <- sqrt(c(KDE$H[1,1],KDE$H[2,2]))/res
+
+  KDE <- c(KDE,kde(data,KDE$H,bias=debias,alpha=error,dr=dr,grid=grid))
 
   KDE <- new.UD(KDE,info=attr(data,"info"))
   
@@ -116,55 +144,97 @@ akde <- function(data,CTMM,error=0.001,res=200,grid=NULL,...)
 }
 
 
+# if a single H matrix is given, make it into an array of H matrices
+prepare.H <- function(data,H)
+{
+  n <- length(data$x)
+
+  # one matrix given
+  if(length(dim(H))==2)
+  {
+    H <- array(H,c(2,2,n))
+    H <- aperm(H,c(3,1,2))
+  }
+  
+  return(H)
+}
+
+
+############################################
+# construct a grid for the density function
+kde.grid <- function(data,H,alpha=0.001,res=1,dr=NULL)
+{
+  x <- data$x
+  y <- data$y
+  
+  H <- prepare.H(data,H)
+  
+  # how far to extend range from data as to ensure alpha significance in total probability
+  z <- sqrt(-2*log(alpha))
+  DX <- z * apply(H,1,function(h){sqrt(h[1,1])})
+  DY <- z * apply(H,1,function(h){sqrt(h[2,2])})
+  
+  # now to find the necessary extent of our grid
+  rx <- c( min(x - DX) , max(x + DX) )
+  ry <- c( min(y - DY) , max(y + DY) )
+  
+  # grid center
+  mu.x <- mean(rx)
+  mu.y <- mean(ry)
+  
+  if(is.null(dr))
+  {
+    dr <- NULL
+    
+    # grid resolution 
+    dr[1] <- diff(rx)/res
+    dr[2] <- diff(ry)/res
+    
+    # grid locations
+    res <- res/2+1 # half resolution
+    X <- mu.x + (-res):(res)*dr[1]
+    Y <- mu.y + (-res):(res)*dr[2]
+  }
+  else
+  {
+    res <- diff(rx)/dr[1]
+    res <- ceiling(res/2+1)
+    X <- mu.x + (-res):(res)*dr[1]
+    
+    res <- diff(ry)/dr[2]
+    res <- ceiling(res/2+1)
+    Y <- mu.y + (-res):(res)*dr[2]
+  }
+  
+  grid <- list(x=X,y=Y,dr=dr,DX=DX,DY=DY,rx=rx,ry=ry)
+  return(grid)
+}
+
 
 ##################################
 # construct my own kde objects
 # was using ks-package but it has some bugs
 # alpha is the error goal in my total probability
-kde <- function(data,H,W=rep(1,length(data$x)),alpha=0.001,res=100,grid=NULL)
+kde <- function(data,H,bias=FALSE,W=rep(1,length(data$x)),alpha=0.001,res=NULL,dr=NULL,grid=NULL)
 {
+  n <- length(data$x)
   x <- data$x
   y <- data$y
 
   # normalize weights
   W <- W/sum(W)
   
-  # if a single H matrix is given, make it into an array of H matrices
-  n <- length(x)
-  if(length(dim(H))==2)
-  {
-    H <- array(H,c(2,2,n))
-    H <- aperm(H,c(3,1,2))
-  }
-
-  # design a good grid
-  if(is.null(grid))
-  {
-    # how far to extend range from data as to ensure alpha significance in total probability
-    z <- sqrt(-2*log(alpha))
-    DX <- z * apply(H,1,function(h){sqrt(h[1,1])})
-    DY <- z * apply(H,1,function(h){sqrt(h[2,2])})
-    
-    # now to find the necessary extent of our grid
-    min.x <- min(x - DX)
-    max.x <- max(x + DX)
-    
-    min.y <- min(y - DY)
-    max.y <- max(y + DY)
-    
-    # grid center
-    mu.x <- (min.x+max.x)/2
-    mu.y <- (min.y+max.y)/2
-    
-    # grid resolution 
-    dx <- (max.x-min.x)/(res)
-    dy <- (max.y-min.y)/(res)
-    
-    # grid locations
-    res <- res/2+1 # half resolution
-    X <- mu.x + (-res):(res)*dx
-    Y <- mu.y + (-res):(res)*dy
-  }
+  # format bandwidth matrix
+  H <- prepare.H(data,H)
+  
+  if(is.null(grid)) { grid <- kde.grid(data,H=H,alpha=alpha,res=res,dr=dr) }
+  X <- grid$x
+  Y <- grid$y
+  # generalize this for future grid option use
+  DX <- grid$DX
+  DY <- grid$DY
+  dx <- grid$dr[1]
+  dy <- grid$dr[2]
   
   cdf <- array(0,c(length(X),length(Y)))
   for(i in 1:n)
@@ -181,23 +251,58 @@ kde <- function(data,H,W=rep(1,length(data$x)),alpha=0.001,res=100,grid=NULL)
   }
 
   dA <- dx*dy
-  pdf <- cdf/dA
-  
+  if(!bias) { pdf <- cdf/dA }
+
   # cdf: cell probability -> probability included in contour
+  cdf <- pdf2cdf(cdf,finish=FALSE)
+  DIM <- cdf$DIM
+  IND <- cdf$IND
+  cdf <- cdf$cdf
+  
+  # areas are biased to be estimated as debias*area
+  if(bias)
+  {
+    # counting area by dA
+    AREA <- 1:length(cdf)
+
+    # evaluate the debiased cdf on the original area grid
+    cdf <- stats::approx(x=AREA/bias,y=cdf,xout=AREA,yleft=0,yright=1)$y
+    
+    # recalculate pdf
+    pdf <- diff(c(0,cdf))/dA
+    pdf[IND] <- pdf
+    pdf <- array(pdf,DIM)
+  }
+
+  cdf[IND] <- cdf # back in spatial order
+  cdf <- array(cdf,DIM) # back in table form
+  
+  result <- list(PDF=pdf,CDF=cdf,x=X,y=Y,dA=dA)
+  
+  return(result)
+}
+
+########################
+# cdf: cell probability -> probability included in contour
+pdf2cdf <- function(cdf,finish=TRUE)
+{
+  #cdf <- pdf * dA
   DIM <- dim(cdf)
   cdf <- c(cdf) # flatten table
   cdf <- sort(cdf,decreasing=TRUE,method="quick",index.return=TRUE)
   IND <- cdf[[2]] # sorted indices
   cdf <- cdf[[1]]
   cdf <- cumsum(cdf)
-  cdf[IND] <- cdf # back in spatial order
-  cdf <- array(cdf,DIM) # back in table form
-  
-  result <- list(PDF=pdf,CDF=cdf,x=X,y=Y,dA=dA)
 
-  return(result)
+  if(finish)
+  {
+    cdf[IND] <- cdf # back in spatial order
+    cdf <- array(cdf,DIM) # back in table form
+    return(cdf)
+  }
+  else
+  { return(list(cdf=cdf,IND=IND,DIM=DIM)) }
 }
-
 
 #######################
 # robust bi-variate CDF (mean zero assumed)
@@ -382,7 +487,7 @@ CI.UD <- function(object,level.UD=0.95,level=0.95,P=FALSE)
   area <- sum(object$CDF <= level.UD) * object$dA
   
   # chi square approximation of uncertainty
-  area <- chisq.ci(area,DOF=2*object$DOF.H,alpha=1-level)
+  area <- chisq.ci(area,DOF=2*object$DOF.area,alpha=1-level)
   
   if(!P) { return(area) }
   
@@ -407,18 +512,28 @@ summary.UD <- function(object,level.UD=0.95,level=0.95,...)
   scale <- unit.info$scale
   
   area <- array(area/scale,c(1,3))
-  colnames(area) <- c("low","ML","high")
   rownames(area) <- paste("area (",name,")",sep="")
+
+  colnames(area) <- c("low","ML","high")
+
+  SUM <- list()
   
-  return(area)
+  SUM$DOF <- c(object$DOF.area,object$DOF.H)
+  names(SUM$DOF) <- c("area","bandwidth")
+  
+  SUM$CI <- area
+  
+  return(SUM)
 }
 #methods::setMethod("summary",signature(object="UD"), function(object,...) summary.UD(object,...))
 
 
 ################################
 # create a raster of the ML akde
-raster.UD <- function(UD,DF="CDF")
+raster.UD <- function(x,DF="CDF",...)
 {
+  UD <- x
+  
   dx <- UD$x[2]-UD$x[1]
   dy <- UD$y[2]-UD$y[1]
   
@@ -432,6 +547,7 @@ raster.UD <- function(UD,DF="CDF")
   
   return(Raster)
 }
+methods::setMethod("raster",signature(x="UD"), function(x,DF="CDF",...) raster.UD(x,DF=DF,...))
 
 
 ################
@@ -444,8 +560,10 @@ inside <- function(A,B)
 
 
 ##############
-SpatialPolygonsDataFrame.UD <- function(UD,level.UD=0.95,level=0.95)
+SpatialPolygonsDataFrame.UD <- function(object,level.UD=0.95,level=0.95,...)
 {
+  UD <- object
+  
   P <- CI.UD(UD,level.UD,level,P=TRUE)
   NAMES <- c("low","ML","high")
   
@@ -494,11 +612,14 @@ SpatialPolygonsDataFrame.UD <- function(UD,level.UD=0.95,level=0.95)
   
   return(polygons)
 }
+#methods::setMethod("SpatialPolygonsDataFrame",signature(Sr="UD"), function(Sr,level.UD=0.95,level=0.95) SpatialPolygonsDataFrame.UD(Sr,level.UD=level.UD,level=level))
 
 
 ################
-writeShapefile.UD <- function(UD, folder, file=UD@info$identity, level.UD=0.95 ,level=0.95,  ...)
+writeShapefile.UD <- function(object, folder, file=UD@info$identity, level.UD=0.95 ,level=0.95,  ...)
 {
+  UD <- object
+  
   SP <- SpatialPolygonsDataFrame.UD(UD,level.UD=level.UD,level=level)
   
   rgdal::writeOGR(SP, dsn=folder, layer=file, driver="ESRI Shapefile",...)

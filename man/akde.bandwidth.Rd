@@ -16,7 +16,7 @@ akde.bandwidth(data,CTMM,fast=NULL,dt=NULL,verbose=FALSE)
   \item{CTMM}{A \code{ctmm} movement model from the output of \code{ctmm.fit}.}
   \item{fast}{ Use the direct algorithm if \code{FALSE} or the FFT algorithm if \code{TRUE}. The default behavior switches from slow to fast at \code{length(data$t)==100}.}
   \item{dt}{ Optional lag bin width for the FFT algorithm.}
-  \item{verbose}{ Optionally return the effective sample size \code{DOF.H} along with \code{H}.}
+  \item{verbose}{ Optionally return the effective sample size \code{DOF.H} along with the bandwidth matrix \code{H}.}
 }
 \details{
 One of two algorithms is used to count the time lags. The direct method is always exact but comes at an \eqn{O(n^2)} computational cost. The fast \eqn{O(n \log n)} algorithm is based upon the FFT method of Marcotte (1996). This FFT method is exact for evenly scheduled data, and can account for missing observations.

@@ -1,6 +1,6 @@
 \name{plot.variogram}
 \alias{plot.variogram}
-\alias{zoom.variogram}
+\alias{zoom,variogram-method}
 %- Also NEED an '\alias' for EACH other topic documented here.
 \title{
 Plotting methods for variogram objects.
@@ -11,7 +11,7 @@ Produces simple plots of \code{varigram} objects (semi-variance vs. time lag) an
 \usage{
 \S3method{plot}{variogram}(x,CTMM=NULL,level=0.95,fraction=0.5,col="black",col.CTMM="red",...)
 
-\S3method{zoom}{variogram}(x,fraction=0.5,...)
+\S4method{zoom}{variogram}(x,fraction=0.5,...)
 }
 %- maybe also 'usage' for other objects documented here.
 \arguments{

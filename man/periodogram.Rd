@@ -7,22 +7,24 @@
 Calculate the Lomb-Scargle periodogram of animal-tracking data
 }
 \description{
-This function calculates isotropic Lomb-Scargle periodogram (LSP, Scargle, 1982) from a telemetry object. One of two algorithms is used. The slow \eqn{O(n^2)} algorithm vectorizes the exact relations of Scargle (1982), while the fast \eqn{O(n \log n)} algorithm uses the FFT method described in Péron et al (2016). The latter method is only exact if the data are evenly scheduled, permitting gaps, and otherwise it produces some distortion at high frequencies.
+This function calculates isotropic Lomb-Scargle periodogram (LSP, Scargle, 1982) from a telemetry object. One of two algorithms is used. The slow \eqn{O(n^2)} algorithm vectorizes the exact relations of Scargle (1982), while the fast \eqn{O(n \log n)} algorithm uses the FFT method described in Péron et al (2016). The latter method is exact if the data are evenly scheduled, permitting gaps, and otherwise it can be made arbitrarily precise via the \code{res.time} option.
 }
 \usage{
-periodogram(data,CTMM=NULL,T=NULL,dt=NULL,res=1,fast=NULL)
+periodogram(data,CTMM=NULL,dt=NULL,res.freq=1,res.time=1,fast=NULL,axes=c("x","y"))
 
-\S3method{plot}{periodogram}(x,diagnostic=FALSE,col="black",transparency=0.25,grid=TRUE,...)
+\S3method{plot}{periodogram}(x,max=FALSE,diagnostic=FALSE,col="black",transparency=0.25,grid=TRUE,...)
 }
 %- maybe also 'usage' for other objects documented here.
 \arguments{
   \item{data}{ \code{telemetry} data object or list of such objects. }
   \item{CTMM}{ An optional \code{ctmm} model object for specifying the mean. }
-  \item{T}{Sampling period for frequency resolution.}
   \item{dt}{Sampling interval for frequency cutoff.}
-  \item{res}{Multiplier to inflate the frequency resolution.}
-  \item{fast}{Use the exact algorithm if FALSE or the FFT algorithm if TRUE. The default behavior switches from slow to fast at length(data$t)>=10000.}
+  \item{res.freq}{Multiplier to inflate the frequency resolution.}
+  \item{res.time}{Integer multiplier to inflate the temporal resolution. Useful when \code{fast}>0 and the sampling rate is variable.}
+  \item{fast}{Use the exact algorithm if FALSE, the FFT algorithm if TRUE, and further inflate the frequency resolution to a power of two sample size if \code{fast=2}.}
+  \item{axes}{Array of axes to calculate an average (isotropic) variogram for.}
   \item{x}{Output object of \code{periodogram}.}
+  \item{max}{Plot only the local maxima of the periodogram. Use only with \code{res>1}.}
   \item{diagnostic}{Plot the sampling schedule's periodogram to check for spurious periodicities.}
   \item{col}{Color of periodogram.}
   \item{transparency}{Adds transparency to clustered data if greater than zero. Should be less than one.}
@@ -30,13 +32,14 @@ periodogram(data,CTMM=NULL,T=NULL,dt=NULL,res=1,fast=NULL)
   \item{...}{Optional arguments fed to \code{\link{plot}}.}
 }
 \details{
-If no \code{dt} is specified, the median sampling interval is used. This is typically a good assumption for most data, even when there are gaps and this choice corresponds to the discrete Fourier transform (DFT) periodogram for evenly-sampled data. If no \code{T} is specified, the full sampling period is used. 
+If no \code{dt} is specified, the median sampling interval is used. This is typically a good assumption for most data, even when there are gaps and this choice corresponds to the discrete Fourier transform (DFT) periodogram for evenly-sampled data.
+%If no \code{T} is specified, the full sampling period is used. 
 
-The frequency grid interval is finally given by \code{1/(2*(T+dt)*res)} and the frequency cutoff is given by \code{1/(2*dt)}, both in accordance with the DFT periodogram. Increasing \code{res} beyond \code{res=1} will make for a smooth periodogram, but sequential frequencies will be highly correlated.
+At default resolution the frequency grid interval is given by \code{1/(2*(range(data$t)+dt))} and the frequency cutoff is given by \code{1/(2*dt)}, both in accordance with the DFT periodogram. Increasing \code{res.freq} beyond \code{res.freq=1} will make for a smooth periodogram, but sequential frequencies will be highly correlated. The \code{max=TRUE} option to \code{plot.periodogram} may be useful for \code{res>1}. Increasing \code{res.time} beyond \code{res.time=1} is helpful if there is variability in the sampling rate and \code{fast>0}.
 
-If a \code{ctmm} argument is provided, the ML mean will be detrended from the data prior to calculating the periodogram. Otherwise, the sample mean will be detrended.
+If a \code{CTMM} argument is provided, the ML mean will be detrended from the data prior to calculating the periodogram. Otherwise, the sample mean will be detrended.
 
-If a list of \code{telemetry} objects are fed into \code{periodogram}, then a mean \code{periodogram} object will be returned with the default \code{T} and \code{dt} arguments selected on a worst case basis according to the method described by Péron et al (2016).
+If a list of \code{telemetry} objects are fed into \code{periodogram}, then a mean \code{periodogram} object will be returned with the default \code{dt} and base frequency resolution selected on a worst case basis according to the method described by Péron et al (2016).
 }
 
 \value{
@@ -50,7 +53,9 @@ G. Péron, C. H. Fleming, J. M. Calabrese. (2016).
 
 \author{ C. H. Fleming and G. Péron }
 
-\note{ The LSP is totally inappropriate if you in any way alter the sampling rate within the dataset. Stick with variograms in that case. There is a \code{diagnostic} option in \code{plot.periodogram} that can check for spurious periodicities that result from an autocorrelated sampling schedule. This plot will not contain any periodicities if the LSP is appropriate.}
+\note{ The LSP is totally inappropriate if you in any way alter the sampling rate within the dataset. Stick with variograms in that case. There is a \code{diagnostic} option in \code{plot.periodogram} that can check for spurious periodicities that result from an autocorrelated sampling schedule. This plot will not contain any periodicities if the LSP is appropriate.
+
+\code{res.time>1} relies on Lagrange interpolation of the sinusoids (not the data), which can suffer from Runge's phenomena. \code{periodogram} tests for an invalid result and can fail with an error message. For whatever reason, this only seems to happen when \code{res.time=3}. }
 
 %% ~Make other sections like Warning with \section{Warning }{....} ~
 
@@ -64,8 +69,9 @@ data(buffalo)
 #Extract movement data for a single animal
 cilla <- buffalo[[1]]
 
-#Calculate periodogram (fast=TRUE for example)
-LSP <- periodogram(cilla,fast=TRUE)
+#Calculate periodogram (fast>0 for a speedy example)
+#There is drift in the sampling rate here, necessitating res.time>1 with fast>0
+LSP <- periodogram(cilla,fast=2,res.time=2)
 
 #Plot the periodogram
 plot(LSP)

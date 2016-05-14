@@ -4,14 +4,14 @@
 \title{Continuous-time movement modeling}
 \description{
 Description: Functions for identifying, fitting, and applying continuous-space, continuous-time stochastic movement models to animal tracking data.
-The methods are based on those introduced in Fleming et al. (2014-2015).
+The methods are based on those introduced in Fleming et al. (2014-2016).
 }
 \details{
 \tabular{ll}{
 Package: \tab ctmm\cr
 Type: \tab Package\cr
-Version: \tab 0.3.1 \cr
-Date: \tab 2015-02-23 \cr
+Version: \tab 0.3.2 \cr
+Date: \tab 2015-05-12 \cr
 License: \tab GPL-3 \cr
 }
 }

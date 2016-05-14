@@ -12,7 +12,7 @@ The fast \eqn{O(n \log n)} algorithm is based upon the FFT method of Marcotte (1
 Both methods reduce to the standard \dQuote{method of moments} estimator in the case of evenly \emph{scheduled} data, even with missing observations, but they produce slightly different outputs for irregularly sampled data.
 }
 \usage{
-variogram(data,dt=NULL,fast=TRUE,CI="Markov")
+variogram(data,dt=NULL,fast=TRUE,CI="Markov",axes=c("x","y"))
 }
 %- maybe also 'usage' for other objects documented here.
 \arguments{
@@ -20,6 +20,7 @@ variogram(data,dt=NULL,fast=TRUE,CI="Markov")
   \item{dt}{ Lag bin width. An ordered array will yield a progressive coarsening of the lags. Defaults to the median sampling interval.}
   \item{fast}{ Use the lag-weighted algorithm if \code{FALSE} or the FFT algorithm if \code{TRUE}. The slow algorithm outputs a progress bar.}
   \item{CI}{Defaults to only consider non-overlapping lags independent. All unique lags are considered independent with "IID".}
+  \item{axes}{Array of axes to calculate an average (isotropic) variogram for.}
 }
 \details{
 If no \code{dt} is specified, the median sampling interval is used. This is typically a good assumption for most data, even when there are gaps. A \code{dt} coarser than the sampling interval may bias the variogram (particuarly if \code{fast=TRUE}) and so this should be reserved for poor data quality.

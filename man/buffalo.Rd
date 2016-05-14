@@ -16,9 +16,13 @@
 %\source{
 %%  ~~ reference to a publication or URL from which the data were obtained ~~
 %}
-%\references{
-%%  ~~ possibly secondary sources and usages ~~
-%}
+\references{
+Cross, P., Heisey, D., Bowers, J., Hay, C., Wolhuter, J., Buss, P., Hofmeyr, M., Michel, A., Bengis, R., Bird, T. et al (2009).
+Disease, predation and demography: assessing the impacts of bovine tuberculosis on African buffalo by monitoring at individual and population levels.
+Journal of Applied Ecology, 46, 467-475. 
+}
+
+\note{In \code{ctmm} v0.3.2 the erroneous location fix \code{606} was removed from \code{buffalo[[4]]} "Pepper".}
 
 \seealso{ \code{\link{as.telemetry}}, \code{\link{gazelle}}, \code{\link{plot.telemetry}}. }
 

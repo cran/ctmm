@@ -1,5 +1,5 @@
 # variogram class
-new.variogram <- methods::setClass("variogram",representation(info="list"),contains="data.frame")
+new.variogram <- methods::setClass("variogram",representation("data.frame",info="list"))
 
 # extend subset method
 subset.variogram <- function(x,...)
@@ -10,14 +10,22 @@ subset.variogram <- function(x,...)
   new.variogram(x,info=info)
 }
 
+`[.variogram` <- function(x,...)
+{
+  info <- attr(x,"info")
+  x <- utils::getS3method("[","data.frame")(x,...)
+  if(class(x)=="data.frame") { x <- new.variogram(x,info=info) }
+  return(x)
+}
+
 
 # variogram funcion wrapper
-variogram <- function(data,dt=NULL,fast=TRUE,CI="Markov")
+variogram <- function(data,dt=NULL,fast=TRUE,CI="Markov",axes=c("x","y"))
 {
-  if(length(dt)<2) { return(variogram.dt(data,dt=dt,fast=fast,CI=CI)) }
+  if(length(dt)<2) { return(variogram.dt(data,dt=dt,fast=fast,CI=CI,axes=axes)) }
   
   # calculate a variograms at each dt
-  vars <- lapply(dt, function(DT) { variogram.dt(data,dt=DT,fast=fast,CI=CI) } )
+  vars <- lapply(dt, function(DT) { variogram.dt(data,dt=DT,fast=fast,CI=CI,axes=axes) } )
   
   # subset each variogram to relevant range of lags
   dt <- c(dt,Inf)
@@ -40,7 +48,7 @@ variogram <- function(data,dt=NULL,fast=TRUE,CI="Markov")
   
 
 # wrapper for fast and slow variogram codes, for a specified dt
-variogram.dt <- function(data,dt=NULL,fast=NULL,CI="Markov")
+variogram.dt <- function(data,dt=NULL,fast=NULL,CI="Markov",axes=c("x","y"))
 {
   # intelligently select algorithm
   if(is.null(fast))
@@ -50,9 +58,9 @@ variogram.dt <- function(data,dt=NULL,fast=NULL,CI="Markov")
   }
   
   if(fast)
-  { SVF <- variogram.fast(data=data,dt=dt,CI=CI) }
+  { SVF <- variogram.fast(data=data,dt=dt,CI=CI,axes=axes) }
   else
-  { SVF <- variogram.slow(data=data,dt=dt,CI=CI) }
+  { SVF <- variogram.slow(data=data,dt=dt,CI=CI,axes=axes) }
   
   # skip missing data
   SVF <- SVF[where(SVF$DOF>0),]
@@ -63,31 +71,41 @@ variogram.dt <- function(data,dt=NULL,fast=NULL,CI="Markov")
 
 ############################
 # best initial time for a uniform grid
-grid.init <- function(t,dt=stats::median(diff(t)),W=rep(1,length(t)))
+grid.init <- function(t,dt=stats::median(diff(t)),W=array(1,length(t)))
 {
-  cost <- function(t0)
-  { 
-    grid <- (t-t0)/dt
-    return( sum(W*(grid-round(grid))^2) )
-  }
-
-  t0 <- stats::optimize(cost,t[1]+c(-1,1)*dt/2)$minimum
+  # simple analytic periodic cost function
+  # COST = sum_t w(t) sin^2(pi(t-t0)/dt)
+  # maximized anaytically
+  theta <- (2*pi/dt)*t
+  SIN <- W %*% sin(theta)
+  COS <- W %*% cos(theta)
+  t0 <- -dt/(2*pi)*atan(SIN/COS)
+  
+  # OLD METHOD
+  # cost <- function(t0)
+  # { 
+  #   grid <- (t-t0)/dt
+  #   return( sum(W*(grid-round(grid))^2) )
+  # }
+  # 
+  # #t0 <- stats::optimize(cost,t[1]+c(-1,1)*dt/2)$minimum
+  # t0 <- stats::nlm(cost,p=t[1],stepmax=dt/4,iterlim=.Machine$integer.max)$estimate
   
   return(t0)   
 }
 
 ############################
 # smear data across a uniform grid
-gridder <- function(t,x,y,dt)
+gridder <- function(t,z,dt=NULL)
 {
   n <- length(t)
+  COL <- ncol(z)
   
   # time lags
   DT <- diff(t)
   
   # default time step
-  if(is.null(dt))
-  { dt <- stats::median(DT) }
+  if(is.null(dt)) { dt <- stats::median(DT) }
   
   # gap weights to prevent oversampling with coarse dt
   W <- clamp(c(DT[1],DT)/dt) # left weights
@@ -107,9 +125,8 @@ gridder <- function(t,x,y,dt)
   lag <- seq(0,n-1)*dt
   
   # continuously distribute times over uniform grid
-  W.grid <- rep(0,n)
-  X.grid <- rep(0,n)
-  Y.grid <- rep(0,n)
+  W.grid <- numeric(n) # DONT USE ARRAY HERE :(
+  Z.grid <- array(0,c(n,COL))
   for(i in 1:length(t))
   {
     j <- index[i]
@@ -119,76 +136,70 @@ gridder <- function(t,x,y,dt)
       J <- round(j)
       w <- W[i] # total weight
       W.grid[J] <- W.grid[J] + w
-      X.grid[J] <- X.grid[J] + w*x[i]
-      Y.grid[J] <- Y.grid[J] + w*y[i]
+      Z.grid[J,] <- Z.grid[J,] + w*z[i,]
     }
     else
     { # distribution information between adjacent grids
-      
       # left grid portion
       J <- floor(j)
       w <- W[i]*(1-(j-J))
       W.grid[J] <- W.grid[J] + w
-      X.grid[J] <- X.grid[J] + w*x[i]
-      Y.grid[J] <- Y.grid[J] + w*y[i]
-      
+      Z.grid[J,] <- Z.grid[J,] + w*z[i,]
+
       # right grid portion
       J <- ceiling(j)
       w <- W[i]*(1-(J-j))
       W.grid[J] <- W.grid[J] + w
-      X.grid[J] <- X.grid[J] + w*x[i]
-      Y.grid[J] <- Y.grid[J] + w*y[i]
+      Z.grid[J,] <- Z.grid[J,] + w*z[i,]
     }
   }
   
   # normalize distributed information
-  for(i in 1:n)
-  {
-    if(W.grid[i]>0)
-    {
-      X.grid[i] <- X.grid[i]/W.grid[i]
-      Y.grid[i] <- Y.grid[i]/W.grid[i]
-    }
-  }
+  POS <- (W.grid>0)
+  Z.grid[POS,] <- Z.grid[POS,]/W.grid[POS]
+  
+  
   # continuous weights eff up the FFT numerics so discretize weights
   W <- sum(W) # now total DOF
   W.grid <- sign(W.grid) # discrete weights
   
-  return(list(w=W.grid,x=X.grid,y=Y.grid,lag=lag,dt=dt))
+  return(list(w=W.grid,z=Z.grid,lag=lag,dt=dt))
 }
-
 
 ############################
 # FFT VARIOGRAM
-variogram.fast <- function(data,dt=NULL,CI="Markov")
+# SLP sum of lagged product
+variogram.fast <- function(data,dt=NULL,fast=fast,CI="Markov",axes=c("x","y"),SLP=FALSE,ACF=FALSE)
 {
   t <- data$t
-  x <- data$x
-  y <- data$y
-  
+  z <- extract.telemetry(data,axes)
+  COL <- ncol(z)
+
   # smear the data over an evenly spaced time grid
-  GRID <- gridder(t,x,y,dt)
+  GRID <- gridder(t,z,dt)
   W.grid <- GRID$w
-  X.grid <- GRID$x
-  Y.grid <- GRID$y
+  Z.grid <- GRID$z
   lag <- GRID$lag
   
   n <- length(lag)
-  
-  W.grid <- Conj(FFT(pad(W.grid,2*n)))
-  XX.grid <- FFT(pad(X.grid^2,2*n))
-  YY.grid <- FFT(pad(Y.grid^2,2*n))
-  X.grid <- FFT(pad(X.grid,2*n))
-  Y.grid <- FFT(pad(Y.grid,2*n))
+  #N <- 2*n
+  N <- composite(2*n)
+
+  W.grid <- Conj(FFT(pad(W.grid,N)))
+  ZZ.grid <- FFT(rpad(Z.grid^2,N))
+  Z.grid <- FFT(rpad(Z.grid,N))
 
   # pair number. one for x and y data
-  DOF <- round(Re(2*IFFT(abs(W.grid)^2)[1:n]))
+  DOF <- COL*round(Re(IFFT(abs(W.grid)^2)[1:n]))
   # SVF un-normalized
-  SVF <- Re(IFFT(Re(W.grid*(XX.grid+YY.grid))-(abs(X.grid)^2+abs(Y.grid)^2))[1:n])
+  SVF <- Re(IFFT(Re(W.grid*rowSums(ZZ.grid))-rowSums(abs(Z.grid)^2))[1:n])
+  if(SLP) { slp <- Re(IFFT(rowSums(abs(Z.grid)^2))[1:n]) }
   
   # delete missing lags
   SVF <- data.frame(SVF=SVF,DOF=DOF,lag=lag)
+  if(SLP) { SVF$SLP <- slp }
   SVF <- subset(SVF,DOF>0)
+  if(SLP) { slp <- SVF$SLP }
   lag <- SVF$lag
   DOF <- SVF$DOF
   SVF <- SVF$SVF
@@ -214,17 +225,18 @@ variogram.fast <- function(data,dt=NULL,CI="Markov")
   }
   
   result <- data.frame(SVF=SVF,DOF=DOF,lag=lag)
+  if(SLP) { result$SLP <- slp }
   return(result)
 }
 
 ##################################
 # LAG-WEIGHTED VARIOGRAM
-variogram.slow <- function(data,dt=NULL,CI="Markov")
+variogram.slow <- function(data,dt=NULL,CI="Markov",axes=c("x","y"))
 {
   t <- data$t
-  x <- data$x
-  y <- data$y
-
+  z <- extract.telemetry(data,axes)
+  COL <- ncol(z)
+  
   n <- length(t)
   
   # time lags
@@ -233,14 +245,13 @@ variogram.slow <- function(data,dt=NULL,CI="Markov")
   DT.R <- c(DT,DT[n-1])
   
   # default time step
-  if(is.null(dt))
-  { dt <- stats::median(DT) }
+  if(is.null(dt)) { dt <- stats::median(DT) }
 
   # where we will store stuff
   lag <- seq(0,ceiling((t[n]-t[1])/dt))*dt
-  SVF <- rep(0,length(lag))
-  DOF <- rep(0,length(lag))
-  DOF2 <- rep(0,length(lag))
+  SVF <- numeric(length(lag))
+  DOF <- numeric(length(lag))
+  DOF2 <- numeric(length(lag))
   
   pb <- utils::txtProgressBar(style=3)
   for(i in 1:n)
@@ -248,8 +259,8 @@ variogram.slow <- function(data,dt=NULL,CI="Markov")
     for(j in i:n)
     {
       tau <- t[j] - t[i]
-      var <- ((x[j]-x[i])^2 + (y[j]-y[i])^2)/4
-      
+      var <- mean((z[j,]-z[i,])^2)/2
+
       # gap weight
       if(tau==0) { w <- 1 }
       else { w <- (clamp(DT.L[j]/tau)+clamp(DT.R[j]/tau))*(clamp(DT.L[i]/tau)+clamp(DT.R[i]/tau)) }
@@ -342,21 +353,22 @@ svf.func <- function(CTMM,moment=FALSE)
 
   # trace variance
   sigma <- mean(diag(CTMM$sigma)) # now AM.sigma
-  ecc <- CTMM$sigma@par[2]
   
   CPF <- CTMM$CPF
   circle <- CTMM$circle
 
-  if(length(tau)>0 && tau[1]==Inf) { range <- FALSE } else { range <- TRUE }
+  range <- CTMM$range
   tau <- tau[tau>0]
   tau <- tau[tau<Inf]
   K <- length(tau)
-  
-  # parameter covariances
-  # default to no error considered
+
+  # no error considered if missing
   COV <- CTMM$COV
-  if(is.null(COV)) { COV <- diag(0,K+1+(if(circle){1}else{0})) }
-  
+  if(is.null(COV))
+  { COV <- diag(0,1+K+(if(circle){1}else{0})) }
+  else
+  { COV <- area2var(CTMM) }
+    
   # FIRST CONSTRUCT STANDARD ACF AND ITS PARAMTER GRADIENTS
   if(CPF) # Central place foraging
   {
@@ -394,42 +406,49 @@ svf.func <- function(CTMM,moment=FALSE)
   # finish off svf function including circulation if present
   if(!circle)
   {
+    ACF <- function(t) { acf(t) }
     svf <- function(t) { sigma*(1-acf(t)) }
-    grad <- function(t) { c(svf(t)*cosh(ecc)/sigma, -sigma*acf.grad(t)) }
+    grad <- function(t) { c(svf(t)/sigma, -sigma*acf.grad(t)) }
   }
   else
   {
     f <- 2*pi/circle
+    ACF <- function(t) { cos(f*t)*acf(t) }
     svf <- function(t) { sigma*(1-cos(f*t)*acf(t)) }
-    grad <- function(t) { c(svf(t)*cosh(ecc)/sigma, -sigma*cos(f*t)*acf.grad(t), -(f/circle)*sigma*t*sin(f*t)*acf(t)) }
+    grad <- function(t) { c(svf(t)/sigma, -sigma*cos(f*t)*acf.grad(t), -(f/circle)*sigma*t*sin(f*t)*acf(t)) }
   }
   
-  MEAN <- svf.mean(CTMM)
-  SVF <- function(t) { svf(t) + MEAN$svf(t) }
+  if(moment)
+  { drift <- get(CTMM$mean) }
+  else
+  { drift <- stationary }
+  MEAN <- drift@svf(CTMM)
+  
+  SVF <- function(t) { svf(t) + MEAN$EST(t) }
   
   # variance of SVF
   VAR <- function(t)
   {
     g <- grad(t)
-    return( g %*% COV %*% g + MEAN$VAR(t) )
+    return( (g %*% COV %*% g) + MEAN$VAR(t) )
   }
   
   # chi-square effective degrees of freedom
   DOF <- function(t) { return( 2*SVF(t)^2/VAR(t) ) }
   
-  return(list(svf=SVF,VAR=VAR,DOF=DOF))
+  return(list(svf=SVF,VAR=VAR,DOF=DOF,ACF=ACF))
 }
 
 
 ##########
 plot.svf <- function(lag,CTMM,alpha=0.05,col="red",type="l",...)
 {
-  SVF <- svf.func(CTMM)
+  SVF <- svf.func(CTMM,moment=TRUE)
   svf <- SVF$svf
   DOF <- SVF$DOF
   
   # point estimate plot
-  SVF <- Vectorize(function(t){svf(t)})
+  SVF <- Vectorize(svf)
   graphics::curve(SVF,from=0,to=lag,n=1000,add=TRUE,col=col,type=type,...)
   
   # confidence intervals if COV provided
@@ -458,7 +477,11 @@ plot.variogram <- function(x, CTMM=NULL, level=0.95, fraction=0.5, col="black", 
   # number of variograms
   if(class(x)=="variogram" || class(x)=="data.frame") { x <- list(x) }
   n <- length(x)
+
+  # default single comparison model
+  if(is.null(CTMM) && n==1 && !is.null(attr(x[[1]],"info")$CTMM)) { CTMM <- attr(x[[1]],"info")$CTMM }
   
+    
   # maximum lag in data
   max.lag <- sapply(x, function(v){ last(v$lag) } )
   max.lag <- max(max.lag)
@@ -527,35 +550,8 @@ plot.variogram <- function(x, CTMM=NULL, level=0.95, fraction=0.5, col="black", 
     for(i in 1:n)
     {
       # units conversion
-      CTMM[[i]]$sigma <- CTMM[[i]]$sigma/SVF.scale
-      CTMM[[i]]$mu <- CTMM[[i]]$mu/sqrt(SVF.scale)
-      if(length(CTMM[[i]]$tau)>0){ CTMM[[i]]$tau <- CTMM[[i]]$tau/lag.scale }
-      CTMM[[i]]$circle <- CTMM[[i]]$circle/lag.scale
-      
-      if(CTMM[[i]]$mean=="periodic")
-      { attr(CTMM[[i]]$mean,"par")$P <- attr(CTMM[[i]]$mean,"par")$P/lag.scale }
-      
-      scale <- SVF.scale
-      # variance -> diffusion adjustment
-      if(length(CTMM[[i]]$tau)>0 && max(CTMM[[i]]$tau)==Inf)
-      {
-        CTMM[[i]]$sigma <- CTMM[[i]]$sigma*lag.scale
-        scale[1] <- scale[1]/lag.scale
-      }
-      
-      # unit convert uncertainties
-      if(!is.null(CTMM[[i]]$COV))
-      {
-        CTMM[[i]]$COV.mu <- CTMM[[i]]$COV.mu/SVF.scale
-        
-        P <- nrow(CTMM[[i]]$COV)
-        if(P>1){ scale <- c(scale,rep(lag.scale,P-1)) }
-      
-        scale <- diag(1/scale,length(scale))
-        dimnames(scale) <- dimnames(CTMM[[i]]$COV)
-        CTMM[[i]]$COV <- scale %*% CTMM[[i]]$COV %*% scale
-      }
-      
+      CTMM[[i]] <- unit.ctmm(CTMM[[i]],sqrt(SVF.scale),lag.scale)
+
       plot.svf(max.lag/lag.scale,CTMM[[i]],alpha=alpha,type=type,col=col[[i]])
     }
   }
@@ -592,10 +588,7 @@ zoom.variogram <- function(x, fraction=0.5, ...)
   min.step <- min(fraction,10*min.lag/max.lag)
   manipulate::manipulate( { plot.variogram(x, fraction=b^(z-1), ...) }, z=manipulate::slider(1+log(min.step,b),1,initial=1+log(fraction,b),label="zoom") )
 }
-#methods::setMethod("zoom",signature(x="variogram",y="missing"), function(x,y,...) zoom.variogram(x,...))
-#methods::setMethod("zoom",signature(x="variogram",y="variogram"), function(x,y,...) zoom.variogram(list(x,y),...))
-#methods::setMethod("zoom",signature(x="variogram",y="ctmm"), function(x,y,...) zoom.variogram(x,model=y,...))
-#methods::setMethod("zoom",signature(x="variogram"), function(x,...) zoom.variogram(x,...))
+methods::setMethod("zoom",signature(x="variogram"), function(x,fraction=0.5,...) zoom.variogram(x,fraction=fraction,...))
 
 
 ####################################
@@ -694,6 +687,7 @@ variogram.fit <- function(variogram,CTMM=ctmm(),name="GUESS",fraction=0.5,intera
   # parameters for logarithmic slider
   b <- 4
   min.step <- 10*variogram$lag[2]/variogram$lag[n]
+  #min.step <- max(min.step,fraction)
   
   # manipulation controls
   manlist <- list(z = manipulate::slider(1+log(min.step,b),1,initial=1+log(fraction,b),label="zoom"))
@@ -788,8 +782,8 @@ mean.variogram <- function(x,...)
   IDS <- length(x)
   
   # assemble observed lag range
-  lag.min <- rep(0,IDS) # this will be dt
-  lag.max <- rep(0,IDS)
+  lag.min <- numeric(IDS) # this will be dt
+  lag.max <- numeric(IDS)
   for(id in 1:IDS)
   { 
     n <- length(x[[id]]$lag)
@@ -802,8 +796,8 @@ mean.variogram <- function(x,...)
   
   # where we will store everything
   n <- length(lag)
-  SVF <- rep(0,n)
-  DOF <- rep(0,n)
+  SVF <- numeric(n)
+  DOF <- numeric(n)
   
   # accumulate semivariance
   for(id in 1:IDS)

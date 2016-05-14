@@ -1,23 +1,33 @@
 \name{plot.telemetry}
+\alias{plot}
 \alias{plot.telemetry}
-\alias{zoom.telemetry}
+\alias{zoom,list-method}
+\alias{zoom,telemetry-method}
+\alias{zoom,UD-method}
 %- Also NEED an '\alias' for EACH other topic documented here.
 \title{
 Plotting methods for telemetry objects.
 }
 \description{
-Produces simple plots of \code{telemetry} objects, possibly overlayed with a Gaussian \code{ctmm} movement model or an \code{akde} autocorrelated kernel density estimate.
+Produces simple plots of \code{telemetry} objects, possibly overlayed with a Gaussian \code{ctmm} movement model or a \code{UD} utilization distribution.
 }
 \usage{
+plot(x,y,...)
+
 \S3method{plot}{telemetry}(x, CTMM=NULL, UD=NULL, level.UD=0.95, level=0.95, DF="CDF", col="red",
 col.level="black", col.DF="blue", col.grid="grey", fraction=1, add=FALSE, xlim=NULL,
-ylim=NULL, ...)
+ylim=NULL, cex=1, lwd=1, ...)
 
-\S3method{zoom}{telemetry}(x,fraction=1,...)
+\S4method{zoom}{list}(x,...)
+
+\S4method{zoom}{telemetry}(x,fraction=1,...)
+
+\S4method{zoom}{UD}(x,fraction=1,...)
 }
 %- maybe also 'usage' for other objects documented here.
 \arguments{
-  \item{x}{ The 2D timeseries data represented as a \code{telemetry} object or list of such objects. All other arguments are optional.}
+  \item{x}{\code{telemetry} or \code{UD} object.}
+  \item{y}{Unused option.}
   \item{CTMM}{Optional Gaussian \code{ctmm} movement model from the output of \code{ctmm.fit} or list of such objects.}
   \item{UD}{Optional \code{UD} object such as from the output of \code{akde} or list of such objects.}
   \item{level.UD}{Confidence level of Gaussian \code{ctmm} model or \code{UD} estimate contours to be displayed. I.e., \code{level.UD=0.50} can yield the 50\% core home range within the rendered contours.}
@@ -31,6 +41,8 @@ ylim=NULL, ...)
   \item{add}{Setting to \code{TRUE} will disable the unit conversions and base layer plot, so that \code{plot.telemetry} can be overlayed atop other outputs more easily.}
   \item{xlim}{The \code{x} limits \code{c(x1, x2)} of the plot.}
   \item{ylim}{The \code{y} limits \code{c(y1, y2)} of the plot.}
+  \item{cex}{Relative size of plotting symbols. Only used when errors are missing.}
+  \item{lwd}{Line widths of \code{UD} contours.}
   \item{\dots}{ Additional options passed to \code{plot}.}
 }
 
