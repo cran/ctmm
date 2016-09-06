@@ -18,22 +18,22 @@ title("zoomed out")
 m0 <- ctmm(sigma=23*1000^2) # 23 km^2 in m^2
 m1 <- ctmm(sigma=23*1000^2,tau=6*24*60^2) # and 6 days in seconds
 plot(SVF,CTMM=m0,fraction=0.65,level=c(0.5,0.95),col.CTMM="red")
-title("m0")
+title("m0: IID")
 plot(SVF,CTMM=m1,fraction=0.65,level=c(0.5,0.95),col.CTMM="purple")
-title("m1")
+title("m1: OU")
 
 ## ----  fig.show='hold'---------------------------------------------------
 m2 <- ctmm(sigma=23*1000^2,tau=c(6*24*60^2,1*60^2)) # and 1 hour in seconds
 plot(SVF,CTMM=m1,fraction=0.002,col.CTMM="purple")
-title("m1")
+title("m1: OU")
 plot(SVF,CTMM=m2,fraction=0.002,col.CTMM="blue")
-title("m2")
+title("m2: OUF")
 
 ## ----  fig.show='hold'---------------------------------------------------
 plot(SVF,CTMM=m1,fraction=0.65,level=c(0.5,0.95),col.CTMM="purple")
-title("m1")
+title("m1: OU")
 plot(SVF,CTMM=m2,fraction=0.65,level=c(0.5,0.95),col.CTMM="blue")
-title("m2")
+title("m2: OUF")
 
 ## ----  fig.show='hold'---------------------------------------------------
 # simulate fake buffalo with the same sampling schedule
@@ -82,9 +82,9 @@ DATA <- as.telemetry(system.file("extdata","leroy.csv.gz",package="move"))
 GUESS <- ctmm(tau=c(1/4,24)*60^2)
 # first fit without telemetry error
 FITS <- list()
-FITS$CLEAN <- ctmm.fit(DATA,GUESS)
+FITS$NOERR <- ctmm.fit(DATA,GUESS)
 # second fit based on first with telemetry error
-GUESS <- FITS$CLEAN
+GUESS <- FITS$NOERR
 GUESS$error <- TRUE
 FITS$ERROR <- ctmm.fit(DATA,GUESS)
 # model improvement
@@ -103,7 +103,7 @@ M2 <- ctmm.fit(cilla,m2)
 summary(M2)
 
 ## ----  fig.show='hold'---------------------------------------------------
-FITS <- list(M0=M0,M1=M1,M2=M2)
+FITS <- list(IID=M0,OU=M1,OUF=M2)
 summary(FITS)
 
 ## ------------------------------------------------------------------------

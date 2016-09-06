@@ -72,7 +72,19 @@ composite <- function(n) { 2^ceiling(log(n,2)) }
 
 ##### det shouldn't fail because R dropped indices
 det.numeric <- function(x,...) { x }
+determinant.numeric <- function(x,logarithm=TRUE,...)
+{
+  SIGN <- sign(x)
+  if(logarithm)
+  { x <- log(abs(x)) }
+  
+  RESULT <- list(modulus=x,sign=SIGN)
+  attr(RESULT$modulus,"logarithm") <- logarithm
 
+  class(RESULT) <- "det"
+  
+  return(det)
+}
 
 # forwarding function for list of a particular datatype
 zoom.list <- function(x,...)
@@ -167,6 +179,18 @@ PDsolve <- function(M)
   M <- He(M)
 
   return(M)
+}
+
+# sqrtm fails on 1x1 matrix
+# I cannot figure out how to make this "Note" go away!
+# x <- Matrix::Matrix(x,sparse=FALSE,doDiag=FALSE)
+sqrtm <- function(x)
+{
+  DIM <- dim(x)
+  if(all(DIM==c(1,1)))
+  { return ( sqrt(x) ) }
+  else
+  { return( expm::sqrtm(x) ) }
 }
 
 
@@ -265,7 +289,7 @@ lognorm.ci <- function(MLE,COV,alpha=0.05)
 
 # last element of array
 last <- function(vec) { vec[length(vec)] }
-
+first <- function(vec) { vec[1] }
 
 # CLAMP A NUMBER
 clamp <- Vectorize(function(num,min=0,max=1) { if(num<min) {min} else if(num<max) {num} else {max} })
@@ -458,6 +482,7 @@ unit.ctmm <- function(CTMM,length=1,time=1)
   drift <- get(CTMM$mean)
   CTMM <- drift@scale(CTMM,time)
   
+  CTMM$error <- CTMM$error/length
   CTMM$sigma <- CTMM$sigma/length^2
   CTMM$sigma@par["area"] <- CTMM$sigma@par["area"]/length^2
   
@@ -505,10 +530,9 @@ unit.ctmm <- function(CTMM,length=1,time=1)
 ######################
 unit.UD <- function(UD,length=1)
 {
-  UD$x <- UD$x / length
-  UD$y <- UD$y / length
+  UD$r <- lapply(UD$r,function(x){ x/length })
   UD$PDF <- UD$PDF * length^2
-  UD$dA <- UD$dA / length^2
+  UD$dr <- UD$dr / length
   UD$H <- UD$H / length^2
   
   return(UD)

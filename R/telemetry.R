@@ -19,10 +19,11 @@ subset.telemetry <- function(x,...)
   return(x)
 }
 
-extract.telemetry <- function(data,axes)
+get.telemetry <- function(data,axes=c("x","y"))
 {
   z <- "[.data.frame"(data,axes)
   z <- as.matrix(z)
+  colnames(z) <- axes
   return(z)
 }
 
@@ -33,29 +34,34 @@ as.telemetry <- function(CSV,timezone="GMT",projection=NULL,UERE=NULL,...) UseMe
 # Move object
 as.telemetry.Move <- function(CSV,timezone="GMT",projection=NULL,UERE=NULL,...)
 {
-  # clean this up to just dump idData into columns
-  DATA <- data.frame(timestamp=CSV$timestamp,
-                    location.long=CSV@coords[,1],
-                    location.lat=CSV@coords[,2]
+  DATA <- sp::coordinates(CSV)
+  # make sure that lat and long are carried over
+  if(!raster::isLonLat(CSV)){ DATA[,c('location.long','location.lat')] <- sp::coordinates(sp::spTransform(CSV,sp::CRS("+proj=longlat +datum=WGS84"))) }
+  # form basic data.frame
+  DATA <- data.frame(timestamp=move::timestamps(CSV),
+                    location.long=DATA[,1],
+                    location.lat=DATA[,2]
                     )
   
   # possibly empty columns
-  DATA$individual.local.identifier <- CSV@idData$individual.local.identifier
-  DATA$tag.local.identifier <- CSV@idData$tag.local.identifier
+  DATA$individual.local.identifier <- move::idData(CSV)$individual.local.identifier
+  DATA$tag.local.identifier <- move::idData(CSV)$tag.local.identifier
   DATA$eobs.horizontal.accuracy.estimate <- CSV$eobs.horizontal.accuracy.estimate
   DATA$GPS.HDOP <- CSV$GPS.HDOP
   DATA$height.above.ellipsoid <- CSV$height.above.ellipsoid
+  DATA$GPS.VDOP <- CSV$GPS.VDOP
   
+  # can now treat this as a MoveBank CSV
   DATA <- as.telemetry.data.frame(DATA,timezone=timezone,projection=projection,UERE=UERE)
   return(DATA)
 }
-  
+
 # this assumes a MoveBank data.frame
 as.telemetry.data.frame <- function(CSV,timezone="GMT",projection=NULL,UERE=NULL,...)
 {
   # choose id strings from what's present
   id <- as.factor(CSV$individual.local.identifier)
-  if(is.null(id)) { id <- as.factor(CSV$tag.local.identifier) }
+  if(length(id)==0) { id <- as.factor(CSV$tag.local.identifier) }
   
   DATA <- data.frame(id=id,
                     timestamp=as.POSIXct(CSV$timestamp,tz=timezone),
@@ -64,28 +70,39 @@ as.telemetry.data.frame <- function(CSV,timezone="GMT",projection=NULL,UERE=NULL
                     )
 
   # Import and use HDOP if available
-  error <- CSV$GPS.HDOP
-  if(!is.null(error))
+  HDOP <- CSV$GPS.HDOP
+  if(!is.null(HDOP))
   { 
     if(is.null(UERE))
     {
       warning("HDOP values found but UERE not specified. See help(\"uere\").")
-      DATA$HDOP <- error
+      DATA$HDOP <- HDOP
     }
     else
-    { DATA$error <- (error*UERE)^2/2 }
+    { DATA$HERE <- (HDOP*UERE) }
   }
   
   # Import and use e-obs accuracy if available
-  error <- CSV$eobs.horizontal.accuracy.estimate
-  if(!is.null(error)) { DATA$error <- error^2 }
-  # I emailed them, but they didn't know if there needed to be a 1/2 factor here
+  HSTD <- CSV$eobs.horizontal.accuracy.estimate
+  if(!is.null(HSTD)) { DATA$HERE <- sqrt(2)*HSTD }
+  # I emailed them, but they didn't know if there needed to be a sqrt(2) factor here
   # Do I assume this is a sigma_H ?
   # Do I assume this is an x-y standard deviation?
-  
+  # Scott's calibration data is more like the latter
+    
   # Import third axis if available
   DATA$z <- CSV$height.above.ellipsoid
-  # need to now uncertainty (VDOP)
+  VDOP <- CSV$GPS.VDOP
+  if(!is.null(VDOP))
+  { 
+    if(is.null(UERE))
+    {
+      warning("VDOP values found but UERE not specified. See help(\"uere\").")
+      DATA$VDOP <- VDOP
+    }
+    else
+    { DATA$VERE <- (VDOP*UERE) }
+  }
   # need to know where the ground is too
   
   DATA <- stats::na.omit(DATA)
@@ -272,6 +289,7 @@ zoom.telemetry <- function(x,fraction=1,...)
 methods::setMethod("zoom",signature(x="telemetry"), function(x,fraction=1,...) zoom.telemetry(x,fraction=fraction,...))
 methods::setMethod("zoom",signature(x="UD"), function(x,fraction=1,...) zoom.telemetry(x,fraction=fraction,...))
 
+##############
 new.plot <- function(data=NULL,CTMM=NULL,UD=NULL,level.UD=0.95,level=0.95,fraction=1,add=FALSE,xlim=NULL,ylim=NULL,...)
 {
   alpha.UD <- 1-level.UD
@@ -299,12 +317,12 @@ new.plot <- function(data=NULL,CTMM=NULL,UD=NULL,level.UD=0.95,level=0.95,fracti
       for(i in 1:length(UD))
       {
         EXT <- rowSums(UD[[i]]$PDF) > 0
-        EXT <- UD[[i]]$x[EXT]
+        EXT <- UD[[i]]$r$x[EXT]
         EXT <- c(EXT[1],last(EXT))
         ext.x <- range(ext.x,EXT)
         
         EXT <- colSums(UD[[i]]$PDF) > 0
-        EXT <- UD[[i]]$y[EXT]
+        EXT <- UD[[i]]$r$y[EXT]
         EXT <- c(EXT[1],last(EXT))
         ext.y <- range(ext.y,EXT)
       }
@@ -313,6 +331,7 @@ new.plot <- function(data=NULL,CTMM=NULL,UD=NULL,level.UD=0.95,level=0.95,fracti
     # bounding locations from Gaussian CTMM
     if(!is.null(CTMM))
     {
+      if(is.na(alpha.UD[1])) { alpha.UD <- exp(-1) } # mean area
       z <- sqrt(-2*log(alpha.UD))
       
       for(i in 1:length(CTMM))
@@ -385,8 +404,9 @@ new.plot <- function(data=NULL,CTMM=NULL,UD=NULL,level.UD=0.95,level=0.95,fracti
 #######################################
 plot.telemetry <- function(x,CTMM=NULL,UD=NULL,level.UD=0.95,level=0.95,DF="CDF",col="red",col.level="black",col.DF="blue",col.grid="grey",fraction=1,add=FALSE,xlim=NULL,ylim=NULL,cex=1,lwd=1,...)
 {
-  alpha.UD <- 1-level.UD
   alpha <- 1-level
+  alpha.UD <- 1-level.UD
+  if(is.na(alpha.UD)) { alpha.UD <- exp(-1) } # mean area
   
   # listify everything for generality
   if(class(x)=="telemetry" || class(x)=="data.frame") { x <- list(x)  }
@@ -418,7 +438,7 @@ plot.telemetry <- function(x,CTMM=NULL,UD=NULL,level.UD=0.95,level=0.95,DF="CDF"
       CTMM[[i]] <- unit.ctmm(CTMM[[i]],dist$scale)
       
       # plot denisty function lazily reusing KDE code
-      pdf <- kde(list(x=CTMM[[i]]$mu[1,1],y=CTMM[[i]]$mu[1,2]),H=methods::getDataPart(CTMM[[i]]$sigma),res=500)
+      pdf <- kde(data.frame(CTMM[[i]]$mu[1,,drop=FALSE]),H=methods::getDataPart(CTMM[[i]]$sigma),axes=c("x","y"),res=500)
       plot.df(pdf,DF=DF,col=col.DF[[i]],...)
       
       # plot ML estimate, regular style
@@ -460,31 +480,31 @@ plot.telemetry <- function(x,CTMM=NULL,UD=NULL,level.UD=0.95,level=0.95,DF="CDF"
   if(p>1000) { cex <- 1000/p * cex }
   
   # minimum error
-  suppressWarnings(MIN <- min(sapply(x,function(X){min(X$error)})))
-  MIN <- pi*MIN/dist$scale^2 / 2
+  suppressWarnings(MIN <- min(sapply(x,function(X){min(X$HERE)})))
+  # minimum area
+  MIN <- pi*MIN^2/2/dist$scale^2
   
   # scale error to level.UD radius
-  z2 <- -2*log(alpha.UD)
-  MIN <- z2*MIN
+  z <- sqrt(-2*log(alpha.UD))
+  MIN <- z*MIN
   
   for(i in 1:length(x))
   { 
     r <- x[[i]][,c("x","y")]/dist$scale
     
-    if(is.null(x[[i]]$error))
+    if(is.null(x[[i]]$HERE))
     {
       graphics::points(r, cex=cex, col=col[[i]],...)
     }
     else 
     {
-      x[[i]]$error <- z2*x[[i]]$error/dist$scale^2
       # circle radius
-      circles <- sqrt(x[[i]]$error)
+      x[[i]]$HERE <- z*x[[i]]$HERE/sqrt(2)/dist$scale
       # color density proportional to true density
-      alpha <- clamp(max((1/pxpkm)^2,MIN)/(pi*x[[i]]$error))
+      alpha <- clamp(max((1/pxpkm)^2,MIN)/(pi*x[[i]]$HERE^2))
       bg <- scales::alpha(col[[i]],alpha)
       fg <- scales::alpha(col[[i]],alpha/2)
-      graphics::symbols(x=r$x,y=r$y,circles=circles,fg=fg,bg=bg,inches=FALSE,add=TRUE,...)
+      graphics::symbols(x=r$x,y=r$y,circles=x[[i]]$HERE,fg=fg,bg=bg,inches=FALSE,add=TRUE,...)
     }
     
     # also plot velocity vectors at dt scale
@@ -537,6 +557,7 @@ plot.UD <- function(x,level.UD=0.95,level=0.95,DF="CDF",col.level="black",col.DF
     if(!is.na(col.level[[i]]))
     {
       # make sure that correct style is used for low,ML,high even in absence of lows and highs
+      if(is.na(level.UD)) { level.UD <- CI.UD(x[[i]],level.UD,level,P=TRUE)[2] } # ugly/redundant code for now!!!
       plot.kde(x[[i]],level=level.UD,col=scales::alpha(col.level[[i]],1),lwd=lwd,...)
       
       if(!is.null(x[[i]]$DOF.H))
@@ -557,8 +578,8 @@ plot.UD <- function(x,level.UD=0.95,level=0.95,DF="CDF",col.level="black",col.DF
       ecc <- H@par["eccentricity"]
       sigma <- H@par["area"]
       
-      X <- x[[i]]$x
-      Y <- x[[i]]$y
+      X <- x[[i]]$r$x
+      Y <- x[[i]]$r$y
       
       COS <- cos(theta)
       SIN <- sin(theta)
@@ -620,7 +641,7 @@ plot.df <- function(kde,DF="CDF",col="blue",...)
     kde$CDF <- 1 - kde$CDF
   }
 
-  graphics::image(kde$x,kde$y,kde[[DF]],useRaster=TRUE,zlim=zlim,col=col,add=TRUE,...)
+  graphics::image(kde$r,z=kde[[DF]],useRaster=TRUE,zlim=zlim,col=col,add=TRUE,...)
 }
 
 
@@ -633,7 +654,7 @@ plot.kde <- function(kde,level=0.95,labels=round(level*100),col="black",...)
 
   # do something that works
   options(max.contour.segments=.Machine$integer.max)
-  graphics::contour(x=kde$x,y=kde$y,z=kde$CDF,levels=level,labels=labels,labelcex=1,col=col,add=TRUE,...)
+  graphics::contour(kde$r,z=kde$CDF,levels=level,labels=labels,labelcex=1,col=col,add=TRUE,...)
   
   # reinstate initial option (or default if was NULL--can't set back to NULL???)
   # if(is.null(MAX)) { MAX <- 25000 }

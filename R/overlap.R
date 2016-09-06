@@ -119,7 +119,7 @@ overlay <- function(data1,data2,CTMM1,CTMM2,debias=TRUE,error=0.001,res=10,grid=
   PDF <- PDF/OVER
   
   # create CDF for plotting
-  CDF <- pdf2cdf(PDF*dA)
+  CDF <- pmf2cdf(PDF*dA)
   
   # choose largest bandwidth for grid.....
   H <- diag(c(max(HP1$H[1,1],HP2$H[1,1]),max(HP1$H[2,2],HP2$H[2,2])),2)

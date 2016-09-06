@@ -120,6 +120,8 @@ periodogram <- function(data,CTMM=NULL,dt=NULL,res.freq=1,res.time=1,fast=NULL,a
   }
   
   result <- new.periodogram(result,info=mean.info(data))
+  attr(result,"info")$axes <- axes
+  
   
   return(result)
 }
@@ -138,7 +140,7 @@ periodogram.fast <- function(data,n=NULL,dn=NULL,axes=c("x","y"))
   diag(DEN) <- rep(1,length(SPAN))
   DEN <- sapply(1:length(SPAN),function(i){ prod(DEN[i,]) })
   
-  z <- extract.telemetry(data,axes)
+  z <- get.telemetry(data,axes)
   COL <- ncol(z)
   
   W <- numeric(n)
@@ -205,7 +207,7 @@ periodogram.fast <- function(data,n=NULL,dn=NULL,axes=c("x","y"))
 periodogram.slow <- function(data,f=NULL,axes=c("x","y"))
 {
   t <- data$t
-  z <- extract.telemetry(data,axes)
+  z <- get.telemetry(data,axes)
   COL <- ncol(z)
   
   # double angle matrix

@@ -35,7 +35,7 @@ periodogram(data,CTMM=NULL,dt=NULL,res.freq=1,res.time=1,fast=NULL,axes=c("x","y
 If no \code{dt} is specified, the median sampling interval is used. This is typically a good assumption for most data, even when there are gaps and this choice corresponds to the discrete Fourier transform (DFT) periodogram for evenly-sampled data.
 %If no \code{T} is specified, the full sampling period is used. 
 
-At default resolution the frequency grid interval is given by \code{1/(2*(range(data$t)+dt))} and the frequency cutoff is given by \code{1/(2*dt)}, both in accordance with the DFT periodogram. Increasing \code{res.freq} beyond \code{res.freq=1} will make for a smooth periodogram, but sequential frequencies will be highly correlated. The \code{max=TRUE} option to \code{plot.periodogram} may be useful for \code{res>1}. Increasing \code{res.time} beyond \code{res.time=1} is helpful if there is variability in the sampling rate and \code{fast>0}.
+At default resolution the frequency grid interval is given by \code{1/(2*(range(data$t)+dt))} and the frequency cutoff is given by \code{1/(2*dt)}, both in accordance with the DFT periodogram. Increasing \code{res.freq} beyond \code{res.freq=1} will make for a smooth periodogram, but sequential frequencies will be highly correlated. The \code{max=TRUE} option to \code{plot.periodogram} may be useful for \code{res.freq>1}. Increasing \code{res.time} beyond \code{res.time=1} is helpful if there is variability in the sampling rate and \code{fast>0}.
 
 If a \code{CTMM} argument is provided, the ML mean will be detrended from the data prior to calculating the periodogram. Otherwise, the sample mean will be detrended.
 
@@ -48,7 +48,7 @@ Returns a periodogram object (class \code{periodogram}) which is a dataframe con
 \references{
 J. D. Scargle. (1952). Studies in astronomical time-series analysis. II. Statistical aspects of spectral analysis of unevenly-sampled data. The Astrophysical Journal, 263, 835-853.
 
-G. Péron, C. H. Fleming, J. M. Calabrese. (2016).
+G. Péron, C. H. Fleming,  R. C. de Paula, J. M. Calabrese. (2016). Uncovering periodic patterns of space use in animal tracking data with periodograms, including a new algorithm for the Lomb-Scargle periodogram and improved randomization tests. \href{https://movementecologyjournal.biomedcentral.com/articles/10.1186/s40462-016-0084-7}{Movement Ecology, 4:19, DOI:10.1186/s40462-016-0084-7}.
 }
 
 \author{ C. H. Fleming and G. Péron }

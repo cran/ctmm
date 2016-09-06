@@ -9,7 +9,28 @@ stationary.drift <- function(t,CTMM) { cbind( array(1,length(t)) ) }
 # guess some parameters and check the model parameter sanity
 stationary.init <- function(data,CTMM)
 {
-  CTMM$mu <- c(mean(data$x),mean(data$y))
+  z <- get.telemetry(data,CTMM$axes)
+  
+  # weights from errors
+  error <- get.error(data,CTMM)
+  if(CTMM$error) { w <- 1/error }
+  else { w <- rep(1,length(data$t)) }
+  # normalize weights
+  w <- w/sum(w)
+  
+  CTMM$mu <- c(w %*% z)
+
+  z <- t(t(z)-CTMM$mu)
+  
+  CTMM$sigma <- t(z) %*% z
+  
+  # remove error from variability
+  if(CTMM$error) { CTMM$sigma <- CTMM$sigma - (sum(error) * diag(length(CTMM$axes))) }
+  
+  n <- length(data$t)
+  CTMM$sigma <- CTMM$sigma / (n-1)  
+  
+  CTMM$sigma <- covm(CTMM$sigma,isotropic=CTMM$isotropic,axes=CTMM$axes)
   
   return(CTMM)
 }

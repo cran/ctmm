@@ -2,10 +2,10 @@
 importFrom("graphics",plot)
 importFrom("methods",new)
 importFrom("raster",raster,zoom)
-importFrom("stats",simulate)
+importFrom("stats",simulate,predict)
 
 # non-base generics to export
-export(plot,simulate)
+export(plot,simulate,predict)
 export(raster,zoom)
 #export(SpatialPoints,SpatialPolygonsDataFrame)
 #S3method(SpatialPoints,matrix)
@@ -13,7 +13,8 @@ export(raster,zoom)
 #S3method(SpatialPolygonsDataFrame,SpatialPolygons)
 
 #GENERAL FUNCTIONS
-S3method(det,numeric)
+#S3method(det,numeric)
+#S3method(determinant,numeric) # can't get these to work???
 S3method(mean,list)
 S3method(plot,list)
 S3method(summary,list)
@@ -45,7 +46,6 @@ S3method(`[`,periodogram)
 #LIKELIHOOD/MODEL FUNCTIONS
 export(ctmm,ctmm.guess,ctmm.fit,ctmm.loglike,ctmm.select)
 S3method(residuals,ctmm)
-S3method(simulate,ctmm)
 S3method(summary,ctmm)
 
 #MEAN FUNCTIONS
@@ -58,6 +58,10 @@ S3method(writeShapefile,UD)
 
 #KRIGE FUNCTIONS
 export(occurrence)
+S3method(predict,ctmm)
+S3method(predict,telemetry)
+S3method(simulate,ctmm)
+S3method(simulate,telemetry)
 
 #UERE FUNCTIONS
 export(uere)

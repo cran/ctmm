@@ -3,10 +3,9 @@ new.covm <- methods::setClass("covm", representation("matrix",par="numeric",isot
 
 #######################################
 # convenience wrapper for new.ctmm
-ctmm <- function(tau=NULL,isotropic=FALSE,range=TRUE,circle=FALSE,error=FALSE,...)
+ctmm <- function(tau=NULL,isotropic=FALSE,range=TRUE,circle=FALSE,error=FALSE,axes=c("x","y"),...)
 {
   tau.names <- c("position","velocity","acceleration")
-  dim.names <- c("x","y")
   List <- list(...)
   List <- List[!sapply(List,is.null)]
 
@@ -16,15 +15,12 @@ ctmm <- function(tau=NULL,isotropic=FALSE,range=TRUE,circle=FALSE,error=FALSE,..
   
   List$error <- error
   List$circle <- circle
+  List$axes <- axes
   
   # put covariance into universal format
-  if(!is.null(List$sigma)) { List$sigma <- covm(List$sigma,isotropic=isotropic) }
+  if(length(axes)==1) { isotropic <- TRUE }
+  if(!is.null(List$sigma)) { List$sigma <- covm(List$sigma,isotropic=isotropic,axes=axes) }
   List$isotropic <- isotropic
-  
-  # label spatial elements
-  # FIX THIS
-  #if(!is.null(List$mu)) { List$mu <- as.numeric(List$mu) ; names(List$mu) <- dim.names }
-  #if(!is.null(List$COV.mu)) { dimnames(List$COV.mu) <- list(dim.names,dim.names) }
   
   # label tau elements
   K <- length(tau)
@@ -65,8 +61,11 @@ ctmm <- function(tau=NULL,isotropic=FALSE,range=TRUE,circle=FALSE,error=FALSE,..
   {
     # format simple-style stationary mean properly
     List$mu <- rbind(List$mu)
-    colnames(List$mu) <- c("x","y")
+    colnames(List$mu) <- axes
   }
+  
+  # FIX THIS
+  #if(!is.null(List$COV.mu)) { dimnames(List$COV.mu) <- list(axes,axes) }
   
   # supply default parameters / check sanity / label dimensions
   # drift <- get(List$mean)
@@ -88,36 +87,46 @@ ctmm.ctmm <- function(CTMM)
 }
 
 # 2D covariance matrix universal format
-covm <- function(pars,isotropic=FALSE)
+covm <- function(pars,isotropic=FALSE,axes=c("x","y"))
 {
   if(is.null(pars))
   { return(NULL) }
   else if(class(pars)=="covm")
   { return(pars) }
-  else if(length(pars)==1)
-  {
-    pars <- c(pars,0,0)
-    sigma <- diag(pars[1],2)
-  }
-  else if(length(pars)==3)
-  { sigma <- sigma.construct(pars) }
-  else if(length(pars)==4)
-  {
-    sigma <- pars
-    pars <- sigma.destruct(sigma)
-  }
   
-  # isotropic error check
-  if(isotropic)
+  if(length(axes)==1)
   {
-    pars <- c(mean(diag(sigma)),0,0)
-    sigma <- diag(pars[1],2)
+    sigma <- array(pars,c(1,1))
+    pars <- sigma[1,1]
+    
+    names(pars) <- c("area")
   }
-  
-  name <- c("x","y")
-  dimnames(sigma) <- list(name,name)
-  
-  names(pars) <- c("area","eccentricity","angle")
+  else if(length(axes)==2)
+  {
+    if(length(pars)==1)
+    {
+      pars <- c(pars,0,0)
+      sigma <- diag(pars[1],2)
+    }
+    else if(length(pars)==3)
+    { sigma <- sigma.construct(pars) }
+    else if(length(pars)==4)
+    {
+      sigma <- pars
+      pars <- sigma.destruct(sigma)
+    }
+    
+    # isotropic error check
+    if(isotropic)
+    {
+      pars <- c(mean(diag(sigma)),0,0)
+      sigma <- diag(pars[1],2)
+    }
+    
+    names(pars) <- c("area","eccentricity","angle")
+  }
+
+  dimnames(sigma) <- list(axes,axes)
   
   new.covm(sigma,par=pars,isotropic=isotropic)
 }
@@ -309,23 +318,70 @@ ctmm.repair <- function(CTMM)
   return(CTMM)
 }
 
-## prepare error array
-error.prepare <- function(DATA,CTMM)
+## prepare error array, also return a flag #
+# 0 : no error
+# 1 : constant error parameter fit
+# 2 : proportional error parameter fit to DOP value
+# 3 : full error no fit
+get.error <- function(DATA,CTMM,flag=FALSE)
 {
   n <- length(DATA$t)
+  axes <- CTMM$axes
+  COLS <- names(DATA)
   
   # model the error
-  if(CTMM$error>0)
+  if(CTMM$error)
   {
     # is the data supplied with error estimates
-    error <- DATA$error
-    # if not, then use the modeled error
-    if(is.null(error)) { error <- rep(as.numeric(CTMM$error),n) }
+    if(any(is.element(axes,c("x","y"))))
+    {
+      if(is.element("HERE",COLS))
+      { 
+        error <- DATA$HERE^2/2
+        FLAG <- 3
+      }
+      else if(is.element("HDOP",COLS))
+      {
+        error <- (CTMM$error * DATA$HDOP)^2/2
+        FLAG <- 2
+      }
+      else
+      {
+        error <- rep(CTMM$error^2/2,n)
+        FLAG <- 1
+      }
+    }
+    else if(axes=="z")
+    {
+      if(is.element("VERE",COLS))
+      { 
+        error <- DATA$VERE^2
+        FLAG <- 3
+      }
+      else if(is.element("VDOP",COLS))
+      {
+        error <- (CTMM$error * DATA$VDOP)^2
+        FLAG <- 2
+      }
+      else
+      {
+        error <- rep(CTMM$error^2,n)
+        FLAG <- 1
+      }
+    }
   }
   else
-  { error <- rep(0,n) }
+  {
+    error <- rep(0,n)
+    FLAG <- 0
+  }
   
-  return(error)
+  if(flag) { return(FLAG) }
+  else
+  { 
+    attr(error,"flag") <- FLAG
+    return(error)
+  }
 }
 
 # degree of continuity in the model

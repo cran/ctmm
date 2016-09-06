@@ -1,3 +1,23 @@
+0.3.3 2016-09-05
+
+  * Improved support for 'move' objects
+
+  * Preliminary 3D AKDE support, debiased
+
+  * New method predict for ctmm objects
+  
+  * akde now supports smoothing errors
+
+  * variogram.fit and plot.variogram now support telemetry error
+
+  * UERE fitting now possible simultaneous with tracking data
+
+  * tag.local.identifier now used as backup to individual.local.identifier in as.telemetry
+  
+  * multiple bug fixes in uere
+  
+  * res.space fixed in occurrence
+
 0.3.2 2016-05-12
 
   * New function overlap for stationary Gaussian distributions and KDEs
@@ -25,8 +45,6 @@
   * new plot.periodogram option max
   
   * new periodogram option res.time (with Lagrange interpolation). Old option res renamed to res.freq.
-
-  * tag.local.identifier now used as backup to individual.local.identifier in as.telemetry
 
   * akde res argument is now relative to the bandwidth
   

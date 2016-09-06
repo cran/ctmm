@@ -12,7 +12,7 @@ Specify, fit, and select continuous-time movement models
 The fitting functions wrap around \code{optim} and \code{ctmm.loglike} to maximize the likelihood function of continuous-time movement models described in Fleming et al (2014) and Fleming et al (2015), given 2D animal tracking data.
 }
 \usage{
-ctmm(tau=NULL,isotropic=FALSE,range=TRUE,circle=FALSE,error=FALSE,...)
+ctmm(tau=NULL,isotropic=FALSE,range=TRUE,circle=FALSE,error=FALSE,axes=c("x","y"),...)
 
 ctmm.loglike(data,CTMM,REML=FALSE,verbose=FALSE)
 
@@ -28,7 +28,8 @@ ctmm.select(data,CTMM,verbose=FALSE,level=0.99,IC="AICc",...)
   \item{circle}{The period it takes the animal to stochastically circle its mean location.}
 %  \item{CPF}{A Boolean denoting whether to consider an oscillatory CPF model.}
   \item{error}{A Boolean denoting whether or not to use annotated telemetry error estimates or an estimate of the error's variance if the data are not annotated with error estimates.}
-  \item{data}{ The 2D timeseries data represented as a \code{telemetry} object. }
+  \item{axes}{Spatial dimensions of the movement model.}
+  \item{data}{ Timeseries data represented as a \code{telemetry} object. }
   \item{CTMM}{ A \code{ctmm} movement-model object containing the initial parameter guesses conforming to the basic structure of the model hypothesis. \code{ctmm.select} can accept a list of such objects.}
   \item{REML}{Use residual maximum likelihood if \code{TRUE}. Not recommended.}
   \item{verbose}{Return additional information. See "Value" below.}

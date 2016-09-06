@@ -1,16 +1,8 @@
-global variable for units of current plot?
-
-proj4: email about making north up
-plot N vector in corner
-
-sort.ctmm
-sort.list
-name.ctmm
-  
-dogleg splines
-  degree = 1,2?
-  migration = times?
-  settlement = times?
+periodic simulate.telemetry (not pure ctmm)
+periodic smoother (velocity vector--check)
+periodic akde...
+periodic plot ctmm
+periodic vignette: periodogram, ctmm.select
 
 generalize Gaussian area?
   UDs for both mean and population
@@ -18,23 +10,43 @@ generalize Gaussian area?
 time/tube plot 
 periodic plot.ctmm
 
-periodic simulate.telemetry (not pure ctmm)
-periodic smoother (velocity vector--check)
-periodic akde...
+level.UD of summary UD/ctmm return Inf
+  test p-value against sample size
 
-periodic vignette: periodogram, ctmm.select
+store fixed error in data
+store fixed reml ll in data
+  log(det(U%*%U)) not included in ctmm.loglike (precompute in ctmm.fit for fixed U)
+  This really needs to be in ctmm.loglike if you expect people to use this function -- feed it through like mean.vec
+ctmm.fit PARS==0 REML=TRUE
+don't delete mean off of IOU and BM... need that to Krige I think
+IOU with drift not setup correctly
+
+effect of errors on variogram, variogram.fit ?
+
+summary on z-axis ctmm.fit might be buggy
+
+sort.ctmm
+sort.list
+name.ctmm
+name.generic
+
+zoom.telemetry x,y offset clicker
+
+global variable for units of current plot?
+
+proj4: email about making north up
+plot N vector in corner
+
+dogleg splines
+  degree = 1,2?
+  migration = times?
+  settlement = times?
 
 model option vignette
 IID, OU, OUF, (an)isotropic table in vignette
 
 fixed circulation option?
 Fixed period parameters during fitting?
-
-log(det(U%*%U)) not included in ctmm.loglike (precompute in ctmm.fit for fixed U)
-This really needs to be in ctmm.loglike if you expect people to use this function -- feed it through like mean.vec
-ctmm.fit PARS==0 REML=TRUE
-don't delete mean off of IOU and BM... need that to Krige I think
-IOU with drift not setup correctly
 
 3d periodogram, ctmm.fit, krige, kde
 

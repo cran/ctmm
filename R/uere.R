@@ -5,45 +5,38 @@ uere <- function(data,diagnostic=FALSE)
   
   n <- 0
   mu <- list()
-  W <- 0
-  r <- 0
+  r <- list()
   # calculate mean and residuals
   for(i in 1:length(data))
   {
     if(is.null(data[[i]]$HDOP)) { stop("Failed to import GPS.HDOP column from Movebank file || missing HDOP column in telemetry object.") }
     
-    w <- 1/data[[i]]$HDOP^2
-    W[i] <- sum(w)
+    w <- 2/data[[i]]$HDOP^2
     n <- n + 2*length(w)
-    mu[[i]] <- c( sum(w*data[[i]]$x) , sum(w*data[[i]]$x) )/W[i]
-    r <- r + sum(w*(data[[i]]$x - mu[[i]][1])^2) + sum(w*(data[[i]]$y - mu[[i]][2])^2)
+    mu[[i]] <- c( w %*% data[[i]]$x , w %*% data[[i]]$y )/sum(w)
+    r[[i]] <- c( sqrt(w) * (data[[i]]$x - mu[[i]][1]) , sqrt(w) * (data[[i]]$y - mu[[i]][2]) )
   }
+  r <- unlist(r)
   
   # total degrees of freedom
   n <- n - 2*length(data)
   
   # residuals and UERE
-  UERE <- sqrt(r/n)
+  UERE <- sqrt(sum(r^2/n))
+  CI <- sqrt(chisq.ci(UERE^2,DOF=n))
   
   if(diagnostic)
   {
-    CTMM <- list()
-    for(i in 1:length(data))
-    {
-      data[[i]]$error <- (UERE*data[[i]]$HDOP)^2/2
-      sigma <- UERE^2/W[i]/2
-      COV <- array(sigma^2 * 2/n,c(1,1))
-      dimnames(COV) <- list("area","area")
-      CTMM[[i]] <- ctmm(mu=mu[[i]],sigma=sigma,COV=COV,isotropic=TRUE)
-    }
-    
-    plot(data,CTMM=CTMM,col.DF="black",col=grDevices::rainbow(length(data)))
-    
-    RETURN <- list()
-    RETURN$UERE <- UERE
-    RETURN$UERE95CI <- chisq.ci(UERE,DOF=n)
-    
-    return(RETURN)
+    graphics::hist(r,breaks="scott",freq=FALSE,main="residual distribution",xlab="normalized residual")
+    graphics::lines(stats::density(r,bw="SJ"))
+    DNORM <- Vectorize(function(x){ stats::dnorm(x,sd=UERE) })
+    graphics::curve(DNORM,from=min(r),to=max(r),n=1001,add=TRUE,col="red",lwd=2)
+    DNORM <- Vectorize(function(x){ stats::dnorm(x,sd=CI[1]) })
+    graphics::curve(DNORM,from=min(r),to=max(r),n=1001,add=TRUE,col="red")
+    DNORM <- Vectorize(function(x){ stats::dnorm(x,sd=CI[3]) })
+    graphics::curve(DNORM,from=min(r),to=max(r),n=1001,add=TRUE,col="red")
+
+    return(CI)
   }
   else
   { return( UERE ) }
