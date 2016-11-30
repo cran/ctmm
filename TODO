@@ -1,8 +1,41 @@
-periodic simulate.telemetry (not pure ctmm)
-periodic smoother (velocity vector--check)
-periodic akde...
-periodic plot ctmm
-periodic vignette: periodogram, ctmm.select
+Make Kalman filter updates manifestly positive definite
+  Joseph form covariance update
+
+pregridder composite dimension?
+  I don't remember what this note means... :(
+
+pREML
+store fixed error in data
+store fixed reml ll in data
+  log(det(U%*%U)) not included in ctmm.loglike (precompute in ctmm.fit for fixed U)
+  This really needs to be in ctmm.loglike if you expect people to use this function -- feed it through like mean.vec
+ctmm.fit PARS==0 REML=TRUE
+don't delete mean off of IOU and BM... need that to Krige I think
+IOU with drift not setup correctly
+
+LOW HANGING FRUIT
+* 1-point azimuthal equidistant projection quick option
+* have summary return a warning on occurrence distributions
+* variogram.list <- mean-lapply-variogram
+* occurrence.list
+  + need to choose/enforce the same time steps?
+  + weight by period of data?
+* mean.UD on occurrence objects; +1 DOF
+* simulate.UD
+* krige velocities, activity plot
+* put overlap in vignette after publication
+* predict plot with transparency proportional to uncertainty (Google Earth?)
+* mean.ctmm: list -> iid
+
+PERIODIC
+* simulate.telemetry (not pure ctmm)
+* smoother (velocity vector--check)
+* akde... slow exact and fast approximation or block toeplitz matrix
+* plot ctmm
+* vignette: periodogram, ctmm.select
+* maned wolf data: individually projected subset in reserve with largest daily periodicities and no weekly periodicity
+  + submit to Rogerio first to check over, ask about MoveBank DOI
+  + get MoveBank DOI
 
 generalize Gaussian area?
   UDs for both mean and population
@@ -12,14 +45,6 @@ periodic plot.ctmm
 
 level.UD of summary UD/ctmm return Inf
   test p-value against sample size
-
-store fixed error in data
-store fixed reml ll in data
-  log(det(U%*%U)) not included in ctmm.loglike (precompute in ctmm.fit for fixed U)
-  This really needs to be in ctmm.loglike if you expect people to use this function -- feed it through like mean.vec
-ctmm.fit PARS==0 REML=TRUE
-don't delete mean off of IOU and BM... need that to Krige I think
-IOU with drift not setup correctly
 
 effect of errors on variogram, variogram.fit ?
 
