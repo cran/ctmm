@@ -60,20 +60,24 @@ ci.tau <- function(tau,COV,alpha=0.05,min=0,max=Inf)
 }
 
 ###
-summary.ctmm <- function(object,level=0.95,level.UD=0.95,...)
+summary.ctmm <- function(object,level=0.95,level.UD=0.95,units=TRUE,...)
 {
   CLASS <- class(object)
   if(CLASS=="ctmm")
-  { return(summary.ctmm.single(object,level=level,level.UD=level.UD)) }
+  { return(summary.ctmm.single(object,level=level,level.UD=level.UD,units=units)) }
   else if(CLASS=="list")
   { return(summary.ctmm.list(object,level=level,level.UD=level.UD)) }
 }
 
 ######################################################
 # Summarize results
-summary.ctmm.single <- function(object, level=0.95, level.UD=0.95, ...)
+summary.ctmm.single <- function(object, level=0.95, level.UD=0.95, units=TRUE, ...)
 {
-  if(is.na(level.UD)) { level.UD <- 1-exp(-1) } # normal mean area
+  # do we convert units
+  if(units)
+  { thresh <- 1 }
+  else
+  { thresh <- Inf }
   
   alpha <- 1-level
   alpha.UD <- 1-level.UD
@@ -104,7 +108,7 @@ summary.ctmm.single <- function(object, level=0.95, level.UD=0.95, ...)
   par[1,] <- -2*log(alpha.UD)*pi*par[1,]
   
   # pretty area units
-  unit.list <- unit(par[1,2],"area")
+  unit.list <- unit(par[1,2],"area",thresh=thresh)
   name[1] <- unit.list$name
   scale[1] <- unit.list$scale
   
@@ -114,7 +118,7 @@ summary.ctmm.single <- function(object, level=0.95, level.UD=0.95, ...)
   {
     for(i in 2:P)
     {
-      unit.list <- unit(par[i,2],"time")
+      unit.list <- unit(par[i,2],"time",thresh=thresh)
       name[i] <- unit.list$name
       scale[i] <- unit.list$scale
     }
@@ -124,6 +128,7 @@ summary.ctmm.single <- function(object, level=0.95, level.UD=0.95, ...)
   if(continuity(object)>1)
   {
     COV <- area2var(object,MEAN=TRUE)
+    COV <- rm.name(COV,"error")
     
     # RMS velocity
     if(CPF)
@@ -159,7 +164,7 @@ summary.ctmm.single <- function(object, level=0.95, level.UD=0.95, ...)
     # root mean square velocity
     # pretty units
     rms <- sqrt(ms)
-    unit.list <- unit(rms,"speed")
+    unit.list <- unit(rms,"speed",thresh=thresh)
     name <- c(name,unit.list$name)
     scale <- c(scale,unit.list$scale)
     
@@ -167,7 +172,27 @@ summary.ctmm.single <- function(object, level=0.95, level.UD=0.95, ...)
     # rms <- sqrt(norm.ci(ms,var.ms,alpha=alpha))
     
     par <- rbind(par,rms)
-    rownames(par)[P+1] <- "speed"
+    rownames(par)[nrow(par)] <- "speed"
+  }
+  
+  # did we estimate errors?
+  if("error" %in% rownames(object$COV))
+  {
+    error <- object$error
+    VAR <- object$COV["error","error"]
+    # convert to chi^2
+    VAR <- (2*error)^2 * VAR
+    error <- error^2
+    # CIs
+    error <- chisq.ci(error,COV=VAR,alpha=alpha)
+    # back to meters/distance
+    error <- sqrt(error)
+    unit.list <- unit(error,"length",thresh=thresh)
+    name <- c(name,unit.list$name)
+    scale <- c(scale,unit.list$scale)
+    
+    par <- rbind(par,error)
+    rownames(par)[nrow(par)] <- "error"
   }
   
   # Fix unit choice
@@ -243,12 +268,13 @@ summary.ctmm.list <- function(object, IC="AICc", ...)
 
 ###############
 # keep removing uncertain parameters until AIC stops improving
-ctmm.select <- function(data,CTMM,verbose=FALSE,level=0.99,IC="AICc",...)
+ctmm.select <- function(data,CTMM,verbose=FALSE,level=0.99,IC="AICc",trace=FALSE,...)
 {
   alpha <- 1-level
   drift <- get(CTMM$mean)
   
     # fit the intital guess
+  if(trace) { message("Fitting models ",name.ctmm(CTMM)) }
   CTMM <- ctmm.fit(data,CTMM,...)
   OLD <- ctmm()
   MODELS <- list(CTMM)
@@ -306,6 +332,7 @@ ctmm.select <- function(data,CTMM,verbose=FALSE,level=0.99,IC="AICc",...)
     GUESS <- c(GUESS,drift@refine(CTMM))
     
     # fit every model
+    if(trace) { message("Fitting models ",paste(sapply(GUESS,name.ctmm),collapse=", ")) }
     GUESS <- lapply(GUESS,function(g){ctmm.fit(data,g,...)})
     MODELS <- c(MODELS,GUESS)
     

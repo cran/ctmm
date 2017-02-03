@@ -79,13 +79,16 @@ pull.column <- function(object,NAMES,FUNC=as.numeric)
 {
   # consider alternative spellings of NAMES
   NAMES <- c(NAMES,gsub("[.]","_",NAMES))
-  NAMES <- c(NAMES,tolower(NAMES))
+  NAMES <- tolower(NAMES)
   
-  NAMES <- intersect(NAMES,names(object))
-  if(length(NAMES))
-  { return( FUNC(object[,NAMES[1]]) ) }
-  else
-  { return(NULL) }
+  COLS <- names(object)
+  for(COL in COLS)
+  {
+    if(tolower(COL) %in% NAMES)
+    { return( FUNC(object[,COL]) ) }
+  }
+  # nothing matched
+  return(NULL)
 }
 
 # this assumes a MoveBank data.frame
@@ -120,7 +123,7 @@ as.telemetry.data.frame <- function(object,timeformat="",timezone="GMT",projecti
   {
     if(is.null(UERE))
     {
-      warning("HDOP values found but UERE not specified. See help(\"uere\").")
+      warning("HDOP values found but UERE not specified and will have to be fit. See help(\"uere\").")
       DATA$HDOP <- COL
     }
     else
@@ -380,9 +383,8 @@ new.plot <- function(data=NULL,CTMM=NULL,UD=NULL,level.UD=0.95,level=0.95,fracti
     }
 
     # bounding locations from Gaussian CTMM
-    if(!is.null(CTMM))
+    if(!is.null(CTMM) & !is.na(level.UD))
     {
-      if(is.na(alpha.UD[1])) { alpha.UD <- exp(-1) } # mean area
       z <- sqrt(-2*log(alpha.UD))
       
       for(i in 1:length(CTMM))
@@ -392,6 +394,7 @@ new.plot <- function(data=NULL,CTMM=NULL,UD=NULL,level.UD=0.95,level=0.95,fracti
         
         # capture outer contour if present
         const <- 1
+        if(is.na(level)) { alpha <- 1 } # will use ML contour
         if(!is.null(CTMM[[i]]$COV))
         {
           K <- length(CTMM[[i]]$tau)
@@ -496,7 +499,7 @@ plot.telemetry <- function(x,CTMM=NULL,UD=NULL,level.UD=0.95,level=0.95,DF="CDF"
       plot.ctmm(CTMM[[i]],alpha.UD,col=col.level[[i]],lwd=lwd,...)
       
       # plot CIs dashed if present
-      if(!is.null(CTMM[[i]]$COV))
+      if(!is.null(CTMM[[i]]$COV) & !is.na(level))
       {
         # proportionality constants for outer CIs
         const <- confint.ctmm(CTMM[[i]],alpha)["area",]
@@ -524,7 +527,13 @@ plot.telemetry <- function(x,CTMM=NULL,UD=NULL,level.UD=0.95,level=0.95,DF="CDF"
   # PLOT TELEMETRY DATA
   
   # color array for plots
-  col <- array(col,length(x))
+  if(!is.list(col))
+  {
+    if(length(x)>1)
+    { col <- array(col,length(x)) }
+    else
+    { col <- list(array(col,length(x[[1]]$t))) }
+  }
   
   # automagic the plot point size
   p <- sum(sapply(x, function(d) { length(d$t) } ))
@@ -609,7 +618,7 @@ plot.UD <- function(x,level.UD=0.95,level=0.95,DF="CDF",col.level="black",col.DF
   # CONTOURS
   for(i in 1:length(x))
   {
-    if(!any(is.na(col.level[i,])))
+    if(!any(is.na(col.level[i,])) & !is.na(level.UD))
     {
       # make sure that correct style is used for low,ML,high even in absence of lows and highs
       plot.kde(x[[i]],level=level.UD,col=scales::alpha(col.level[i,],1),lwd=lwd,...)
