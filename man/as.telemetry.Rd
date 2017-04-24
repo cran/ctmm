@@ -6,19 +6,17 @@
 \alias{summary.telemetry}
 \encoding{UTF-8}
 %- Also NEED an '\alias' for EACH other topic documented here.
-\title{
-Import, coerce, and summarize MoveBank data
-}
+\title{Import, coerce, and summarize MoveBank data}
 \description{Functions to import MoveBank csv files, \code{data.frame}, and \code{Move} objects, coerce them into \code{telemetry} objects, and summarize them.}
 
 \usage{
-as.telemetry(object,timeformat="",timezone="GMT",projection=NULL,UERE=NULL,...)
+as.telemetry(object,timeformat="",timezone="UTC",projection=NULL,UERE=NULL,...)
 
-\S3method{as.telemetry}{character}(object,timeformat="",timezone="GMT",projection=NULL,UERE=NULL,...)
+\S3method{as.telemetry}{character}(object,timeformat="",timezone="UTC",projection=NULL,UERE=NULL,...)
 
-\S3method{as.telemetry}{data.frame}(object,timeformat="",timezone="GMT",projection=NULL,UERE=NULL,...)
+\S3method{as.telemetry}{data.frame}(object,timeformat="",timezone="UTC",projection=NULL,UERE=NULL,...)
 
-\S3method{as.telemetry}{Move}(object,timeformat="",timezone="GMT",projection=NULL,UERE=NULL,...)
+\S3method{as.telemetry}{Move}(object,timeformat="",timezone="UTC",projection=NULL,UERE=NULL,...)
 
 \S3method{summary}{telemetry}(object,...)
 }
@@ -29,7 +27,7 @@ as.telemetry(object,timeformat="",timezone="GMT",projection=NULL,UERE=NULL,...)
   \item{timezone}{Timezone argument for \code{\link{strptime}}.}
   \item{projection}{Optional PROJ.4 projection argument to be fed to \code{\link[rgdal]{project}}.}
   \item{UERE}{"User equivalent range errors" needed to translate DOP values into location uncertainty.}
-  \item{...}{Optional arguments to be fed to \code{\link{read.csv}}.}
+  \item{...}{Optional arguments to be fed to \code{\link{fread}} or \code{\link{read.csv}}, in the case of compressed files.}
 }
 
 \details{
@@ -47,7 +45,7 @@ The \code{GPS.HDOP} value requires the device's \code{UERE} value to be translat
 
 %\references{}
 
-\author{C. H. Fleming, B. Kranstauber, G. Péron, and K. Safi.}
+\author{C. H. Fleming, X. Dong, B. Kranstauber, G. Péron, and K. Safi.}
 
 %\note{}
 

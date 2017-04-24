@@ -3,12 +3,11 @@
 \alias{raster,UD-method}
 \alias{SpatialPoints.telemetry}
 \alias{SpatialPolygonsDataFrame.UD}
+\alias{writeRaster,UD,character-method}
 \alias{writeShapefile}
 \alias{writeShapefile.UD}
 %- Also NEED an '\alias' for EACH other topic documented here.
-\title{
-Export ctmm data formats
-}
+\title{Export ctmm data formats}
 \description{Functions to export \code{ctmm} data formats into common \code{sp}, \code{raster}, and ESRI formats.}
 
 \usage{
@@ -17,6 +16,8 @@ Export ctmm data formats
 SpatialPoints.telemetry(object,...)
 
 SpatialPolygonsDataFrame.UD(object,level.UD=0.95,level=0.95,...)
+
+\S4method{writeRaster}{UD,character}(x,filename,format,DF="CDF",...)
 
 writeShapefile(object,...)
 
@@ -29,12 +30,16 @@ writeShapefile(object,...)
   \item{object}{ \code{telemetry} or \code{UD} object. }
   \item{level.UD}{ Confidence level of the UD area. I.e., the 50\% core home range would be given by \code{level.UD=0.50}. }
   \item{level}{ Confidence level for the magnitude of the above area. I.e., the 95\% CI of the core home range area. }
+  \item{filename}{Character name of file for raster file.}
+  \item{format}{Character format, if not inferred from \code{filename} extension (see \code{\link[raster]{writeRaster}}.)}
   \item{folder}{Character name of folder for shapefile.}
   \item{file}{Character name of files for shapefile.}
-  \item{...}{ Optional arguments passed to \code{\link[rgdal]{writeOGR}}.}
+  \item{...}{ Optional arguments passed to \code{\link[raster]{writeRaster}}, \code{\link[rgdal]{writeOGR}}, etc..}
 }
 
-\details{\code{writeShapefile.UD} writes a shapefile to disk, with polygons corresponding to the low, ML, and high home-range area estimates.}
+\details{\code{writeRaster} writes a raster file to disk, with pixel values corresponding to the density function.
+
+\code{writeShapefile} writes a shapefile to disk, with polygons corresponding to the low, ML, and high home-range area estimates.}
 
 \value{\code{raster.UD} returns a \code{raster} of the maximum likelihood (ML) distribution function \code{DF}.
 \code{DF=PDF} gives the average probability density per cell,

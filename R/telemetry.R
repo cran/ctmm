@@ -1,12 +1,8 @@
-#########################################
-# telemetry class definition
-#########################################
-new.telemetry <- methods::setClass("telemetry", representation(info="list"), contains="data.frame")
-
 subset.telemetry <- function(x,...)
 {
    info <- attr(x,"info")
-   x <- utils::getS3method("subset","data.frame")(x,...)
+   x <- data.frame(x)
+   x <- subset.data.frame(x,...)
    x <- new.telemetry(x,info=info)
    return(x)
 }
@@ -14,25 +10,28 @@ subset.telemetry <- function(x,...)
 `[.telemetry` <- function(x,...)
 {
   info <- attr(x,"info")
-  x <- utils::getS3method("[","data.frame")(x,...)
-  if(class(x)=="data.frame") { x <- new.telemetry(x,info=info) }
+  x <- data.frame(x)
+  x <- "[.data.frame"(x,...)
+  # if(class(x)=="data.frame") { x <- new.telemetry(x,info=info) }
+  x <- new.telemetry(x,info=info)
   return(x)
 }
 
 get.telemetry <- function(data,axes=c("x","y"))
 {
-  z <- "[.data.frame"(data,axes)
-  z <- as.matrix(z)
-  colnames(z) <- axes
-  return(z)
+  # z <- "[.data.frame"(data,axes)
+  # z <- as.matrix(z)
+  # colnames(z) <- axes
+  # return(z)
+  return(as.matrix(data.frame(data)[, axes], dimnames = axes))
 }
 
 #######################
 # Generic import function
-as.telemetry <- function(object,timeformat="",timezone="GMT",projection=NULL,UERE=NULL,...) UseMethod("as.telemetry")
+as.telemetry <- function(object,timeformat="",timezone="UTC",projection=NULL,UERE=NULL,...) UseMethod("as.telemetry")
 
 # MoveStack object
-as.telemetry.MoveStack <- function(object,timeformat="",timezone="GMT",projection=NULL,UERE=NULL,...)
+as.telemetry.MoveStack <- function(object,timeformat="",timezone="UTC",projection=NULL,UERE=NULL,...)
 {
   # need to first conglomerate to MoveBank format, then run as.telemetry
   object <- move::split(object)
@@ -43,7 +42,7 @@ as.telemetry.MoveStack <- function(object,timeformat="",timezone="GMT",projectio
 }
 
 # Move object
-as.telemetry.Move <- function(object,timeformat="",timezone="GMT",projection=NULL,UERE=NULL,...)
+as.telemetry.Move <- function(object,timeformat="",timezone="UTC",projection=NULL,UERE=NULL,...)
 {
   DATA <- Move2CSV(object,timeformat=timeformat,timezone=timezone,projection=projection,UERE=UERE)
   # can now treat this as a MoveBank object
@@ -52,7 +51,7 @@ as.telemetry.Move <- function(object,timeformat="",timezone="GMT",projection=NUL
 }
 
 # convert Move object back to MoveBank CSV
-Move2CSV <- function(object,timeformat="",timezone="GMT",projection=NULL,UERE=NULL,...)
+Move2CSV <- function(object,timeformat="",timezone="UTC",projection=NULL,UERE=NULL,...)
 {
   DATA <- data.frame(timestamp=move::timestamps(object))
   if(raster::isLonLat(object))
@@ -77,29 +76,36 @@ Move2CSV <- function(object,timeformat="",timezone="GMT",projection=NULL,UERE=NU
 # pull out a column with different possible names
 pull.column <- function(object,NAMES,FUNC=as.numeric)
 {
-  # consider alternative spellings of NAMES
-  NAMES <- c(NAMES,gsub("[.]","_",NAMES))
-  NAMES <- tolower(NAMES)
+  # consider alternative spellings of NAMES, but preserve order (preference) of NAMES
+  COPY <- NULL
+  for(NAME in NAMES)
+  { COPY <- c(COPY,unique(c(NAME,gsub("[.]","_",NAME)))) }
+  NAMES <- tolower(COPY) # all lower case
   
-  COLS <- names(object)
-  for(COL in COLS)
+  COLS <- names(object) # already lower case
+  
+  for(NAME in NAMES)
   {
-    if(tolower(COL) %in% NAMES)
-    { return( FUNC(object[,COL]) ) }
+    if(NAME %in% COLS)
+    { return( FUNC(object[,NAME]) ) }
   }
   # nothing matched
   return(NULL)
 }
 
 # this assumes a MoveBank data.frame
-as.telemetry.data.frame <- function(object,timeformat="",timezone="GMT",projection=NULL,UERE=NULL,...)
+as.telemetry.data.frame <- function(object,timeformat="",timezone="UTC",projection=NULL,UERE=NULL,...)
 {
-  # as.POSIXct is effed up, so work around
-  if(timeformat=="") { DATA <- as.POSIXct(object$timestamp,tz=timezone) }
+  # make column names canonicalish
+  names(object) <- tolower(names(object))
+  
+  # fastPOSIXct doesn't have a timeformat argument and as.POSIXct doesn't accept this argument if empty/NA/NULL
+  if(class(object$timestamp)=="character" && timeformat=="") { DATA <- fasttime::fastPOSIXct(object$timestamp,tz=timezone) }
+  else if(timeformat=="") { DATA <- as.POSIXct(object$timestamp,tz=timezone) }
   else { DATA <- as.POSIXct(object$timestamp,tz=timezone,format=timeformat) }
   DATA <- data.frame(timestamp=DATA)
   
-  COL <- c("animal.ID","individual.local.identifier","deployment.ID","tag.local.identifier","tag.ID")
+  COL <- c("animal.ID","individual.local.identifier","deployment.ID","tag.local.identifier","tag.ID","ID")
   COL <- pull.column(object,COL,as.factor)
   if(length(COL)==0)
   {
@@ -108,7 +114,7 @@ as.telemetry.data.frame <- function(object,timeformat="",timezone="GMT",projecti
   }
   DATA$id <- COL
   
-  COL <- c("location.long","Longitude","long")
+  COL <- c("location.long","Longitude","long","lon")
   COL <- pull.column(object,COL)
   DATA$longitude <- COL
   
@@ -198,9 +204,16 @@ as.telemetry.data.frame <- function(object,timeformat="",timezone="GMT",projecti
 }
 
 # read in a MoveBank object file
-as.telemetry.character <- function(object,timeformat="",timezone="GMT",projection=NULL,UERE=NULL,...)
+as.telemetry.character <- function(object,timeformat="",timezone="UTC",projection=NULL,UERE=NULL,...)
 {
-  data <- utils::read.csv(object,...)
+  # fread doesn't work on compressed files yet
+  # using tryCatch because sometimes the fread error message for reading zip file have characters cannot be displayed in system locale, and there will be warning for that.
+  # currently the error message is lost, we can use print(e) for debugging.
+  data <- tryCatch(data.table::fread(object,data.table=FALSE,check.names=TRUE,nrows=5), 
+                   error = function(e) "error")
+  # if fread fails, then decompress zip to temp file, read data, remove temp file
+  if (class(data) == "data.frame") { data <- data.table::fread(object,data.table=FALSE,check.names=TRUE,...) }
+  else { data <- temp_unzip(object, data.table::fread, data.table=FALSE,check.names=TRUE,...) }
   data <- as.telemetry.data.frame(data,timeformat=timeformat,timezone=timezone,projection=projection,UERE=UERE)
   return(data)
 }
@@ -212,15 +225,15 @@ telemetry.clean <- function(data,id)
   # sort in time
   ORDER <- sort.list(data$t,na.last=NA,method="quick")
   data <- data[ORDER,]
-  if(any(ORDER != 1:length(ORDER))) { warning("Times out of order in ",id," sorted") }
+  if(any(ORDER != 1:length(ORDER))) { warning("Times might be out of order or duplicated in ",id,". Make sure that timeformat and timezone are correctly specified.") }
   
   # remove duplicate observations
   ORDER <- length(data$t)
   data <- unique(data)
-  if(ORDER != length(data$t)) { warning("Duplicate data in ",id," removed") }
+  if(ORDER != length(data$t)) { warning("Duplicate data in ",id," removed.") }
   
   # exit with warning on duplicate times
-  if(anyDuplicated(data$t)) { warning("Duplicate times in ",id) }
+  if(anyDuplicated(data$t)) { warning("Duplicate times in ",id,". Data cannot be fit without an error model.") }
   
   # remove old level information
   data <- droplevels(data)
@@ -230,7 +243,8 @@ telemetry.clean <- function(data,id)
   v <- max(v)
   message("Maximum speed of ",v," m/s observed in ",id)
   dt <- min(dt)
-  message("Minimum sampling interval of ",dt," s in ",id)
+  units <- unit(dt,dimension='time')
+  message("Minimum sampling interval of ",dt/units$scale," ",units$name," in ",id)
   
   return(data)
 }
@@ -322,6 +336,7 @@ suggest.projection <- function(data,datum="WGS84")
   proj <- paste(proj," +towgs84=0,0,0,0,0,",tan(theta),",",cos(theta),sep="")
 }
 
+
 validate.projection <- function(projection)
 {
   if(grepl("latlong",projection,fixed=TRUE) || grepl("latlong",projection,fixed=TRUE))
@@ -331,8 +346,10 @@ validate.projection <- function(projection)
   { stop("Units of distance other than meters not supported.") }
 }
 
+
 ################################
 # ZOOM INTO TELEMETRY DATA
+# this needs some work
 zoom.telemetry <- function(x,fraction=1,...)
 {
   manipulate::manipulate(
@@ -346,80 +363,38 @@ methods::setMethod("zoom",signature(x="UD"), function(x,fraction=1,...) zoom.tel
 ##############
 new.plot <- function(data=NULL,CTMM=NULL,UD=NULL,level.UD=0.95,level=0.95,fraction=1,add=FALSE,xlim=NULL,ylim=NULL,...)
 {
-  alpha.UD <- 1-level.UD
-  alpha <- 1-level
-  
   dist <- list()
   dist$name <- "meters"
   dist$scale <- 1
 
   if(!add)
   {
-    ext.x <- NULL
-    ext.y <- NULL
+    ext <- NULL
     
     # bounding locations from data
     if(!is.null(data))
-    {
-      ext.x <- range(sapply(data, function(d){ range(d$x) } ))
-      ext.y <- range(sapply(data, function(d){ range(d$y) } ))
-    }
+    { ext <- rbind(ext,extent(data)) }
     
     # bounding locations from UDs
     if(!is.null(UD))
-    {
-      for(i in 1:length(UD))
-      {
-        EXT <- rowSums(UD[[i]]$PDF) > 0
-        EXT <- UD[[i]]$r$x[EXT]
-        EXT <- c(EXT[1],last(EXT))
-        ext.x <- range(ext.x,EXT)
-        
-        EXT <- colSums(UD[[i]]$PDF) > 0
-        EXT <- UD[[i]]$r$y[EXT]
-        EXT <- c(EXT[1],last(EXT))
-        ext.y <- range(ext.y,EXT)
-      }
-    }
+    { ext <- rbind(ext,extent(UD,level=level,level.UD=level.UD)) }
 
     # bounding locations from Gaussian CTMM
     if(!is.null(CTMM) & !is.na(level.UD))
-    {
-      z <- sqrt(-2*log(alpha.UD))
-      
-      for(i in 1:length(CTMM))
-      {
-        # proportionality constants for outer CIs
-        sigma <- CTMM[[i]]$sigma
-        
-        # capture outer contour if present
-        const <- 1
-        if(is.na(level)) { alpha <- 1 } # will use ML contour
-        if(!is.null(CTMM[[i]]$COV))
-        {
-          K <- length(CTMM[[i]]$tau)
-          const <- confint.ctmm(CTMM[[i]],alpha)[1,3]/sqrt(det(sigma))
-        }
-        
-        buff <- z*sqrt(const*diag(sigma))
-        
-        ext.x[1] <- min(ext.x[1], CTMM[[i]]$mu[1] - buff[1])
-        ext.x[2] <- max(ext.x[2], CTMM[[i]]$mu[1] + buff[1])
-        
-        ext.y[1] <- min(ext.y[1], CTMM[[i]]$mu[2] - buff[2])
-        ext.y[2] <- max(ext.y[2], CTMM[[i]]$mu[2] + buff[2])
-      }
-    }
+    { ext <- rbind(ext,extent(CTMM,level=level,level.UD=level.UD)) }
+    
+    # combine ranges
+    ext <- extent.telemetry(ext)
     
     # bounding box
-    mu <- c(mean(ext.x),mean(ext.y))
-    buff <- c(diff(ext.x),diff(ext.y))/2
+    mu <- c(mean(ext$x),mean(ext$y))
+    buff <- c(diff(ext$x),diff(ext$y))/2
     
     # now zoom in/out to some fraction of the grid
     buff <- fraction*buff
     
-    ext.x <- mu[1] + buff[1]*c(-1,1)
-    ext.y <- mu[2] + buff[2]*c(-1,1)
+    ext$x <- mu[1] + buff[1]*c(-1,1)
+    ext$y <- mu[2] + buff[2]*c(-1,1)
     
     # try to obey xlim/ylim if provided
     if(!is.null(xlim) || !is.null(ylim))
@@ -431,23 +406,27 @@ new.plot <- function(data=NULL,CTMM=NULL,UD=NULL,level.UD=0.95,level=0.95,fracti
       else if(is.null(xlim))
       { xlim <- mu[1] + max.diff }
       
-      ext.x <- xlim
-      ext.y <- ylim
+      ext$x <- xlim
+      ext$y <- ylim
     }
     
     # Get best unit scale
-    dist <- unit(abs(c(ext.x,ext.y)),"length")
+    dist <- unit(unlist(ext),"length")
 
     xlab <- paste("x ", "(", dist$name, ")", sep="")
     ylab <- paste("y ", "(", dist$name, ")", sep="")
     
-    mu <- mu/dist$scale
+    # residuals have no units
+    if(!is.null(data) && !is.null(attr(data[[1]],"info")$residual))
+    {
+      xlab <- "x"
+      ylab <- "y"
+    }
     
-    ext.x <- ext.x/dist$scale
-    ext.y <- ext.y/dist$scale
-    
+    ext <- ext/dist$scale
+
     # empty base layer plot
-    plot(ext.x,ext.y, xlab=xlab, ylab=ylab, col=grDevices::rgb(1,1,1,0), asp=1, ...)
+    plot(ext, xlab=xlab, ylab=ylab, col=grDevices::rgb(1,1,1,0), asp=1, ...)
   }
   
   return(dist)
@@ -456,7 +435,7 @@ new.plot <- function(data=NULL,CTMM=NULL,UD=NULL,level.UD=0.95,level=0.95,fracti
 #######################################
 # PLOT TELEMETRY DATA
 #######################################
-plot.telemetry <- function(x,CTMM=NULL,UD=NULL,level.UD=0.95,level=0.95,DF="CDF",col="red",col.level="black",col.DF="blue",col.grid="grey",fraction=1,add=FALSE,xlim=NULL,ylim=NULL,cex=1,lwd=1,...)
+plot.telemetry <- function(x,CTMM=NULL,UD=NULL,level.UD=0.95,level=0.95,DF="CDF",col="red",col.level="black",col.DF="blue",col.grid="grey",pch=1,labels=NULL,fraction=1,add=FALSE,xlim=NULL,ylim=NULL,cex=1,lwd=1,...)
 {
   alpha <- 1-level
   alpha.UD <- 1-level.UD
@@ -520,20 +499,27 @@ plot.telemetry <- function(x,CTMM=NULL,UD=NULL,level.UD=0.95,level=0.95,DF="CDF"
   if(!is.null(UD))
   {
     UD <- lapply(UD,function(ud){ unit.UD(ud,length=dist$scale) })
-    plot.UD(UD,level.UD=level.UD,level=level,DF=DF,col.level=col.level,col.DF=col.DF,col.grid=col.grid,fraction=fraction,add=TRUE,xlim=xlim,ylim=ylim,cex=cex,lwd=lwd,...)
+    plot.UD(UD,level.UD=level.UD,level=level,DF=DF,col.level=col.level,col.DF=col.DF,col.grid=col.grid,labels=labels,fraction=fraction,add=TRUE,xlim=xlim,ylim=ylim,cex=cex,lwd=lwd,...)
   }
   
   #########################
   # PLOT TELEMETRY DATA
   
-  # color array for plots
-  if(!is.list(col))
+  # prepare point characteristics
+  prepare.p <- function(pchar)
   {
-    if(length(x)>1)
-    { col <- array(col,length(x)) }
-    else
-    { col <- list(array(col,length(x[[1]]$t))) }
+    if(!is.list(pchar))
+    {
+      if(length(x)>1)
+      { pchar <- array(pchar,length(x)) }
+      else
+      { pchar <- list(array(pchar,length(x[[1]]$t))) }
+    }
+    return(pchar)
   }
+  
+  col <- prepare.p(col)
+  pch <- prepare.p(pch)
   
   # automagic the plot point size
   p <- sum(sapply(x, function(d) { length(d$t) } ))
@@ -554,7 +540,7 @@ plot.telemetry <- function(x,CTMM=NULL,UD=NULL,level.UD=0.95,level=0.95,DF="CDF"
     
     if(is.null(x[[i]]$HERE))
     {
-      graphics::points(r, cex=cex, col=col[[i]],...)
+      graphics::points(r, cex=cex, col=col[[i]], pch=pch[[i]],...)
     }
     else 
     {
@@ -590,7 +576,7 @@ plot.telemetry <- function(x,CTMM=NULL,UD=NULL,level.UD=0.95,level=0.95,DF="CDF"
 
 
 ##############
-plot.UD <- function(x,level.UD=0.95,level=0.95,DF="CDF",col.level="black",col.DF="blue",col.grid="grey",fraction=1,add=FALSE,xlim=NULL,ylim=NULL,cex=1,lwd=1,...)
+plot.UD <- function(x,level.UD=0.95,level=0.95,DF="CDF",col.level="black",col.DF="blue",col.grid="grey",labels=NULL,fraction=1,add=FALSE,xlim=NULL,ylim=NULL,cex=1,lwd=1,...)
 {
   if(!is.null(x)) { if(class(x)=="UD") { x <- list(x) } }
   
@@ -601,6 +587,16 @@ plot.UD <- function(x,level.UD=0.95,level=0.95,DF="CDF",col.level="black",col.DF
   { col.level <- t(array(col.level,c(length(level.UD),length(x)))) }
   else 
   { col.level <- array(col.level,c(length(x),length(level.UD))) }
+  
+  # contour labels
+  if(is.null(labels)) { labels <- round(100*level.UD) }
+  if((length(labels)==length(level.UD) || length(labels)==3*length(level.UD)) && length(labels) != length(x))
+  { 
+    labels <- array(labels,c(length(level.UD),3,length(x)))
+    labels <- aperm(labels,c(3,1,2))
+  }
+  else
+  { labels <- array(labels,c(length(x),length(level.UD),3)) }
   
   col.DF <- array(col.DF,length(x))
   col.grid <- array(col.grid,length(x))
@@ -618,15 +614,15 @@ plot.UD <- function(x,level.UD=0.95,level=0.95,DF="CDF",col.level="black",col.DF
   # CONTOURS
   for(i in 1:length(x))
   {
-    if(!any(is.na(col.level[i,])) & !is.na(level.UD))
+    if(!any(is.na(col.level[i,])) && !is.na(level.UD))
     {
       # make sure that correct style is used for low,ML,high even in absence of lows and highs
-      plot.kde(x[[i]],level=level.UD,col=scales::alpha(col.level[i,],1),lwd=lwd,...)
+      plot.kde(x[[i]],level=level.UD,labels=labels[i,,2],col=scales::alpha(col.level[i,],1),lwd=lwd,...)
       
-      if(!is.na(level) & !is.null(x[[i]]$DOF.area))
+      if(!is.na(level) && !is.null(x[[i]]$DOF.area))
       {
         P <- CI.UD(x[[i]],level.UD,level,P=TRUE)
-        plot.kde(x[[i]],level=P[-2],labels=round(100*P[2]),col=scales::alpha(col.level[i,],0.5),lwd=lwd/2,...)
+        plot.kde(x[[i]],level=P[-2],labels=labels[i,,c(1,3)],col=scales::alpha(col.level[i,],0.5),lwd=lwd/2,...)
       }
     }
   }
@@ -777,25 +773,6 @@ summary.telemetry <- function(object,...)
   return(result)
 }
 #methods::setMethod("summary",signature(object="telemetry"), function(object,...) summary.telemetry(object,...))
-
-
-#########################
-# convert to spatialpoints object
-SpatialPoints.telemetry <- function(object,...)
-{
-  data <- object
-  
-  if(class(data)=="telemetry" || class(data)=="data.frame")
-  {
-    return( sp::SpatialPoints( "[.data.frame"(data,c("x","y")), proj4string=sp::CRS(attr(data,"info")$projection) ) )
-  }
-  else if(class(data)=="list")
-  {
-    SPL <- lapply( data, function(d) { sp::SpatialPoints( "[.data.frame"(d,c("x","y")), proj4string=sp::CRS(attr(d,"info")$projection) ) } )
-    return(SPL)
-  }
-}
-#methods::setMethod("SpatialPoints",signature(coords="telemetry"), function(coords) SpatialPoints.telemetry(coords))
 
 
 ##############

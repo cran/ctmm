@@ -5,16 +5,19 @@ new.periodogram <- methods::setClass("periodogram",representation("data.frame",i
 subset.periodogram <- function(x,...)
 {
   info <- attr(x,"info")
+  x <- data.frame(x)
   x <- subset.data.frame(x,...)
-  x < - droplevels(x)
+  x < - droplevels(x) # why is this here?
   new.periodogram(x,info=info)
 }
 
 `[.periodogram` <- function(x,...)
 {
   info <- attr(x,"info")
-  x <- utils::getS3method("[","data.frame")(x,...)
-  if(class(x)=="data.frame") { x <- new.periodogram(x,info=info) }
+  x <- data.frame(x)
+  x <- "[.data.frame"(x,...)
+  # if(class(x)=="data.frame") { x <- new.periodogram(x,info=info) }
+  x <- new.periodogram(x,info=info)
   return(x)
 }
 
@@ -247,7 +250,7 @@ max.periodogram <- function(LSP,df=stats::median(diff(LSP$f)))
   dP.right <- dP[2:n]
   
   # first index of 3-index sequence containing a local maximum
-  START <- where((dP.left>=0) & (dP.right<=0))
+  START <- which((dP.left>=0) & (dP.right<=0))
 
   # local maximum in periodogram (quadratic approximation)
   dP.left <- dP[START]/df

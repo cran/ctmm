@@ -1,18 +1,41 @@
-UPDATE [pREML] TODO
-* make ctmm.select robust to use MLE guesses
-* ctmm.fit PARS==0 : MLE, pREML, REML consistency
+PERIODIC 0.4.0
+* variogram on mean detrended data with CTMM argument
+* simulate.telemetry (not pure ctmm)
+* smoother (velocity vector--check)
+* akde... slow exact and fast approximation or block toeplitz matrix (stationary Laplace approximation?)
+* plot ctmm (fall back on kde code)
+* vignette: periodogram, ctmm.select
+* maned wolf data: individually projected subset in reserve with largest daily periodicities and no weekly periodicity
+  + submit to Rogerio first to check over, ask about MoveBank DOI
+  + get MoveBank DOI
+
+VIGNETTES & EXAMPLES
+* m0,m1,m2 -> m.iid,m.ou,m.ouf
+* numeric guesses -> ctmm.guess
+* explain effective sample sizes (DOF of summary)
+
+* mc.optimize cross curvature if queue allows space
+* mc.optimize fill up queue with higher-order derivatives if further space allows
+* mc.genD cross correlations are wrong
+
 * document pREML
 
 Aligned Krige UDs
 pregridder composite dimension?
 
 LOW HANGING FRUIT & Nagging issues
+* plot errors with HDOP & error model in CTMM
+* rainbow.telemetry
+* summary.telemetry.list like Dong's
+* plot telemetry/UD with reverse axes (preserve x&y orientation)s
+* give writeShapefile a default folder name, maybe also separate layers into different files
+* compass plot
+* unit Environment on plots for points()
 * individualized projections
 * 1-point azimuthal equidistant projection quick option
+* overload covm * / to apply to area & matrix
 * plot.telemetry with HDOP & UERE
-* str.ctmm, str.telemetry (print too?)
-* links between vignettes and FAQ
-* error correlation in SVF plot
+* str.ctmm, str.telemetry (show, print too?)
 * don't delete mean off of IOU and BM... need that to Krige I think...
 * IOU with drift not setup correctly
 * points methods units environment
@@ -30,16 +53,6 @@ LOW HANGING FRUIT & Nagging issues
 * put overlap in vignette after publication
 * predict plot with transparency proportional to uncertainty (Google Earth?)
 * mean.ctmm: list -> iid
-
-PERIODIC 0.4.0
-* simulate.telemetry (not pure ctmm)
-* smoother (velocity vector--check)
-* akde... slow exact and fast approximation or block toeplitz matrix
-* plot ctmm
-* vignette: periodogram, ctmm.select
-* maned wolf data: individually projected subset in reserve with largest daily periodicities and no weekly periodicity
-  + submit to Rogerio first to check over, ask about MoveBank DOI
-  + get MoveBank DOI
 
 generalize Gaussian area?
   UDs for both mean and population

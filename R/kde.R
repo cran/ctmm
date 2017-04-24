@@ -1,7 +1,3 @@
-# akde object generator
-# list of kde objects with info slots
-new.UD <- methods::setClass("UD", representation("list",info="list"))
-
 # S3 generic
 akde <- function(data,CTMM,VMM=NULL,debias=TRUE,smooth=TRUE,error=0.001,res=10,grid=NULL,...) { UseMethod("akde") }
 
@@ -47,6 +43,8 @@ lag.DOF <- function(data,dt=NULL,weights=NULL,lag=NULL,FLOOR=NULL,p=NULL)
 #lag.DOF is an unsupported option for end users
 bandwidth <- function(data,CTMM,VMM=NULL,weights=FALSE,fast=TRUE,dt=NULL,precision=1/2,PC="Markov",verbose=FALSE,trace=FALSE)
 {
+  PC <- match.arg(PC,c("Markov","circulant","IID","direct"))
+  
   n <- length(data$t)
   error <- 2^(log(.Machine$double.eps,2)*precision)
   
@@ -337,7 +335,7 @@ akde.telemetry <- function(data,CTMM,VMM=NULL,debias=TRUE,smooth=TRUE,error=0.00
   {
     axes <- CTMM$axes
     
-    # smooth out errors
+    # smooth out errors (which also removes duplicate times)
     z <- NULL
     if(!is.null(VMM))
     {
@@ -346,7 +344,7 @@ akde.telemetry <- function(data,CTMM,VMM=NULL,debias=TRUE,smooth=TRUE,error=0.00
       axes <- c(axes,axis)
     }
     if(CTMM$error && smooth) { data <- predict(CTMM,data=data,t=data$t) }
-    # copy back
+    # copy back !!! times and locations
     if(!is.null(VMM)) { data[,axis] <- z }
     
     # calculate optimal bandwidth and some other information
@@ -854,6 +852,13 @@ CI.UD <- function(object,level.UD=0.95,level=0.95,P=FALSE)
   
   # probabilities associated with these areas
   P <- round(area / dV)
+  
+  # fix lower bound
+  P[1] <- max(1,P[1])
+  # fix upper bound to not overflow
+  P[3] <- min(length(object$CDF),P[3])
+  if(P[3]==length(object$CDF)) { warning("Outer contour extends beyond raster.") }
+  
   P <- sort(object$CDF,method="quick")[P]
 
   # recorrect point estimate level
@@ -892,109 +897,3 @@ summary.UD <- function(object,level.UD=0.95,level=0.95,units=TRUE,...)
   return(SUM)
 }
 #methods::setMethod("summary",signature(object="UD"), function(object,...) summary.UD(object,...))
-
-
-################################
-# create a raster of the ML akde
-raster.UD <- function(x,DF="CDF",...)
-{
-  UD <- x
-  
-  dx <- UD$dr[1]
-  dy <- UD$dr[2]
-  
-  xmn <- UD$r$x[1]-dx/2
-  xmx <- last(UD$r$x)+dx/2
-  
-  ymn <- UD$r$y[1]-dy/2
-  ymx <- last(UD$r$y)+dy/2
-  
-  # probability mass for the cells
-  if(DF=="PMF")
-  {
-    DF <- "PDF"
-    UD[[DF]] <- UD[[DF]] * prod(UD$dr)
-  }
-  
-  Raster <- raster::raster(t(UD[[DF]][,dim(UD[[DF]])[2]:1]),xmn=xmn,xmx=xmx,ymn=ymn,ymx=ymx,crs=attr(UD,"info")$projection)
-  
-  return(Raster)
-}
-methods::setMethod("raster",signature(x="UD"), function(x,DF="CDF",...) raster.UD(x,DF=DF,...))
-
-
-################
-# Is contour A inside contour B
-inside <- function(A,B)
-{
-  result <- mode(sp::point.in.polygon(A$x,A$y,B$x,B$y))
-  if(1<=result && result<=2) { return(1) } else { return(0) }
-}
-
-
-##############
-SpatialPolygonsDataFrame.UD <- function(object,level.UD=0.95,level=0.95,...)
-{
-  UD <- object
-  
-  P <- CI.UD(UD,level.UD,level,P=TRUE)
-  NAMES <- names(P)
-  
-  ID <- paste(UD@info$identity," ",round(100*level.UD),"% ",NAMES,sep="")
-
-  polygons <- list()
-  for(i in 1:length(P))
-  {
-    CL <- grDevices::contourLines(UD$r,z=UD$CDF,levels=P[i])
-    
-    # create contour heirarchy matrix (half of it)
-    H <- array(0,c(1,1)*length(CL))    
-    for(row in 1:length(CL))
-    {
-      for(col in row:length(CL))
-      {
-        H[row,col] <- inside(CL[[row]],CL[[col]]) 
-      }
-    }
-    
-    # number of contours that this contour is inside
-    I <- rowSums(H)
-    
-    # if I is odd, then you are a hole inside a positive area
-    hole <- is.odd(I)
-    
-    # polygon
-    polygons[[i]] <- list()
-    for(j in 1:length(CL))
-    {
-      polygons[[i]][[j]] <- sp::Polygon( cbind( CL[[j]]$x , CL[[j]]$y ) , hole=hole[j] )
-    }
-
-    # polygonS
-    polygons[[i]] <- sp::Polygons(polygons[[i]],ID=ID[i])
-  }
-  names(polygons) <- ID
-
-    # spatial polygons
-  polygons <- sp::SpatialPolygons(polygons, proj4string=sp::CRS(attr(UD,"info")$projection))
-
-  # spatial polygons data frame  
-  data <- data.frame(name=rev(ID))
-  rownames(data) <- rev(ID)
-  polygons <- sp::SpatialPolygonsDataFrame(polygons,data)
-  
-  return(polygons)
-}
-#methods::setMethod("SpatialPolygonsDataFrame",signature(Sr="UD"), function(Sr,level.UD=0.95,level=0.95) SpatialPolygonsDataFrame.UD(Sr,level.UD=level.UD,level=level))
-
-
-################
-writeShapefile.UD <- function(object, folder, file=UD@info$identity, level.UD=0.95 ,level=0.95,  ...)
-{
-  UD <- object
-  
-  SP <- SpatialPolygonsDataFrame.UD(UD,level.UD=level.UD,level=level)
-  
-  rgdal::writeOGR(SP, dsn=folder, layer=file, driver="ESRI Shapefile",...)
-}
-

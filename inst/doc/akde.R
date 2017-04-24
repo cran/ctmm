@@ -10,15 +10,15 @@ M2 <- ctmm.fit(pepper,m2)
 UD0 <- akde(pepper,M0)
 UD2 <- akde(pepper,M2)
 UD2w <- akde(pepper,M2,weights=TRUE)
+# calculate one extent for all UDs
+EXT <- extent(list(UD0,UD2,UD2w),level=0.95)
 
 ## ----  fig.show='hold'---------------------------------------------------
-xlim <- c(-70,-4)*1000
-ylim <- c(-12,16)*1000
-plot(pepper,UD=UD0,xlim=xlim,ylim=ylim)
+plot(pepper,UD=UD0,xlim=EXT$x,ylim=EXT$y)
 title(expression("IID KDE"["C"]))
-plot(pepper,UD=UD2,xlim=xlim,ylim=ylim)
+plot(pepper,UD=UD2,xlim=EXT$x,ylim=EXT$y)
 title(expression("OUF AKDE"["C"]))
-plot(pepper,UD=UD2w,xlim=xlim,ylim=ylim)
+plot(pepper,UD=UD2w,xlim=EXT$x,ylim=EXT$y)
 title(expression("weighted OUF AKDE"["C"]))
 
 ## ----  fig.show='hold'---------------------------------------------------

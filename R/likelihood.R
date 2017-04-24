@@ -143,8 +143,6 @@ kalman <- function(z,u,dt,CTMM,error=rep(0,nrow(z)),smooth=FALSE,sample=FALSE,we
     Sigma[i,,] <- Langevin$Sigma
   }
   
-  # DEBUG <<- list(dt=dt,CTMM=CTMM)
-  
   # first zForcast is properly zeroed
   sFor[1,,] <- Sigma[1,,]
   
@@ -199,10 +197,10 @@ kalman <- function(z,u,dt,CTMM,error=rep(0,nrow(z)),smooth=FALSE,sample=FALSE,we
   {
     # hard coded for position observations
     sigma <- (M[DATA,DATA] - (Adj(mu) %*% W %*% mu))/n
-
-    # log det autocorrelation matrix == trace log autocorrelation matrix
-    logdet <- sum(log(sRes))
     
+    # log det autocorrelation matrix == trace log autocorrelation matrix
+    logdet <- mean(log(sRes)) # this is 1/n times the full term
+
     return(list(mu=mu,W=W,sigma=sigma,logdet=logdet))
   }
   
@@ -315,7 +313,7 @@ kalman <- function(z,u,dt,CTMM,error=rep(0,nrow(z)),smooth=FALSE,sample=FALSE,we
 ####################################
 # log likelihood function
 ####################################
-ctmm.loglike <- function(data,CTMM=ctmm(),REML=FALSE,verbose=FALSE)
+ctmm.loglike <- function(data,CTMM=ctmm(),REML=FALSE,zero=0,verbose=FALSE)
 {
   n <- length(data$t)
   AXES <- length(CTMM$axes)
@@ -354,7 +352,19 @@ ctmm.loglike <- function(data,CTMM=ctmm(),REML=FALSE,verbose=FALSE)
   z <- get.telemetry(data,CTMM$axes)
   u <- CTMM$mean.vec
   M <- ncol(u) # number of linear parameters per spatial dimension
-  if(REML) { REML <- n/(n-M) } # now storing the covariance debias factor here
+  if(REML)
+  { 
+    # variance debias factor
+    VAR.MULT <- n/(n-M)
+    # likelihood constant: 2pi from det second term from variance-profiled quadratic term (which we will subtract if variance is not profiled)
+    LL.CONST <- - (n-M)*AXES/2*log(2*pi) - n*AXES/2 # not fixing this second term for REML yet... not wrong, but suboptimal maybe
+  }
+  else # ML constant
+  {
+    VAR.MULT <- 1
+    LL.CONST <- - n*AXES/2*log(2*pi*exp(1))
+  }
+  
   
   # get the error information
   error <- get.error(data,CTMM)
@@ -389,9 +399,8 @@ ctmm.loglike <- function(data,CTMM=ctmm(),REML=FALSE,verbose=FALSE)
       # profile variance if unspecified
       if(is.na(area))
       { 
-        # debias?
-        if(REML) { area <- REML*ML.area }
-        else { area <- ML.area }
+        # debias if REML
+        area <- VAR.MULT*ML.area
         
         sigma <- covm(c(area,ecc,theta),isotropic=isotropic,axes=CTMM$axes)
         
@@ -402,23 +411,26 @@ ctmm.loglike <- function(data,CTMM=ctmm(),REML=FALSE,verbose=FALSE)
       COV.mu <- solve(KALMAN$W/area)
       DOF.mu <- KALMAN$W
       
-      loglike <- -KALMAN$logdet -(n)*log(2*pi*area) - (n)*(ML.area/area)
+      # this is loglikelihood/n
+      loglike <- -KALMAN$logdet -log(area) - (ML.area/area-1)
       
-      if(REML) { loglike <- loglike - log(det(KALMAN$W/area)) }
+      if(REML) { loglike <- loglike - log(det(KALMAN$W/area))/n } 
     }
     else
     {
       CTMM$sigma <- area
       KALMAN <- kalman(z,u,dt=dt,CTMM=CTMM,error=error)
       
+      # what does this term here represent? relative variance or something
       R.sigma <- KALMAN$sigma
       
       COV.mu <- solve(KALMAN$W)
       DOF.mu <- area * KALMAN$W
       
-      loglike <- -KALMAN$logdet - (n)*log(2*pi*1) - (n/2)*R.sigma
+      # this is loglikelihood/n
+      loglike <- -KALMAN$logdet - (1/2)*(R.sigma-2)
       
-      if(REML) { loglike <- loglike - log(det(KALMAN$W)) }
+      if(REML) { loglike <- loglike - log(det(KALMAN$W))/n }
     }
 
     loglike <- Re(loglike)
@@ -440,7 +452,7 @@ ctmm.loglike <- function(data,CTMM=ctmm(),REML=FALSE,verbose=FALSE)
     COV.mu <- t(R * t(COV.mu))
     COV.mu <- array(COV.mu,c(M,M,2,2))
   }
-  else if(!CTMM$error) # ONE KALMAN FILTER WITH UNKNOWN VARIANCE AND NO ERROR
+  else if(!CTMM$error) # ONE KALMAN FILTER WITH UNKNOWN COVARIANCE AND NO ERROR
   {
     CTMM$sigma <- 1
     KALMAN <- kalman(z,u,dt=dt,CTMM=CTMM,error=error)
@@ -449,9 +461,8 @@ ctmm.loglike <- function(data,CTMM=ctmm(),REML=FALSE,verbose=FALSE)
     # profile covariance if sigma unspecified
     if(is.null(sigma))
     {
-      # debias?
-      if(REML) { sigma <- REML*ML.sigma }
-      else { sigma <- ML.sigma }
+      # debias if REML
+      sigma <- VAR.MULT*ML.sigma 
       
       sigma <- covm(sigma,isotropic=isotropic,axes=CTMM$axes)
     }
@@ -460,10 +471,11 @@ ctmm.loglike <- function(data,CTMM=ctmm(),REML=FALSE,verbose=FALSE)
     COV.mu <- solve(KALMAN$W) %o% sigma
     DOF.mu <- KALMAN$W %o% diag(AXES)
     
-    loglike <- -(AXES/2)*KALMAN$logdet -(n/2)*log(det(2*pi*sigma)) - (n/2)*sum(diag(ML.sigma %*% solve(sigma)))
-    
+    # this is loglikelihood/n
+    loglike <- -(AXES/2)*KALMAN$logdet -(1/2)*log(det(sigma)) - (1/2)*sum(diag(ML.sigma %*% solve(sigma))-1)
+
     # tensor product rule for determinants
-    if(REML) { loglike <- loglike - (1/2)*log(det(KALMAN$W)^AXES/det(sigma)^M) }
+    if(REML) { loglike <- loglike - (1/2)*log(det(KALMAN$W)^AXES/det(sigma)^M)/n }
   }
   else if(isotropic && UERE<3) # ONE KALMAN FILTER WITH UNKNOWN VARIANCE AND KNOWN ERROR RATIO
   {
@@ -474,9 +486,8 @@ ctmm.loglike <- function(data,CTMM=ctmm(),REML=FALSE,verbose=FALSE)
     # profile variance if unspecified
     if(is.na(area))
     { 
-      # debias?
-      if(REML) { area <- REML*ML.area }
-      else { area <- ML.area }
+      # debias if REML
+      area <- VAR.MULT*ML.area
       
       sigma <- covm(area,isotropic=isotropic,axes=CTMM$axes)
       
@@ -488,11 +499,12 @@ ctmm.loglike <- function(data,CTMM=ctmm(),REML=FALSE,verbose=FALSE)
     COV.mu <- solve(KALMAN$W) %o% sigma
     DOF.mu <- KALMAN$W %o% diag(AXES)
     
-    loglike <- -(AXES/2)*KALMAN$logdet -(n/2)*log(det(2*pi*sigma)) - (n/2)*AXES*(ML.area/area)
+    # this is loglikelihood/n
+    loglike <- -(AXES/2)*KALMAN$logdet -(1/2)*log(det(sigma)) - (1/2)*AXES*(ML.area/area-1)
     
     # tensor product rule for determinants
     # not sure about this equation !!!
-    if(REML) { loglike <- loglike - (1/2)*log(det(KALMAN$W)^AXES/det(sigma)^M) }
+    if(REML) { loglike <- loglike - (1/2)*log(det(KALMAN$W)^AXES/det(sigma)^M)/n } 
   }
   else if(isotropic) # ONE KALMAN FILTER WITH KNOWN VARIANCE AND KNOWN ERROR
   {
@@ -507,9 +519,10 @@ ctmm.loglike <- function(data,CTMM=ctmm(),REML=FALSE,verbose=FALSE)
     R.sigma <- KALMAN$sigma
     R.sigma <- mean(diag(R.sigma))
     
-    loglike <- -(AXES/2)*KALMAN$logdet -(n*AXES/2)*log(2*pi*1) -(n*AXES/2)*R.sigma
+    # this is loglikelihood/n
+    loglike <- -(AXES/2)*KALMAN$logdet -(AXES/2)*(R.sigma-1)
     
-    if(REML) { loglike <- loglike - (AXES/2)*log(det(KALMAN$W)) }
+    if(REML) { loglike <- loglike - (AXES/2)*log(det(KALMAN$W))/n }
   }
   else # TWO KALMAN FILTERS WITH KNOWN VARIANCE AND FIXED ERROR
   {
@@ -530,10 +543,11 @@ ctmm.loglike <- function(data,CTMM=ctmm(),REML=FALSE,verbose=FALSE)
     mu <- cbind(KALMAN1$mu,KALMAN2$mu)
     COV.mu <- array(c(solve(KALMAN1$W),diag(0,M),diag(0,M),solve(KALMAN2$W)),c(M,M,2,2)) # -1/Hessian
     DOF.mu <- array(c(SIGMA[1]*KALMAN1$W,diag(0,M),diag(0,M),SIGMA[2]*KALMAN2$W),c(M,M,2,2))
-
-    loglike <- -(1/2)*logdet - (n)*log(2*pi*1) - (n/2)*R.sigma
     
-    if(REML) { loglike <- loglike - (1/2)*log(det(KALMAN1$W)*det(KALMAN2$W)) }
+    # this is loglikelihood/n
+    loglike <- -(1/2)*logdet - (1/2)*(R.sigma-2)
+    
+    if(REML) { loglike <- loglike - (1/2)*log(det(KALMAN1$W)*det(KALMAN2$W))/n }
   }
   
   # restructure indices from m,n,x,y to x,m,n,y
@@ -573,6 +587,9 @@ ctmm.loglike <- function(data,CTMM=ctmm(),REML=FALSE,verbose=FALSE)
   # mean structure terms
   if(REML) { loglike <- loglike + CTMM$REML.loglike }
   CTMM$REML.loglike <- NULL
+
+  # finish off the loglikelihood calculation
+  loglike <- n*(loglike-(zero-LL.CONST)/n)
   
   if(verbose)
   {
@@ -580,7 +597,7 @@ ctmm.loglike <- function(data,CTMM=ctmm(),REML=FALSE,verbose=FALSE)
     CTMM$sigma <- sigma
     CTMM <- ctmm.repair(CTMM)
     
-    if(range)
+    # if(range)
     {
       CTMM$mu <- mu
       CTMM$COV.mu <- COV.mu
@@ -599,8 +616,16 @@ ctmm.loglike <- function(data,CTMM=ctmm(),REML=FALSE,verbose=FALSE)
 
 ###########################################################
 # FIT MODEL WITH LIKELIHOOD FUNCTION (convenience wrapper to optim)
-ctmm.fit <- function(data,CTMM=ctmm(),method="ML",control=list(maxit=.Machine$integer.max),...)
+ctmm.fit <- function(data,CTMM=ctmm(),method="ML",control=list(),trace=FALSE)
 {
+  method <- match.arg(method,c("ML","pREML","REML"))
+
+  default <- list(method="Nelder-Mead",precision=1/2,maxit=.Machine$integer.max)
+  control <- replace(default,names(control),control)
+  precision <- control$precision
+  optimizer <- control$method
+  control$method <- NULL
+  
   # clean/validate
   CTMM <- ctmm.ctmm(CTMM)
   
@@ -622,6 +647,8 @@ ctmm.fit <- function(data,CTMM=ctmm(),method="ML",control=list(maxit=.Machine$in
   range <- CTMM$range
   axes <- CTMM$axes
   
+  # save for fitting
+  COV.init <- CTMM$COV
   # erase previous fitting info if present
   CTMM$COV <- NULL
   CTMM$COV.mu <- NULL
@@ -705,23 +732,35 @@ ctmm.fit <- function(data,CTMM=ctmm(),method="ML",control=list(maxit=.Machine$in
   PARS <- length(SIGMA) + length(TAU) + length(CIRCLE) + length(ERROR)
   # degrees of freedom, including the mean, variance/covariance, tau, and error model
   k.mean <- ncol(CTMM$mean.vec)
-  k <- length(axes)*(k.mean - (if(range){0}else{1})) + (if(isotropic){1}else{3}) + length(TAU) + length(CIRCLE) + length(ERROR)
+  # covariance parameters only
+  nu <- (if(isotropic){1}else{3}) + length(TAU) + length(CIRCLE) + length(ERROR)
+  # all parameters
+  k <- nu + length(axes)*(if(range){k.mean}else{k.mean-1})
   
   # OPTIMIZATION GUESS (pars)
   # also construct reasonable parscale
   pars <- NULL
   parscale <- NULL
+  lower <- NULL
+  upper <- NULL
+  period <- NULL
   calpars <- function()
   {
     pars <<- NULL
     parscale <<- NULL
+    period <<- NULL
     
     if(length(SIGMA))
     {
       # need some initial guess...
       if(is.null(sigma)) { sigma <<- drift@init(data,CTMM)$sigma@par }
       pars <<- sigma[SIGMAV]
-      parscale <<- c(sigma[1],1,pi/4)[SIGMAV]
+      parscale <<- c(parscale,c(sigma[1],log(2),pi/2)[SIGMAV])
+      LO <- c(0,0,-Inf)
+      lower <<- LO[SIGMAV]
+      UP <- c(Inf,Inf,Inf)
+      upper <<- UP[SIGMAV]
+      period <<- c(period,c(F,F,pi)[SIGMAV])
       
       # can we profile the variance, if so delete the guess
       if(!is.element(1,SIGMAV)) { sigma[1] <<- NA }
@@ -729,8 +768,14 @@ ctmm.fit <- function(data,CTMM=ctmm(),method="ML",control=list(maxit=.Machine$in
     
     if(length(TAU))
     {
-      pars <<- c(pars,pars.tauv(tau))
-      parscale <<- c(parscale,pars[TAU])
+      PS <- pars.tauv(tau)
+      pars <<- c(pars,PS) # pull out relevant tau elements
+      parscale <<- c(parscale,PS)
+      LO <- 0*PS
+      lower <<- c(lower,LO)
+      UP <- Inf*(PS+1)
+      upper <<- c(upper,UP)
+      period <<- c(period,F)
     }
 
     # use 1/T as circulation parameter
@@ -738,6 +783,9 @@ ctmm.fit <- function(data,CTMM=ctmm(),method="ML",control=list(maxit=.Machine$in
     {
       pars <<- c(pars,1/circle)
       parscale <<- c(parscale,1/abs(circle))
+      lower <<- c(lower,-Inf)
+      upper <<- c(upper,Inf)
+      period <<- c(period,F)
     }
     
     if(length(ERROR))
@@ -754,6 +802,9 @@ ctmm.fit <- function(data,CTMM=ctmm(),method="ML",control=list(maxit=.Machine$in
         pars <<- c(pars,error)
         parscale <<- c(parscale,error)
       }
+      lower <<- c(lower,0)
+      upper <<- c(upper,Inf)
+      period <<- c(period,F)
     }
     # names(pars) <<- NAMES
   }
@@ -761,13 +812,18 @@ ctmm.fit <- function(data,CTMM=ctmm(),method="ML",control=list(maxit=.Machine$in
   
   cleanpars <- function(p)
   {
+
     if(length(SIGMA))
     {
       # enforce positivity
       if(isotropic)
       { p[SIGMA] <- abs(p[SIGMA]) }
       else
-      { p[SIGMA][-3] <- abs(p[SIGMA][-3]) }
+      {
+        if(p[SIGMA][2]<0) { p[SIGMA][2] <- p[SIGMA][2] - pi/2 } # swap major and minor axis
+        p[SIGMA][-3] <- abs(p[SIGMA][-3]) # positive area & eccentricity
+        p[SIGMA][3] <- (((p[SIGMA][3]/pi+1/2) %% 1) - 1/2)*pi # wrap angle back
+      }
     }
     
     if(length(TAU))
@@ -789,7 +845,7 @@ ctmm.fit <- function(data,CTMM=ctmm(),method="ML",control=list(maxit=.Machine$in
   
   # OPTIMIZATION FUNCTION (fn)
   # optional argument lengths: TAU, TAU+1, TAU+SIGMA
-  fn <- function(p)
+  fn <- function(p,zero=0)
   {
     p <- cleanpars(p)
     
@@ -831,8 +887,23 @@ ctmm.fit <- function(data,CTMM=ctmm(),method="ML",control=list(maxit=.Machine$in
     CTMM$circle <- circle
     CTMM$sigma <- covm(sigma,isotropic=isotropic,axes=axes)
     CTMM$error <- error
-
-    return(-ctmm.loglike(data,CTMM,REML=REML))
+    
+    # negative log likelihood
+    return(-ctmm.loglike(data,CTMM,REML=REML,zero=-zero))
+  }
+  
+  # construct covoariance matrix guess
+  covariance <- function()
+  {
+    COV <- diag(parscale^2,nrow=length(parscale))
+    dimnames(COV) <- list(NAMES,NAMES)
+    COPY <- rownames(COV.init) %in% NAMES
+    if(any(COPY))
+    {
+      COPY <- rownames(COV.init)[COPY]
+      COV[COPY,COPY] <- COV.init[COPY,COPY]
+    }
+    return(COV)
   }
   
   # NOW OPTIMIZE
@@ -849,29 +920,13 @@ ctmm.fit <- function(data,CTMM=ctmm(),method="ML",control=list(maxit=.Machine$in
   }
   else # all further cases require optimization
   {
-    if(PARS==1) # Brent is the best choice here
-    {
-      RESULT <- NULL
-      # direct attempt that can caputure zero boundary
-      ATTEMPT <- stats::optim(par=pars,fn=fn,method="Brent",lower=0,upper=10*pars)
-      RESULT <- rbind(RESULT,c(ATTEMPT$par,ATTEMPT$value))
-      # log scale backup that can't capture zero boundary
-      ATTEMPT <- stats::nlm(function(p){f=fn(pars*exp(p))},p=0,stepmax=log(10),iterlim=control$maxit)
-      RESULT <- rbind(RESULT,c(pars*exp(ATTEMPT$estimate),ATTEMPT$minimum))
-      # choose the better estimate
-      MIN <- sort(RESULT[,2],index.return=TRUE)$ix[1]
-      pars <- RESULT[MIN,1]
-    }
-    else # Nelder-Mead is generally the safest and is default
-    {
-      control$parscale <- parscale
-      pars <- stats::optim(par=pars,fn=fn,control=control,...)$par
-    }
-    
-    # fix par positivity
-    pars[TAU] <- abs(pars[TAU])
-    if(length(SIGMA) & !isotropic) { pars[SIGMA[-3]] <- abs(pars[SIGMA[-3]]) }
-    if(length(ERROR)) { pars[ERROR] <- abs(pars[ERROR]) }
+    if(trace) { message("Maximizing likelihood.") }
+    control$covariance <- covariance()
+    control$parscale <- parscale
+    control$zero <- TRUE
+    RESULT <- Optimizer(par=pars,fn=fn,method=optimizer,lower=lower,upper=upper,period=period,control=control)
+    pars <- cleanpars(RESULT$par)
+    # copy over hessian from fit to COV.init ?
     
     # write best estimates over initial guess
     store.pars <- function(pars)
@@ -880,6 +935,7 @@ ctmm.fit <- function(data,CTMM=ctmm(),method="ML",control=list(maxit=.Machine$in
       
       tau <<- pars[TAU]
       if(!range){ tau <<- c(Inf,tau) }
+      names(tau) <<- names(CTMM$tau)
       
       # save circulation if numerically optimized
       if(circle)
@@ -906,6 +962,7 @@ ctmm.fit <- function(data,CTMM=ctmm(),method="ML",control=list(maxit=.Machine$in
       CTMM$error <<- error
       
       # verbose ML information
+      # this is a wasted evaluation !!! store verbose glob in environment?
       CTMM <<- ctmm.loglike(data,CTMM,REML=REML,verbose=TRUE)
     }
     store.pars(pars)
@@ -917,28 +974,34 @@ ctmm.fit <- function(data,CTMM=ctmm(),method="ML",control=list(maxit=.Machine$in
     calPARS()
     # if error was just the relative error, then convert back
     if(length(ERROR) & isotropic) { error <- error * sqrt(sigma[1]) }
-    # ERROR <- NULL # now necessary to include for REML
-    
+
     calpars()
-    
-    hess <- numDeriv::hessian(fn,pars)
-    side <- sign(pars)
-    side[side==0] <- NA
-    grad <- numDeriv::grad(fn,pars,side=side)
+    if(trace) { message("Calculating covariance.") }
+    DIFF <- genD(par=pars,fn=fn,zero=-CTMM$loglike,lower=lower,upper=upper,covariance=covariance(),parscale=parscale,Richardson=2,mc.cores=1)
+    hess <- DIFF$hessian
+    grad <- DIFF$gradient
     # robust covariance calculation
     CTMM$COV <- cov.loglike(hess,grad)
     dimnames(CTMM$COV) <- list(NAMES,NAMES)
     
+    CTMM$method <- method
     # perturbative correction
-    if(grepl("pREML",method))
+    if(method=="pREML")
     {
+      # store MLE for faster model selection (ML is what is optimized, not pREML or REML)
+      CTMM$MLE <- CTMM
+      CTMM$MLE$method <- "ML"
+      loglike <- CTMM$loglike
+      
       COV <- CTMM$COV
       pNAMES <- names(pars)
       
       # parameter correction
       REML <- TRUE
-      grad <- numDeriv::grad(fn,pars,side=side) # fn is -loglike
-      d.pars <- -c(COV %*% grad) # COV is -1/Hessian, grad is of -loglike
+      #ML.grad <- grad # save old ML gradient
+      if(trace) { message("Calculating pREML correction.") }
+      DIFF <- genD(par=pars,fn=fn,zero=-CTMM$loglike,lower=lower,upper=upper,covariance=covariance(),parscale=parscale,Richardson=2,mc.cores=1)
+      d.pars <- -c(COV %*% DIFF$gradient) # COV is -1/Hessian, grad is of -loglike
 
       # gradient transformations
       # Jacobian
@@ -956,13 +1019,12 @@ ctmm.fit <- function(data,CTMM=ctmm(),method="ML",control=list(maxit=.Machine$in
 
       # store parameter correction
       store.pars(pars)
+      CTMM$loglike <- loglike #MLE
       
       # covariance correction
-      # quadratic term
-      REML <- TRUE
-      hess <- numDeriv::hessian(fn,pars)
-      
-      CTMM$COV <- 2*COV - (COV %*% hess %*% COV)
+      # REML hessian & ML gradient (at boundaries)
+      CTMM$COV <- cov.loglike(DIFF$hessian,grad)
+      #CTMM$COV <- 2*COV - (COV %*% hess %*% COV)
     }
     
     # convert from circulation frequency to circulation period
@@ -971,38 +1033,26 @@ ctmm.fit <- function(data,CTMM=ctmm(),method="ML",control=list(maxit=.Machine$in
       g <- -circle^2
       CTMM$COV[CIRCLE,] <- g*CTMM$COV[CIRCLE,]
       CTMM$COV[,CIRCLE] <- g*CTMM$COV[,CIRCLE]
+      
+      if(method=="pREML")
+      {
+        g <- -CTMM$MLE$circle^2
+        CTMM$MLE$COV[CIRCLE,] <- g*CTMM$MLE$COV[CIRCLE,]
+        CTMM$MLE$COV[,CIRCLE] <- g*CTMM$MLE$COV[,CIRCLE]
+      }
+      # before adding more junk here, just change the ctmm object to store frequency and not period for circulation
     }
     
     dimnames(CTMM$COV) <- list(NAMES,NAMES)
+    if(method=="pREML") { dimnames(CTMM$MLE$COV) <- list(NAMES,NAMES) }
   }
   
-  CTMM$AICc <- (2*k-2*CTMM$loglike) + 2*k*(k+1)/(n-k-1)
+  CTMM$AIC <- (2*k-2*CTMM$loglike)
+  CTMM$AICc <- CTMM$AIC + 2*k*(k+nu)/(length(axes)*n-k-nu)
 
   return(CTMM)
 }
 
-
-####################################
-# Newton-Raphson iterate to a ctmm model
-# to test if optim worked
-newton.ctmm <- function(data,CTMM,REML=REML)
-{
-  tau <- CTMM$tau
-  
-  # wrapper function to differentiate
-  fn <- function(par)
-  { 
-    # will need to update this for telemetry error
-    return(-ctmm.loglike(data,CTMM=ctmm(tau=par),REML=REML))
-  }
-  
-  D <- numDeriv::grad(fn,tau)
-  H <- numDeriv::hessian(fn,tau)
-  
-  tau <- tau - (H %*% D)
-
-  return(ctmm(tau=tau,info=attr(data,"info")))
-}
 
 ####### calculate variance and variance-covaraince from area and eccentricity information
 area2var <- function(CTMM,MEAN=TRUE)
@@ -1034,77 +1084,6 @@ area2var <- function(CTMM,MEAN=TRUE)
   return(COV)
 }
 
-
-############
-residuals.ctmm <- function(object,data,...)
-{
-  object <- ctmm.prepare(data,object)
-  error <- get.error(data,object)
-  t <- data$t
-  dt <- c(Inf,diff(t))
-  
-  # effective DOF of variance estimate
-  n <- 2*object$sigma@par["area"]^2/object$COV["area","area"]
-  
-  # subtract off mean function
-  z <- cbind(data$x,data$y)
-  drift <- get(object$mean)
-  mu <- drift(data$t,object) %*% object$mu
-  z <- z - mu
-  
-  sigma <- object$sigma
-  area <- sigma@par["area"]
-  theta <- sigma@par["angle"]
-  ecc <- sigma@par["eccentricity"]
-
-  circle <- object$circle
-  if(circle) { circle <- 2*pi/circle }
-  
-  
-  # rotate to eigen-basis
-  z <- z %*% t(rotate(-theta))
-  
-  if(circle)
-  {
-    # proportional standardization from ellipse to circle
-    if(ecc)
-    {
-      z[,1] <- z[,1] * exp(-ecc/4)
-      z[,2] <- z[,2] * exp(+ecc/4)
-    }
-    z <- cbind(z[,1] + 1i*z[,2])
-    
-    # corotating frame
-    R <- exp(-1i*circle*(t-t[1]))
-    z <- R * z
-    
-    # preserves error volume, but distorts error ellipse
-    object$sigma <- area
-    z <- kalman(z,u=NULL,dt=dt,object,error=error,residual=TRUE)
-    
-    # de-complexify result
-    z <- cbind(Re(z),Im(z))
-  }
-  else
-  {
-    # send each axis through with correct variance and error
-    object$sigma <- area*exp(+ecc/2)
-    z[,1] <- kalman(z[,1,drop=FALSE],u=NULL,dt=dt,object,error=error,residual=TRUE)
-    
-    object$sigma <- area*exp(-ecc/2)
-    z[,2] <- kalman(z[,2,drop=FALSE],u=NULL,dt=dt,object,error=error,residual=TRUE)
-  }
-
-  data@info$UERE <- NULL
-  COV <- cbind(2/n)
-  dimnames(COV) <- list("area","area")
-  data@info$CTMM <- ctmm(mu=rbind(c(0,0)),sigma=1,isotropic=T,COV=COV)
-  data <- data[,c("t","x","y")]
-  data$x <- z[,1]
-  data$y <- z[,2]
-  
-  return(data) # check class of this object: data.frame or telemetry
-}
 
 ###################
 # general parameter guessing function

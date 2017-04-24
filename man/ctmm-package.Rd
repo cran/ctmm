@@ -11,17 +11,18 @@ The package is described in Calabrese & Fleming (2016) and its methods are based
 \tabular{ll}{
 Package: \tab ctmm\cr
 Type: \tab Package\cr
-Version: \tab 0.3.5 \cr
-Date: \tab 2017-02-01 \cr
+Version: \tab 0.3.6 \cr
+Date: \tab 2017-04-23 \cr
 License: \tab GPL-3 \cr
 }
 
 \itemize{
 \item{ \link{ctmm-FAQ} }
-\item{ \href{http://biology.umd.edu/movement.html}{Core team} }
+\item{ \href{http://biology.umd.edu/movement.html}{CTMM Initiative} }
 \item{ \href{http://www2.physics.umd.edu/~hfleming/}{Beta packages} }
-\item{ \href{https://github.com/chfleming/ctmm}{Github project} }
-\item{ \href{ https://CRAN.R-project.org/package=ctmm}{CRAN package} }
+\item{ \href{https://github.com/ctmm-initiative/ctmm}{Github project} }
+\item{ \href{https://ctmm-initiative.github.io/ctmm/}{Github reference} }
+\item{ \href{https://CRAN.R-project.org/package=ctmm}{CRAN package} }
 \item{ \href{https://groups.google.com/forum/#!forum/ctmm-user}{Google group} }
 }
 

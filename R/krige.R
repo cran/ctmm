@@ -156,7 +156,7 @@ smoother <- function(DATA,CTMM,...)
 
 
 ########################################
-# fill in data gaps with missing observations
+# fill in data gaps with missing observations of infinite error
 ########################################
 fill.data <- function(data,CTMM=ctmm(tau=Inf),verbose=FALSE,t=NULL,dt=NULL,res=1,cor.min=0,dt.max=NULL)
 {
@@ -200,7 +200,7 @@ fill.data <- function(data,CTMM=ctmm(tau=Inf),verbose=FALSE,t=NULL,dt=NULL,res=1
     
     # half weight repeated endpoints in grid
     w.grid <- dt.grid
-    REPEAT <- where(diff(t.grid)==0)
+    REPEAT <- which(diff(t.grid)==0)
     w.grid[REPEAT] <- w.grid[REPEAT]/2
     w.grid[REPEAT+1] <- w.grid[REPEAT+1]/2
   }
@@ -258,9 +258,8 @@ occurrence <- function(data,CTMM,H=0,res.time=10,res.space=10,grid=NULL,cor.min=
   state <- smoother(data,CTMM,smooth=TRUE)
 
   # evenly sampled subset: data points (bridge ends) may be counted twice and weighted half
-  GRID <- c( where(data$t %in% t.grid) , where(data$t %in% t.grid[where(diff(t.grid)==0)]) )
+  GRID <- c( which(data$t %in% t.grid) , which(data$t %in% t.grid[which(diff(t.grid)==0)]) )
   GRID <- sort.int(GRID,method="quick")
-
   # GRID <- data$t %in% t.grid
   
   # t <- state$t[GRID]
@@ -420,7 +419,7 @@ simulate.telemetry <- function(object,nsim=1,seed=NULL,CTMM=NULL,t=NULL,dt=NULL,
 { simulate.ctmm(CTMM,nsim=nsim,seed=seed,data=object,t=t,dt=dt,res=res,...) }
     
 ##########################
-# predict locations at certaint times
+# predict locations at certaint times !!! make times unique
 ##########################
 predict.ctmm <- function(object,data=NULL,t=NULL,dt=NULL,res=1,...)
 {
@@ -461,6 +460,16 @@ predict.ctmm <- function(object,data=NULL,t=NULL,dt=NULL,res=1,...)
         NAME <- paste("cov.",NAMES[i],".",NAMES[j],sep="")
         data[,NAME] <- COV[,i,j]
       }
+    }
+    
+    if(!is.null(t))
+    {
+      # pair down predictions only to those initially requested
+      IN <- data$t %in% t
+      data <- data[IN,]
+      # remove duplicate predictions that arise with duplicate data (which is ok with error)
+      IN <- which(diff(data$t)==0)
+      if(length(IN)) { data <- data[-IN,] }
     }
   }
   

@@ -60,13 +60,13 @@ ci.tau <- function(tau,COV,alpha=0.05,min=0,max=Inf)
 }
 
 ###
-summary.ctmm <- function(object,level=0.95,level.UD=0.95,units=TRUE,...)
+summary.ctmm <- function(object,level=0.95,level.UD=0.95,units=TRUE,IC="AICc",...)
 {
   CLASS <- class(object)
   if(CLASS=="ctmm")
   { return(summary.ctmm.single(object,level=level,level.UD=level.UD,units=units)) }
   else if(CLASS=="list")
-  { return(summary.ctmm.list(object,level=level,level.UD=level.UD)) }
+  { return(summary.ctmm.list(object,level=level,level.UD=level.UD,IC=IC)) }
 }
 
 ######################################################
@@ -225,7 +225,7 @@ summary.ctmm.single <- function(object, level=0.95, level.UD=0.95, units=TRUE, .
 #methods::setMethod("summary",signature(object="ctmm"), function(object,...) summary.ctmm(object,...))
 
 #DOF of area
-DOF.area <- function(CTMM) { CTMM$sigma@par["area"]^2/CTMM$COV["area","area"] }
+DOF.area <- function(CTMM) { CTMM$sigma@par["area"]^2/abs(CTMM$COV["area","area"]) }
 
 ########
 sort.ctmm <- function(x, decreasing=FALSE, IC="AICc", ...)
@@ -256,42 +256,70 @@ DOF.mean <- function(CTMM)
 summary.ctmm.list <- function(object, IC="AICc", ...)
 {
   object <- sort.ctmm(object,IC=IC)
-  DOF <- sapply(object,DOF.mean)
   ICS <- sapply(object,function(m){m[[IC]]})
   ICS <- ICS - ICS[[1]]
-  ICS <- cbind(ICS,DOF)
+  ICS <- cbind(ICS)
   rownames(ICS) <- names(object)
-  colnames(ICS) <- c(paste("d",IC,sep=""),"DOF[mean]")
+  
+  CNAME <- paste("d",IC,sep="")
+  # quick fix for is.resident
+  #if(IC=="AICc")
+  {
+    DOF <- sapply(object,DOF.mean)
+    ICS <- cbind(ICS,DOF)
+    colnames(ICS) <- c(CNAME,"DOF[mean]")
+  }
+  #else
+  #{
+  #  colnames(ICS) <- CNAME
+  #}
+  
   return(ICS)
 }
 
+
+# small sample size adjustment for ctmm.select to be more agressive
+alpha.ctmm <- function(CTMM,alpha)
+{
+  z <- stats::qnorm(alpha)
+  z <- sqrt(z^2 + (CTMM$AICc-CTMM$AIC))
+  alpha <- 1-stats::pnorm(z)
+  return(alpha)
+}
 
 ###############
 # keep removing uncertain parameters until AIC stops improving
 ctmm.select <- function(data,CTMM,verbose=FALSE,level=0.99,IC="AICc",trace=FALSE,...)
 {
   alpha <- 1-level
+  method <- list(...)$method
+  pREML <- !is.null(method) && method=="pREML"
+  
   drift <- get(CTMM$mean)
   
     # fit the intital guess
   if(trace) { message("Fitting models ",name.ctmm(CTMM)) }
-  CTMM <- ctmm.fit(data,CTMM,...)
+  
+  CTMM <- ctmm.fit(data,(if(!pREML || is.null(CTMM$MLE)) { CTMM } else { CTMM$MLE }),trace=trace,...)
   OLD <- ctmm()
   MODELS <- list(CTMM)
   # while progress is being made, keep going, keep going, ...
   while(!identical(CTMM,OLD))
   {
     GUESS <- list()
+    beta <- alpha.ctmm(CTMM,alpha)
+    # initial guess in case of pREML (easier for optimization)
+    MLE <- (if(!pREML) { CTMM } else { CTMM$MLE })
     
     # consider if some timescales are actually zero
-    CI <- confint.ctmm(CTMM,alpha=alpha)
+    CI <- confint.ctmm(CTMM,alpha=beta)
     if(length(CTMM$tau)==2)
     {
       Q <- CI["tau velocity",1]
       if(is.nan(Q) || (Q<=0))
       {
-         GUESS[[length(GUESS)+1]] <- CTMM
-         GUESS[[length(GUESS)]]$tau <- CTMM$tau[-length(CTMM$tau)]
+         GUESS[[length(GUESS)+1]] <- MLE
+         GUESS[[length(GUESS)]]$tau <- MLE$tau[-length(MLE$tau)]
       }
     }
     else if(length(CTMM$tau)==1)
@@ -299,7 +327,7 @@ ctmm.select <- function(data,CTMM,verbose=FALSE,level=0.99,IC="AICc",trace=FALSE
       Q <- CI["tau position",1]
       if(is.nan(Q) || (Q<=0))
       {
-        GUESS[[length(GUESS)+1]] <- CTMM
+        GUESS[[length(GUESS)+1]] <- MLE
         GUESS[[length(GUESS)]]$tau <- NULL
       }
     }
@@ -310,7 +338,7 @@ ctmm.select <- function(data,CTMM,verbose=FALSE,level=0.99,IC="AICc",trace=FALSE
       Q <- prod(CI["circle",c(1,3)])
       if(is.nan(Q) || (Q<=0))
       {
-        GUESS[[length(GUESS)+1]] <- CTMM
+        GUESS[[length(GUESS)+1]] <- MLE
         GUESS[[length(GUESS)]]$circle <- FALSE
       }
     }
@@ -319,21 +347,21 @@ ctmm.select <- function(data,CTMM,verbose=FALSE,level=0.99,IC="AICc",trace=FALSE
     if(!CTMM$isotropic)
     {
       Q <- "eccentricity"
-      Q <- stats::qnorm(alpha/2,mean=CTMM$sigma@par[Q],sd=sqrt(CTMM$COV[Q,Q]))
+      Q <- stats::qnorm(beta/2,mean=CTMM$sigma@par[Q],sd=sqrt(CTMM$COV[Q,Q]))
       if(Q <= 0)
       {
-        GUESS[[length(GUESS)+1]] <- CTMM
+        GUESS[[length(GUESS)+1]] <- MLE
         GUESS[[length(GUESS)]]$isotropic <- TRUE
-        GUESS[[length(GUESS)]]$sigma <- covm(CTMM$sigma,isotropic=T)
+        GUESS[[length(GUESS)]]$sigma <- covm(MLE$sigma,isotropic=T)
       }
     }
     
     # consider if the mean could be more detailed
-    GUESS <- c(GUESS,drift@refine(CTMM))
+    GUESS <- c(GUESS,drift@refine(MLE))
     
     # fit every model
     if(trace) { message("Fitting models ",paste(sapply(GUESS,name.ctmm),collapse=", ")) }
-    GUESS <- lapply(GUESS,function(g){ctmm.fit(data,g,...)})
+    GUESS <- lapply(GUESS,function(g){ctmm.fit(data,g,trace=trace,...)})
     MODELS <- c(MODELS,GUESS)
     
     # what is the new best model?
