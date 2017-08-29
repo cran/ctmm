@@ -13,8 +13,8 @@ Produces simple plots of \code{telemetry} objects, possibly overlayed with a Gau
 plot(x,y,...)
 
 \S3method{plot}{telemetry}(x, CTMM=NULL, UD=NULL, level.UD=0.95, level=0.95, DF="CDF", col="red",
-col.level="black", col.DF="blue", col.grid="grey", pch=1, labels=NULL, fraction=1,
-add=FALSE, xlim=NULL, ylim=NULL, cex=1, lwd=1, ...)
+col.level="black", col.DF="blue", col.grid="grey", pch=1, type='p', labels=NULL,
+fraction=1, add=FALSE, xlim=NULL, ylim=NULL, cex=NULL, lwd=1, ...)
 
 \S4method{zoom}{list}(x,...)
 
@@ -36,6 +36,7 @@ add=FALSE, xlim=NULL, ylim=NULL, cex=1, lwd=1, ...)
   \item{col.DF}{Color option for the density function. Can be an array.}
   \item{col.grid}{Color option for the maximum likelihood \code{akde} bandwidth grid.}
   \item{pch}{Plotting symbol. Can be an array or list of arrays.}
+  \item{type}{How plot points are connected. Can be an array.}
   \item{labels}{Labels for UD contours. Can be an array or list of arrays.}
   \item{fraction}{Fraction of the data, Gaussian \code{ctmm}, or \code{UD} range to plot, whichever is larger.}
   \item{add}{Setting to \code{TRUE} will disable the unit conversions and base layer plot, so that \code{plot.telemetry} can be overlayed atop other outputs more easily.}
@@ -54,17 +55,7 @@ Confidence intervals placed on the \code{ctmm} Gaussian home-range contour estim
 \code{akde} \code{UD} plots also come with a standard resolution grid.
 \code{zoom} includes a zoom slider to manipulate \code{fraction}.}
 
-\references{
-C. H. Fleming, J. M. Calabrese, T. Mueller, K.A. Olson, P. Leimgruber, and W. F. Fagan. (2014). From fine-scale foraging to home ranges: A semi-variance approach to identifying movement modes across spatiotemporal scales. \href{http://www.jstor.org/discover/10.1086/675504}{The American Naturalist, 183(5), E154-E167.}
-
-C. H. Fleming and J. M. Calabrese and T. Mueller and K. A. Olson and P. Leimgruber and W. F. Fagan (2014).
-Non-Markovian maximum likelihood estimation of autocorrelated movement processes
-\href{http://onlinelibrary.wiley.com/doi/10.1111/2041-210X.12176/abstract}{Methods in Ecology and Evolution, 5(5) 462-472}.
-
-C. H. Fleming and W. F. Fagan and T. Mueller and K. A. Olson and P. Leimgruber and J. M. Calabrese (2015).
-Rigorous home-range estimation with movement data: A new autocorrelated kernel-density estimator.
-\href{http://www.esajournals.org/doi/abs/10.1890/14-2010.1}{Ecology, DOI:10.1890/14-2010.1}.
-}
+%\references{}
 
 \author{C. H. Fleming.}
 

@@ -31,7 +31,7 @@ periodogram(data,CTMM=NULL,dt=NULL,res.freq=1,res.time=1,fast=NULL,axes=c("x","y
 }
 \details{
 If no \code{dt} is specified, the median sampling interval is used. This is typically a good assumption for most data, even when there are gaps and this choice corresponds to the discrete Fourier transform (DFT) periodogram for evenly-sampled data.
-%If no \code{T} is specified, the full sampling period is used. 
+%If no \code{T} is specified, the full sampling period is used.
 
 At default resolution the frequency grid interval is given by \code{1/(2*(range(data$t)+dt))} and the frequency cutoff is given by \code{1/(2*dt)}, both in accordance with the DFT periodogram. Increasing \code{res.freq} beyond \code{res.freq=1} will make for a smooth periodogram, but sequential frequencies will be highly correlated. The \code{max=TRUE} option to \code{plot.periodogram} may be useful for \code{res.freq>1}. Increasing \code{res.time} beyond \code{res.time=1} is helpful if there is variability in the sampling rate and \code{fast>0}.
 
@@ -44,16 +44,20 @@ If a list of \code{telemetry} objects are fed into \code{periodogram}, then a me
 Returns a periodogram object (class \code{periodogram}) which is a dataframe containing the frequency, \code{f} and the Lomb-Scargle periodogram at that frequency, \code{LSP}.
 }
 \references{
-J. D. Scargle. (1952). Studies in astronomical time-series analysis. II. Statistical aspects of spectral analysis of unevenly-sampled data. The Astrophysical Journal, 263, 835-853.
+J. D. Scargle.
+Studies in astronomical time-series analysis. II. Statistical aspects of spectral analysis of unevenly-sampled data.
+The Astrophysical Journal, 263, 835-853 (1952).
 
-G. Péron, C. H. Fleming,  R. C. de Paula, J. M. Calabrese. (2016). Uncovering periodic patterns of space use in animal tracking data with periodograms, including a new algorithm for the Lomb-Scargle periodogram and improved randomization tests. \href{https://movementecologyjournal.biomedcentral.com/articles/10.1186/s40462-016-0084-7}{Movement Ecology, 4:19, DOI:10.1186/s40462-016-0084-7}.
+G. Péron, C. H. Fleming,  R. C. de Paula, J. M. Calabrese.
+Uncovering periodic patterns of space use in animal tracking data with periodograms, including a new algorithm for the Lomb-Scargle periodogram and improved randomization tests.
+\href{https://movementecologyjournal.biomedcentral.com/articles/10.1186/s40462-016-0084-7}{Movement Ecology, 4:19, DOI:10.1186/s40462-016-0084-7 (2016)}.
 }
 
 \author{ C. H. Fleming and G. Péron }
 
 \note{ The LSP is totally inappropriate if you in any way alter the sampling rate within the dataset. Stick with variograms in that case. There is a \code{diagnostic} option in \code{plot.periodogram} that can check for spurious periodicities that result from an autocorrelated sampling schedule. This plot will not contain any periodicities if the LSP is appropriate.
 
-\code{res.time>1} relies on Lagrange interpolation of the sinusoids (not the data), which can suffer from Runge's phenomena. \code{periodogram} tests for an invalid result and can fail with an error message. For whatever reason, this only seems to happen when \code{res.time=3}. }
+\code{res.time>1} relies on Lagrange interpolation of the sinusoids (not the data), which can suffer from Runge's phenomena. \code{periodogram} tests for an invalid result and can fail with an error message. For whatever reason, this more frequently seems to happen when \code{res.time=3}. }
 
 %% ~Make other sections like Warning with \section{Warning }{....} ~
 
@@ -62,17 +66,17 @@ G. Péron, C. H. Fleming,  R. C. de Paula, J. M. Calabrese. (2016). Uncovering p
 \examples{
 #Load package and data
 library(ctmm)
-data(buffalo)
+data(wolf)
 
 #Extract movement data for a single animal
-cilla <- buffalo[[1]]
+Tay <- wolf$Tay
 
-#Calculate periodogram (fast>0 for a speedy example)
-#There is drift in the sampling rate here, necessitating res.time>1 with fast>0
-LSP <- periodogram(cilla,fast=2,res.time=2)
+#Calculate periodogram (fast==2 for a speedy example)
+#There is some variability in the sampling frequency, so we increase res.time
+LSP <- periodogram(Tay,fast=2,res.time=2)
 
 #Plot the periodogram
-plot(LSP)
+plot(LSP,max=TRUE)
 }
 
 % Add one or more standard keywords, see file 'KEYWORDS' in the

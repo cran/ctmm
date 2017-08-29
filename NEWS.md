@@ -1,3 +1,34 @@
+0.4.0 2017-08-29
+================
+
+  * periodigram vignette
+
+  * New utility function %#% for unit conversions
+  
+  * New model-fit sampling function "emulate"
+
+  * summary now works on lists of telemetry objects
+  
+  * new extent method for variogram objects
+  
+  * bugfixes in plot.variogram with fit UERE, tau==0
+  
+  * bugfixes with ctmm.fit/select/summary near boundaries
+  
+  * resetting Polak–Ribiere formula in weighted AKDE conjugate gradient routine
+  
+  * read.table fallback in as.telmetry
+  
+  * R 3.4 compatibility fixes
+  
+  * various improvements to plot.variogram
+  
+  * plot.UD & export can now accept multiple level.UD values
+  
+  * increased numerical precision in ctmm.loglike
+  
+  * SI speeds & diffusion fixed with units=FALSE
+
 0.3.6 2017-04-23
 ================
 

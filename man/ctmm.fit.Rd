@@ -12,7 +12,7 @@ The fitting functions wrap around \code{optim} and \code{ctmm.loglike} to maximi
 \usage{
 ctmm(tau=NULL,isotropic=FALSE,range=TRUE,circle=FALSE,error=FALSE,axes=c("x","y"),...)
 
-ctmm.loglike(data,CTMM,REML=FALSE,zero=0,verbose=FALSE)
+ctmm.loglike(data,CTMM,REML=FALSE,profile=TRUE,zero=0,verbose=FALSE)
 
 ctmm.fit(data,CTMM=ctmm(),method="ML",control=list(),trace=FALSE)
 
@@ -30,6 +30,7 @@ ctmm.select(data,CTMM,verbose=FALSE,level=0.99,IC="AICc",trace=FALSE,...)
   \item{data}{ Timeseries data represented as a \code{telemetry} object. }
   \item{CTMM}{ A \code{ctmm} movement-model object containing the initial parameter guesses conforming to the basic structure of the model hypothesis. \code{ctmm.select} can accept a list of such objects.}
   \item{REML}{Use residual maximum likelihood if \code{TRUE}. Not recommended.}
+  \item{profile}{Analytically solve for as many covariance parameters as possible.}
   \item{zero}{Calculates \eqn{\log(likelihood) - zero}, instead of just \eqn{\log(likelihood)}, in a way that maintains numerical precision if the constant \code{zero} is close to the log likelihood. Used internally by \code{ctmm.fit}.}
   \item{verbose}{Return additional information. See "Value" below.}
   \item{method}{Use residual maximum likelihood if \code{"REML"}. Not recommended.}
@@ -66,7 +67,7 @@ By default, \code{ctmm.loglike} returns the log-likelihood of the model \code{CT
 \code{ctmm.fit} (and \code{ctmm.loglike} with \code{verbose=TRUE}) returns the maximum likelihood \code{ctmm} movement-model object with all of the components of \code{CTMM} plus the components listed below.
 \code{ctmm.select} returns the best model by default or the list of attempted models if \code{verbose=TRUE}.
 \describe{
-\item{\code{AICc}}{The approximate corrected Akaike information criterion for multivariate distributions with variable numbers of unknown mean and (structured) covariance parameters (Burnham & Anderson, Eq. 7.91).}
+\item{\code{AICc}}{The approximate corrected Akaike information criterion for multivariate distributions with variable numbers of unknown mean and (structured) covariance parameters (Burnham & Anderson, Eq. 7.91). This formula is only exact for IID data.}
 \item{\code{loglike}}{The log-likelihood.}
 \item{\code{sigma}}{The maximum likelihood variance/covariance estimate (possibly debiased). For the endlessly diffusing BM and IOU processes, this is instead the diffusion rate estimate.}
 \item{\code{mu}}{The maximum likelihood stationary mean vector estimate.}
@@ -77,11 +78,21 @@ By default, \code{ctmm.loglike} returns the log-likelihood of the model \code{CT
 }
 
 \references{
-K. P. Burnham, D. R. Anderson. (2003) Model Selection and Multimodel Inference: A Practical Information-Theoretic Approach. Springer. 2nd edition.
+K. P. Burnham, D. R. Anderson.
+Model Selection and Multimodel Inference: A Practical Information-Theoretic Approach.
+Springer, 2nd edition (2003).
 
-C. H. Fleming, J. M. Calabrese, T. Mueller, K.A. Olson, P. Leimgruber, and W. F. Fagan. (2014). From fine-scale foraging to home ranges: A semi-variance approach to identifying movement modes across spatiotemporal scales. \href{http://www.jstor.org/discover/10.1086/675504}{The American Naturalist, 183(5), E154-E167.}
+C. H. Fleming, J. M. Calabrese, T. Mueller, K.A. Olson, P. Leimgruber, W. F. Fagan.
+From fine-scale foraging to home ranges: A semi-variance approach to identifying movement modes across spatiotemporal scales.
+\href{http://www.jstor.org/discover/10.1086/675504}{The American Naturalist, 183:5, E154-E167 (2014)}.
 
-C. H. Fleming and Y. Subasi and J. M. Calabrese. (2015). A maximum-entropy description of animal movement. \href{http://journals.aps.org/pre/abstract/10.1103/PhysRevE.91.032107}{Physical Review E, 91, 032107.}
+C. H. Fleming, Y. Subasi, J. M. Calabrese.
+A maximum-entropy description of animal movement.
+\href{http://journals.aps.org/pre/abstract/10.1103/PhysRevE.91.032107}{Physical Review E, 91, 032107 (2015)}.
+
+C. H. Fleming, D. Sheldon, E. Gurarie, W. F. Fagan, S. LaPoint, J. M. Calabrese.
+Kálmán filters for continuous-time movement models.
+\href{http://www.sciencedirect.com/science/article/pii/S1574954117301115}{Ecological Informatics, 40, 8-21 (2017)}.
 }
 
 
@@ -96,7 +107,7 @@ However, Nelder Mead is not ideal and you may want to attempt a second fit, usin
 
 The AICs of endlessly diffusing models like BM and IOU cannot be easily compared to the AICs of range resident models like bivariate Gaussian, OU, and OUF. Endlessly diffusing models have to be conditioned off of an initial state, which we derive in \code{ctmm} by taking the large range limit of a range-restricted process. I.e., BM is the limit OU(\code{Inf}) and IOU(\code{tau}) is the limit OUF(\code{Inf},\code{tau}). Using comparable likelihood functions would give up statistical efficiency and the objective prior.
 
-Prior to v0.3.6, the univariate AICc formula was (mis)used, with the full parameter count treated as degrees of freedom in the mean. As of v.0.3.6, the mean and autocovariance parameters are treated separately in the approximate multivariate AICc formula (Burnham & Anderson, Eq. 7.91).
+Prior to v0.3.6, the univariate AICc formula was (mis)used, with the full parameter count treated as degrees of freedom in the mean. As of v.0.3.6, the mean and autocovariance parameters are treated separately in the approximate multivariate AICc formula (Burnham & Anderson, Eq. 7.91). Still, this improved formula is only exact for IID data.
 
 Prior to v0.3.2, \code{ctmm.select} would consider every possible model.
 This is no longer feasible with current versions of \code{ctmm}, as the number of possible models has grown too large.
@@ -110,12 +121,10 @@ This is no longer feasible with current versions of \code{ctmm}, as the number o
 # Load package and data
 library(ctmm)
 data(buffalo)
-cilla <- buffalo[[1]]
+Cilla <- buffalo$Cilla
 
-# Fit a continuous-velocity model with tau ~ c(10 days,1 hour)
-# also see help(variogram.fit)
-GUESS <- ctmm(tau=c(10*24*60^2,60^2))
-FIT <- ctmm.fit(cilla,GUESS)
+GUESS <- ctmm.guess(Cilla,interactive=FALSE)
+FIT <- ctmm.fit(Cilla,GUESS)
 
 # some human-readable information
 summary(FIT)

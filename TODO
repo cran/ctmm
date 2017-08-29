@@ -1,29 +1,44 @@
 PERIODIC 0.4.0
+* test simulation fits of circulation isotropic=T/F, pREML
 * variogram on mean detrended data with CTMM argument
 * simulate.telemetry (not pure ctmm)
 * smoother (velocity vector--check)
 * akde... slow exact and fast approximation or block toeplitz matrix (stationary Laplace approximation?)
 * plot ctmm (fall back on kde code)
 * vignette: periodogram, ctmm.select
-* maned wolf data: individually projected subset in reserve with largest daily periodicities and no weekly periodicity
-  + submit to Rogerio first to check over, ask about MoveBank DOI
-  + get MoveBank DOI
+
+pREML PAPER
+* document pREML
+* autocorrelated AICc
+
+ERROR PAPER
+* ctmm.select for error
+* standardize x,y prior to likelihood calculation
+* prior on error from calibration?
 
 VIGNETTES & EXAMPLES
-* m0,m1,m2 -> m.iid,m.ou,m.ouf
-* numeric guesses -> ctmm.guess
 * explain effective sample sizes (DOF of summary)
 
+OPTIMIZER
+* Somehow optimizer can stop on stage 1 without proceeding to stage 2
+* Stop on encapsulated
+* local tangent transformation on periodic variables
+* STAGE 4 - pattern search
+* try to fit Gamba with error
 * mc.optimize cross curvature if queue allows space
 * mc.optimize fill up queue with higher-order derivatives if further space allows
 * mc.genD cross correlations are wrong
-
-* document pREML
 
 Aligned Krige UDs
 pregridder composite dimension?
 
 LOW HANGING FRUIT & Nagging issues
+* check IID AICc formula for isotropic case
+* change default gap skip in occurrence?
+* rbind on telemetry objects
+* as.telemetry drop=TRUE/FALSE for single individuals
+* grid fix regression - weight to coarse scale when appropriate
+* detrend mean in correlogram function
 * plot errors with HDOP & error model in CTMM
 * rainbow.telemetry
 * summary.telemetry.list like Dong's
@@ -57,7 +72,7 @@ LOW HANGING FRUIT & Nagging issues
 generalize Gaussian area?
   UDs for both mean and population
   homerange(method=normal)
-time/tube plot 
+time/tube plot
 periodic plot.ctmm
 
 level.UD of summary UD/ctmm return Inf
@@ -92,7 +107,7 @@ Fixed period parameters during fitting?
 
 simulate nsim in both unconditioned and conditionedb by storing all objects
 multiple conditional simulations loop
-More efficient sampler/smoother: 
+More efficient sampler/smoother:
 store propagator results for all time-lags
 store forecast/concurrent estimates
 call vectorized RNG

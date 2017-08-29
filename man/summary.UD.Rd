@@ -25,9 +25,9 @@ A \code{matrix} with low, maximum likelihood, and high estimates for the followi
 }
 
 \references{
-C. H. Fleming and W. F. Fagan and T. Mueller and K. A. Olson and P. Leimgruber and J. M. Calabrese (2015).
-Rigorous home-range estimation with movement data: A new autocorrelated kernel-density estimator.
-\href{http://www.esajournals.org/doi/abs/10.1890/14-2010.1}{Ecology, 96(5), 1182-1188}.
+C. H. Fleming, J. M. Calabrese.
+A new kernel-density estimator for accurate home-range and species-range area estimation.
+\href{http://onlinelibrary.wiley.com/wol1/doi/10.1111/2041-210X.12673/abstract}{Methods in Ecology and Evolution, 8:5, 571-579 (2016)}.
 }
 
 \author{ C. H. Fleming. }
@@ -47,15 +47,14 @@ library(ctmm)
 data(buffalo)
 
 # Extract movement data for a single animal
-cilla <- buffalo[[1]]
+Cilla <- buffalo$Cilla
 
-# Find the best OU movement model
-# also see help(variogram.fit)
-GUESS <- ctmm(tau=6*24*60^2)
-FIT <- ctmm.fit(cilla,GUESS)
+# Fit a movement model
+GUESS <- ctmm.guess(Cilla,interactive=FALSE)
+FIT <- ctmm.fit(Cilla,GUESS)
 
 # Estimate and summarize the AKDE
-UD <- akde(cilla,FIT)
+UD <- akde(Cilla,FIT)
 summary(UD)
 }}
 

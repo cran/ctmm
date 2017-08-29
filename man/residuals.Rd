@@ -38,7 +38,11 @@ When calculating correlograms, minimizing bias is more important than producing 
 \value{
 \code{residuals} return a residual object (class \code{telemetry}, but flagged as residual) and \code{correlogram} returns a correlogram object (class \code{variogram}, but flagged as an ACF).
 }
-%\references{}
+\references{
+C. H. Fleming, D. Sheldon, E. Gurarie, W. F. Fagan, S. LaPoint, J. M. Calabrese.
+Kálmán filters for continuous-time movement models.
+\href{http://www.sciencedirect.com/science/article/pii/S1574954117301115}{Ecological Informatics, 40, 8-21 (2017)}.
+}
 
 \author{ C. H. Fleming}
 
@@ -48,7 +52,29 @@ When calculating correlograms, minimizing bias is more important than producing 
 
 \seealso{ \code{\link{plot.variogram}}, \code{\link{variogram}}. }
 
-%\examples{}
+\examples{\donttest{
+#Load package and data
+library(ctmm)
+data(buffalo)
+Cilla <- buffalo$Cilla
+
+#fit a model
+GUESS <- ctmm.guess(Cilla,interactive=FALSE)
+FIT <- ctmm.fit(Cilla,GUESS)
+
+#calculate residuals
+RES <- residuals(Cilla,FIT)
+
+#scatter plot of residuals
+plot(RES)
+
+#calculate correlogram of residuals
+# increase the res argument to account for sampling variability
+ACF <- correlogram(RES,res=10)
+
+#plot a day's worth of lags
+plot(ACF[ACF$lag<=24*60^2,],fraction=1)
+}}
 
 % Add one or more standard keywords, see file 'KEYWORDS' in the
 % R documentation directory.
