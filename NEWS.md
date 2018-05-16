@@ -1,16 +1,104 @@
-0.4.1 2017-08-30
+ctmm 0.5.0 (2018-05-15)
+================
+
+  * Extensive re-write of the Kalman filter & smoother, now supporting an arbitrary number of spatial dimensions, necessary for ARGOS error ellipse support. (Previously, all multi-dimensional problems were transformed into multiple one-dimensional problems.) Many new models will be supported going forward, based on the v0.5.0 code.
+  
+  * telemetry error vignette "error"
+
+  * ARGOS error ellipse support in ctmm.fit() and simulate()
+
+  * plotted variogram errors now estimated from HDOP and no longer assumed to be homoskedastic
+  
+  * as.telemetry() default projections now use robust ellipsoidal statistics
+  
+  * new median.telemetry() method for help with projecting data
+
+  * (anisotropic & circulation & error) models now exact with 2D Kalman filter & smoother
+  
+  * simulate() & predict() velocities now correct with mean="periodic"
+  
+  * units argument in speed()
+  
+  * REML and related methods fixed from 0.4.X 1/2 bug
+  
+  * ctmm.loglike COV[mu] bugfix for circular error & elliptical movement
+  
+  * summary() rotation % bugfix with circle=TRUE
+  
+  * parameter boundary bugfix in ctmm.fit() and ctmm.loglike()
+  
+  * fixed bandwidth() bug when weights=TRUE on IID process
+  
+  * variogram.fit() manipulate more appropriate with calibrated errors
+  
+  * fixed bug in plot.variogram for isotropic model fits
+  
+  * fixed bug in ctmm.fit with fitted errors and any(diff(t)==0)
+  
+  * fixed bug in plot.variogram() from stats::qchisq() with k<<1
+
+ctmm 0.4.2 (2018-02-12)
+================
+  
+  * new speed() method
+  
+  * new ctmm.boot() method
+  
+  * new export functionality for telemetry class
+
+  * overlap debias=TRUE option (approximate)
+
+  * pHREML, pREML, HREML ctmm.fit methods implemented and documented
+  
+  * IID pREML & REML AICc values implemented
+  
+  * MSPE values implemented
+
+  * new uere()<- assignment method
+
+  * velocity esimtates now included in predict() [fitting one model to multiple behaviors can result in wildly optimistic confidence intervals]
+  
+  * velocities now included in simulate()
+  
+  * simulate precompute option
+  
+  * as.telemetry drop=TRUE option
+  
+  * as.telemetry will no longer drop individuals with missing data columns
+  
+  * as.telemetry will try to approximate DOP values
+  
+  * as.telemetry imports velocity vectors
+  
+  * as.telemetry default projection orientation now robust with GmedianCOV
+  
+  * plot.UD resolution grid less obnoxious, NA/FALSE contour label option
+  
+  * plot.telemetry error=0:3 options for data with recorded error circles/ellipses
+  
+  * plot.telemetry velocity=TRUE option for data with recorded velocities
+  
+  * plot.variogram bugfixes with telemetry errors
+  
+  * fixed AIC bug in new parameterization code (0.4.0-0.4.1) where isotropic=TRUE model would never be selected
+  
+  * fixed rare endless loop in akde/bandwidth with weights=TRUE
+  
+  * outlier removed from buffalo$Cilla
+
+ctmm 0.4.1 (2017-08-30)
 ================
 
   * projection method for ctmm objects
 
-0.4.0 2017-08-29
+ctmm 0.4.0 (2017-08-29)
 ================
 
   * periodigram vignette
 
-  * New utility function %#% for unit conversions
+  * new utility function %#% for unit conversions
   
-  * New model-fit sampling function "emulate"
+  * new model-fit sampling function "emulate"
 
   * summary now works on lists of telemetry objects
   
@@ -34,7 +122,7 @@
   
   * SI speeds & diffusion fixed with units=FALSE
 
-0.3.6 2017-04-23
+ctmm 0.3.6 (2017-04-23)
 ================
 
   * AICc formulas updated from univariate to multivariate
@@ -49,7 +137,7 @@
 
   * new writeRaster method for UD objects
 
-  * Better UD plot boxes with new extent methods
+  * better UD plot boxes with new extent methods
   
   * variogram fast=TRUE less biased for irregular data with new res>1 option
   
@@ -71,7 +159,7 @@
   
   * chi-square CIs (area, semi-variance, etc.) more robust when DOF<1
 
-0.3.5 2017-02-01
+ctmm 0.3.5 (2017-02-01)
 ================
 
   * added a FAQ page to the documentation help("ctmm-FAQ")
@@ -90,7 +178,7 @@
 
   * Kalman filter & smoother upgraded to Joseph form covariance updates
 
-0.3.4 2016-11-28
+ctmm 0.3.4 (2016-11-28)
 ================
 
   * weighted AKDE implemented, fast option, covered in vignette
@@ -121,7 +209,7 @@
   
   * as.telemetry defined for MoveStack objects
 
-0.3.3 2016-09-05
+ctmm 0.3.3 (2016-09-05)
 ================
 
   * improved import of 'move' objects
@@ -142,7 +230,7 @@
   
   * res.space fixed in occurrence
 
-0.3.2 2016-05-12
+ctmm 0.3.2 (2016-05-12)
 ================
 
   * new function overlap for stationary Gaussian distributions and KDEs
@@ -181,7 +269,7 @@
   
   * bad location removed from buffalo "Pepper"
 
-0.3.1 2016-02-23
+ctmm 0.3.1 (2016-02-23)
 ================
 
   * variogram.fit now stores global variables of any name
@@ -206,7 +294,7 @@
   
   * occurrence() now works when some timesteps are tiny
   
-0.3.0 2015-11-26
+ctmm 0.3.0 (2015-11-26)
 ================
 
   * new function "occurrence" to estimate occurrence distributions
@@ -229,7 +317,7 @@
 
   * ctmm.fit now has a backup for when Brent fails
 
-0.2.9 2015-10-13
+ctmm 0.2.9 (2015-10-13)
 ================
 
   * fixed a rare condition in ctmm.fit where solve would fail on correlated errors
@@ -250,7 +338,7 @@
   
   * alpha, alpha.HR, res arguments made consistent across all functions
 
-0.2.8 2015-08-25
+ctmm 0.2.8 (2015-08-25)
 ================
 
   * efficiency gains in as.telemetry with multiple animals
@@ -259,7 +347,7 @@
 
   * bugfix in variogram for rare condition when fast=TRUE
 
-0.2.7 2015-07-27
+ctmm 0.2.7 (2015-07-27)
 ================
 
   * CRAN check compliance achieved.
@@ -268,17 +356,17 @@
   
   * argument names no longer clash with function names and are more explicit about their object class
 
-0.2.6 2015-07-17
+ctmm 0.2.6 (2015-07-17)
 ================
 
   * export bugfixes
 
-0.2.5 2015-07-14
+ctmm 0.2.5 (2015-07-14)
 ================
 
   * IOU bug fixes in ctmm.fit and plot.variogram
   
-0.2.4 2015-06-28
+ctmm 0.2.4 (2015-06-28)
 ================
 
   * cleaned up and labeled tau parameter arrays
@@ -287,7 +375,7 @@
 
   * plot.telemetry now enforces asp=1 even with xlim/ylim arguments
 
-0.2.3 2015-06-19
+ctmm 0.2.3 (2015-06-19)
 ================
 
   * new function summary.telemetry
@@ -300,12 +388,12 @@
   
   * minimal support for BM and IOU motion
 
-0.2.2 2015-05-21
+ctmm 0.2.2 (2015-05-21)
 ================
 
   * new functions periodogram, plot.periodogram
 
-0.2.1 2015-05-08
+ctmm 0.2.1 (2015-05-08)
 ================
 
   * new function SpatialPoints.telemetry returns SpatialPoints object from telemetry data
@@ -324,7 +412,7 @@
 
   * telemetry, ctmm, and akde objects now have idenification and projection information slotted, with consistent naming throughout
 
-0.2.0 2015-04-27
+ctmm 0.2.0 (2015-04-27)
 ================
 
   * vignettes "variogram" and "akde"

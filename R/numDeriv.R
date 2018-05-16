@@ -37,7 +37,7 @@ genD.numDeriv <- function(par,fn,zero=0,lower=-Inf,upper=Inf,step=NULL,r=2,covar
 
   # default numDeriv arguments except r=2... seems very sensitive otherwise
   d <- 0.01
-  zero.tol <- sqrt(.Machine$double.eps/7e-7)
+  zero.tol <- sqrt(.Machine$double.eps/7e-7) # this can bug up for microscopic sigma !!!
   n <- length(par)
 
   # calculate hessian and gradient simultaneously
@@ -119,7 +119,7 @@ genD.numDeriv <- function(par,fn,zero=0,lower=-Inf,upper=Inf,step=NULL,r=2,covar
 
 ################################
 # multi-core second-order derivatives
-genD.mcDeriv <- function(par,fn,zero=0,lower=-Inf,upper=Inf,PERIOD=F,step=NULL,covariance=NULL,mc.cores=detectCores(),cheap=FALSE)
+genD.mcDeriv <- function(par,fn,zero=0,lower=-Inf,upper=Inf,PERIOD=F,step=NULL,covariance=NULL,cores=detectCores(),cheap=FALSE)
 {
   DIM <- length(par)
 
@@ -220,7 +220,7 @@ genD.mcDeriv <- function(par,fn,zero=0,lower=-Inf,upper=Inf,PERIOD=F,step=NULL,c
   else # doesn't require zero argument
   { func <- function(p) { fn(p) } }
 
-  FN <- unlist(mclapply(split(P,col(P)),func,mc.cores=mc.cores))
+  FN <- unlist(plapply(split(P,col(P)),func,cores=cores))
 
   MIN <- which.min(FN)
   par.best <- P[,MIN]
@@ -335,9 +335,9 @@ genD <- function(par,fn,zero=FALSE,lower=-Inf,upper=Inf,step=NULL,precision=1/2,
 
   if(is.null(step)) { step <- sqrt(2*.Machine$double.eps^precision) }
 
-  if(Richardson==1) # parallelized, but no Richardson extrapolation (2nd order)
-  { RETURN <- genD.mcDeriv(par,fn,zero=zero,lower=lower,upper=upper,step=step,covariance=covariance,mc.cores=mc.cores) }
-  else # Richardson extrapolation, but no parallelization
+  # if(Richardson==1) # parallelized, but no Richardson extrapolation (2nd order)
+  # { RETURN <- genD.mcDeriv(par,fn,zero=zero,lower=lower,upper=upper,step=step,covariance=covariance,mc.cores=mc.cores) }
+  #else # Richardson extrapolation, but no parallelization
   { RETURN <- genD.numDeriv(par,fn,zero=zero,lower=lower,upper=upper,step=step,covariance=covariance,r=Richardson,order=order,jacobian=jacobian) }
 
   return(RETURN)

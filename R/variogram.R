@@ -45,20 +45,14 @@ variogram <- function(data,dt=NULL,fast=TRUE,res=1,CI="Markov",axes=c("x","y"))
     SVF <- do.call(rbind,SVF)
   }
   else
-  {
-    SVF <- variogram.dt(data,dt=dt,res=res,fast=fast,CI=CI,axes=axes)
-  }
+  { SVF <- variogram.dt(data,dt=dt,res=res,fast=fast,CI=CI,axes=axes) }
 
   # delete missing lags
   SVF <- SVF[SVF$DOF>0,]
 
-  # average error when UERE=1
-  error <- get.error(data,ctmm(error=TRUE,axes=axes))
-  error <- mean(error)
-
   info=attr(data,"info")
   info$axes <- axes
-  info$error <- error
+  # info$error <- error
 
   SVF <- new.variogram(SVF,info=info)
   return(SVF)
@@ -75,14 +69,24 @@ variogram.dt <- function(data,dt=NULL,fast=NULL,res=1,CI="Markov",axes=c("x","y"
     else { fast <- TRUE }
   }
 
+  # telemetry error when UERE=1
+  error <- get.error(data,ctmm(axes=axes,error=TRUE),circle=TRUE)
+
   if(fast)
-  { SVF <- variogram.fast(data=data,dt=dt,res=res,CI=CI,axes=axes) }
+  { SVF <- variogram.fast(data=data,error=error,dt=dt,res=res,CI=CI,axes=axes) }
   else
-  { SVF <- variogram.slow(data=data,dt=dt,CI=CI,axes=axes) }
+  { SVF <- variogram.slow(data=data,error=error,dt=dt,CI=CI,axes=axes) }
 
   # skip missing data
   SVF <- SVF[which(SVF$DOF>0),]
   SVF <- stats::na.omit(SVF)
+
+  SVF$SVF[1] <- 0 # what about dupes?
+  SVF$MSE[1] <- 0 # what about dupes?
+
+  # clarify that this is not calibrated error
+  if(attr(error,'flag')<=2) { SVF <- rename(SVF,"MSE","MSDOP") }
+
   return(SVF)
 }
 
@@ -196,19 +200,21 @@ gridder <- function(t,z,dt=NULL,W=NULL,lag=NULL,p=NULL,FLOOR=NULL,finish=TRUE,re
 ############################
 # FFT VARIOGRAM
 # SLP sum of lagged product
-variogram.fast <- function(data,dt=NULL,res=1,CI="Markov",axes=c("x","y"),ACF=FALSE)
+variogram.fast <- function(data,error=NULL,dt=NULL,res=1,CI="Markov",axes=c("x","y"),ACF=FALSE)
 {
   t <- data$t
   z <- get.telemetry(data,axes)
   COL <- ncol(z)
 
   # smear the data over an evenly spaced time grid (possibly at finer resolution)
+  if(!ACF) { z <- cbind(error,z) }
   GRID <- gridder(t,z,dt=dt,res=res)
   dt <- GRID$dt
   lag <- GRID$lag
   df <- GRID$w
   # continuous weights eff up the FFT numerics so discretize weights
   w <- sign(GRID$w) # indicator function
+  if(!ACF) { error <- GRID$z[,1] ; GRID$z <- GRID$z[,-1] }
   z <- GRID$z
   zz <- z^2
 
@@ -219,22 +225,37 @@ variogram.fast <- function(data,dt=NULL,res=1,CI="Markov",axes=c("x","y"),ACF=FA
   df <- FFT(pad(df,N))
   w <- Conj(FFT(pad(w,N)))
   z <- FFT(rpad(z,N))
+  if(!ACF) { error <- FFT(pad(error,N)) }
   zz <- FFT(rpad(zz,N))
 
   # indicator pair number (integer - stable FFT*)
   DOF <- COL*round(Re(IFFT(abs(w)^2)[1:n]))
   # SVF un-normalized
-  if(!ACF) { SVF <- Re(IFFT(Re(w*rowSums(zz))-rowSums(abs(z)^2))[1:n]) }
-  else { SVF <- Re(IFFT(rowSums(abs(z)^2))[1:n]) }
+  if(!ACF)
+  {
+    SVF <- Re(IFFT(Re(w*rowSums(zz))-rowSums(abs(z)^2))[1:n])
+    error <- Re(IFFT(Re(w*error))[1:n])
+  }
+  else
+  { SVF <- Re(IFFT(rowSums(abs(z)^2))[1:n]) }
 
   # normalize SVF
   SVF <- SVF/DOF
+  if(!ACF) { error <- error/DOF }
 
   # prevent NaNs
-  if(any(DOF==0)) { SVF[DOF==0] <- 0 }
+  ZERO <- DOF==0
+  if(any(ZERO))
+  {
+    SVF[ZERO] <- 0
+    if(!ACF) { error[ZERO] <- 0 }
+  }
+  rm(ZERO)
 
   # weight pair number (more accurate DOF)
   DOF <- COL*(Re(IFFT(abs(df)^2)[1:n]))
+
+  rm(df,w,z,zz)
 
   # aggregate to each dt in array if discretized at higher resolution
   if(res>1)
@@ -243,6 +264,7 @@ variogram.fast <- function(data,dt=NULL,res=1,CI="Markov",axes=c("x","y"),ACF=FA
     n <- dt/diff(lag[1:2])
     m <- ceiling(length(lag)/n)
     SVF <- pad(SVF,n*(m+1))
+    if(!ACF) { error <- pad(error,n*(m+1)) }
     DOF <- pad(DOF,n*(m+1))
 
     # window weights
@@ -262,10 +284,19 @@ variogram.fast <- function(data,dt=NULL,res=1,CI="Markov",axes=c("x","y"),ACF=FA
 
     lag <- (0:m)*dt # aggregated lags > 0
     SVF <- c(SVF[1], sapply(1:m,function(j){ SUB <- j*n + SUB ; sum(W*DOF[SUB]*SVF[SUB]) }) )
+    if(!ACF) { error <- c(error[1], sapply(1:m,function(j){ SUB <- j*n + SUB ; sum(W*DOF[SUB]*error[SUB]) }) ) }
     DOF <- c(DOF[1], sapply(1:m,function(j){ SUB <- j*n + SUB ; sum(W*DOF[SUB]) }) )
 
     SVF[-1] <- SVF[-1]/DOF[-1]
-    if(any(DOF==0)) { SVF[DOF==0] <- 0 }
+    if(!ACF)
+    { error[-1] <- error[-1]/DOF[-1] }
+
+    ZERO <- DOF<=0
+    if(any(ZERO))
+    {
+      SVF[ZERO] <- 0
+      if(!ACF) { error[ZERO] <- 0 }
+    }
   }
 
   # only count non-overlapping lags... not perfect
@@ -285,22 +316,16 @@ variogram.fast <- function(data,dt=NULL,res=1,CI="Markov",axes=c("x","y"),ACF=FA
   }
 
   SVF <- data.frame(SVF=SVF,DOF=DOF,lag=lag)
-
-  # contribution to SVF from telemetry error when UERE=1
-  #error <- get.error(data,ctmm(axes=axes,error=1))
-  #error <- mean(error)
-  #result$error <- error
-  #result$error[1] <- 0
+  if(!ACF) { SVF$MSE <- error }
 
   return(SVF)
 }
 
 ##################################
 # LAG-WEIGHTED VARIOGRAM
-variogram.slow <- function(data,dt=NULL,CI="Markov",axes=c("x","y"),ACF=FALSE)
+variogram.slow <- function(data,error=NULL,dt=NULL,CI="Markov",axes=c("x","y"),ACF=FALSE)
 {
   t <- data$t
-  #error <- get.error(data,ctmm(axes=axes,error=1)) # telemetry error when UERE=1
   z <- get.telemetry(data,axes)
   COL <- ncol(z)
 
@@ -321,11 +346,16 @@ variogram.slow <- function(data,dt=NULL,CI="Markov",axes=c("x","y"),ACF=FALSE)
   # matrix of lags
   LAG <- abs(outer(t,t,'-'))
   # matrix of semi-variances (not normalized)
-  if(!ACF) { VAR <- lapply(1:COL, function(i) { outer(z[,i],z[,i],'-')^2 }) }
+  if(!ACF)
+  {
+    VAR <- lapply(1:COL, function(i) { outer(z[,i],z[,i],'-')^2 })
+    EVAR <- outer(error,error,'+')
+  }
   else { VAR <- lapply(1:COL, function(i) { outer(z[,i],z[,i],'*') }) }
   VAR <- Reduce("+",VAR)
   # matrix of weights
   W.T <- W.T %o% W.T
+  rm(z,error)
 
   # fractional index
   LAG <- 1 + LAG/dt
@@ -347,15 +377,15 @@ variogram.slow <- function(data,dt=NULL,CI="Markov",axes=c("x","y"),ACF=FALSE)
   # where we will store stuff
   lag <- seq(0,ceiling((t[n]-t[1])/dt)+1)*dt
   SVF <- numeric(length(lag))
-  #ERR <- numeric(length(lag))
+  if(!ACF) { ERR <- numeric(length(lag)) }
   DOF <- numeric(length(lag))
   DOF2 <- numeric(length(lag))
 
   # accumulate
-  accumulate <- function(K,W,svf)
+  accumulate <- function(K,W,svf,err=0)
   {
     SVF[K] <<- SVF[K] + W*svf
-    #ERR[K] <<- ERR[K] + W*err
+    if(!ACF) { ERR[K] <<- ERR[K] + W*err }
     DOF[K] <<- DOF[K] + W
     DOF2[K] <<- DOF2[K] + W^2
   }
@@ -365,35 +395,57 @@ variogram.slow <- function(data,dt=NULL,CI="Markov",axes=c("x","y"),ACF=FALSE)
   {
     for(j in i:n)
     {
-      accumulate(I1[i,j],W1[i,j],VAR[i,j])
-      accumulate(I2[i,j],W2[i,j],VAR[i,j])
+      accumulate(I1[i,j],W1[i,j],VAR[i,j],EVAR[i,j])
+      accumulate(I2[i,j],W2[i,j],VAR[i,j],EVAR[i,j])
     }
     utils::setTxtProgressBar(pb,(i*(2*n-i))/(n^2))
   }
   rm(I1,I2,W1,W2,VAR)
-
-  # delete missing lags
-  SVF <- data.frame(SVF=SVF,DOF=DOF,DOF2=DOF2,lag=lag)
-  SVF <- SVF[DOF>0,]
-  rm(DOF,DOF2,lag)
-
-  # normalize SVF before we correct DOF
-  SVF$SVF <- SVF$SVF/((2*COL)*SVF$DOF)
-  #error <- error/DOF
-
-  # effective DOF from weights
-  SVF$DOF <- pmin(SVF$DOF,SVF$DOF^2/SVF$DOF2)
-  SVF$DOF2 <- NULL
+  if(!ACF) { rm(EVAR) }
 
   # only count non-overlapping lags... still not perfect
   if(CI=="Markov")
   {
-    dof <- sapply(SVF$lag,function(lag){ sum(DT[DT<=lag])/lag })
-    dof[1] <- length(t)
+    DT <- sort(DT,method='quick') # diff
+    CDT <- cumsum(DT) # total lag for diff
 
-    SVF$DOF <- pmin(SVF$DOF,dof)
+    # for every lag, what is the max DT<=lag
+    # DOF = CDT[max DT]/lag
+    j <- length(DT)
+    dof <- numeric(length(lag))
+    for(i in length(lag):1)
+    {
+      # go down in DT until lag can fit <=DT
+      while(DT[j]>lag[i] && j>1) { j <- j-1 }
+      # quit if lag can no longer fit <=DT
+      if(j==1 && DT[j]>lag[i]) { break }
+      # store result
+      dof[i] <- CDT[j]/lag[i]
+    }
+
+    dof[1] <- length(t)
+    #DOF <- pmin(DOF,dof)
   }
-  else if(CI=="IID") # fix initial and total DOF
+
+  # delete missing lags
+  SVF <- data.frame(SVF=SVF,DOF=DOF,DOF2=DOF2,lag=lag)
+  if(!ACF) { SVF$MSE <- ERR ; rm(ERR) }
+  if(CI=="Markov") { SVF$dof <- dof ; rm(dof) }
+  SVF <- SVF[DOF>0,]
+  rm(DOF,DOF2,lag)
+
+  TEMP <- 1/((2*COL)*SVF$DOF)
+  # normalize SVF before we correct DOF
+  SVF$SVF <- SVF$SVF * TEMP
+  #error <- error/DOF
+  if(!ACF) { SVF$MSE <- SVF$MSE * TEMP }
+  rm(TEMP)
+
+  # effective DOF from weights, non-overlapping lags, take the most conservative of the 3 estimates
+  SVF$DOF <- pmin(SVF$DOF,SVF$DOF^2/SVF$DOF2) ; SVF$DOF2 <- NULL
+  if(CI=="Markov") { SVF$DOF <- pmin(SVF$DOF,SVF$dof) ; SVF$dof <- NULL }
+
+  if(CI=="IID") # fix initial and total DOF
   {
     SVF$DOF[1] <- length(t)
     SVF$DOF[-1] <- SVF$DOF[-1]/sum(SVF$DOF[-1])*(length(t)^2-length(t))/2
@@ -431,6 +483,10 @@ mean.variogram <- function(x,...)
   n <- length(lag)
   SVF <- numeric(n)
   DOF <- numeric(n)
+  MSE <- numeric(n)
+
+  # error type to pull out -- assumes all are the same
+  if("MSE" %in% names(x[[1]])) { ERR <- "MSE" } else { ERR <- "MSDOP" }
 
   # accumulate semivariance
   for(id in 1:IDS)
@@ -442,28 +498,25 @@ mean.variogram <- function(x,...)
       # number weighted accumulation
       DOF[j] <- DOF[j] + x[[id]]$DOF[i]
       SVF[j] <- SVF[j] + x[[id]]$DOF[i]*x[[id]]$SVF[i]
+      if(ERR %in% names(x[[id]])) { MSE[j] <- MSE[j] + x[[id]]$DOF[i]*x[[id]][[ERR]][i] } # not ideal fix
     }
   }
 
   # delete missing lags
-  variogram <- data.frame(SVF=SVF,DOF=DOF,lag=lag)
-  variogram <- subset(variogram,DOF>0)
+  variogram <- data.frame(lag=lag,SVF=SVF,MSE=MSE,DOF=DOF)
+  variogram <- variogram[DOF>0,]
 
   # normalize SVF
   variogram$SVF <- variogram$SVF / variogram$DOF
+  variogram$MSE <- variogram$MSE / variogram$DOF
 
   # drop unused levels
   variogram <- droplevels(variogram)
 
-  # average average errors
-  DOF <- sapply(1:length(x),function(i){ x[[i]]$DOF[1] })
-  error <- sapply(1:length(x),function(i){ attr(x[[i]],"info")$error })
-  error <- sum(DOF * error)/sum(DOF)
+  # correct name if not calibrated
+  rename(variogram,"MSE",ERR)
 
-  info <- mean.info(x)
-  info$error <- error
-
-  variogram <- new.variogram(variogram,info=info)
+  variogram <- new.variogram(variogram,info=mean.info(x))
   return(variogram)
 }
 #methods::setMethod("mean",signature(x="variogram"), function(x,...) mean.variogram(x,...))
@@ -473,6 +526,8 @@ mean.variogram <- function(x,...)
 # consolodate info attributes from multiple datasets
 mean.info <- function(x)
 {
+  if(class(x) != "list") { return( attr(x,"info")$identity ) }
+
   # mean identity
   identity <- sapply(x , function(v) { attr(v,"info")$identity } )
   identity <- unique(identity) # why did I do this?
@@ -485,578 +540,3 @@ mean.info <- function(x)
 }
 
 
-#########
-# update to moment/cumulant with non-stationary mean
-svf.func <- function(CTMM,moment=FALSE)
-{
-  # pull out relevant model parameters
-  tau <- CTMM$tau
-
-  # trace variance
-  sigma <- mean(diag(CTMM$sigma)) # now AM.sigma
-
-  CPF <- CTMM$CPF
-  circle <- CTMM$circle
-
-  # no error considered if missing
-  COV <- CTMM$COV
-  if(!is.null(COV)) { COV <- area2var(CTMM,MEAN=TRUE) }
-
-  range <- CTMM$range
-  tau <- tau[tau<Inf]
-  if(any(tau==0))
-  {
-    DEL <- paste("tau",names(tau[tau==0]))
-    if(!is.null(COV)) { COV <- rm.name(COV,DEL) }
-    tau <- tau[tau>0]
-  }
-  K <- length(tau)
-
-  # FIRST CONSTRUCT STANDARD ACF AND ITS PARAMTER GRADIENTS
-  if(CPF) # Central place foraging
-  {
-    nu <- 2*pi/tau[1]
-    f <- 1/tau[2]
-    acf <- function(t){ (cos(nu*t)+f/nu*sin(nu*t))*exp(-f*t) }
-    acf.grad <- function(t) { -c(2*pi,1)/tau^2 * c( (-(t+f/nu^2)*sin(nu*t)+f/nu*t*cos(nu*t))*exp(-f*t) , -t*acf(t) + 1/nu*sin(nu*t)*exp(-f*t) ) }
-  }
-  else if(K==0 && range) # Bivariate Gaussian
-  {
-    acf <- function(t){ if(t==0) {1} else {0} }
-    acf.grad <- function(t){ NULL }
-  }
-  else if(K==0) # Brownian motion
-  {
-    acf <- function(t){ 1-t }
-    acf.grad <- function(t){ NULL }
-  }
-  else if(K==1 && range) # OU motion
-  {
-    acf <- function(t){ exp(-t/tau) }
-    acf.grad <- function(t){ t/tau^2*acf(t) }
-  }
-  else if(K==1) # IOU motion
-  {
-    acf <- function(t) { 1-(t-tau*(1-exp(-t/tau))) }
-    acf.grad <- function(t){ 1-(1+t/tau)*exp(-t/tau) }
-  }
-  else if(K==2) # OUF motion
-  {
-    acf <- function(t){ diff(tau*exp(-t/tau))/diff(tau) }
-    acf.grad <- function(t) { c(1,-1)*((1+t/tau)*exp(-t/tau)-acf(t))/diff(tau) }
-  }
-
-  # finish off svf function including circulation if present
-  if(!circle)
-  {
-    ACF <- function(t) { acf(t) }
-    svf <- function(t) { sigma*(1-acf(t)) }
-    grad <- function(t) { c(svf(t)/sigma, -sigma*acf.grad(t)) }
-  }
-  else
-  {
-    ACF <- function(t) { cos(circle*t)*acf(t) }
-    svf <- function(t) { sigma*(1-cos(circle*t)*acf(t)) }
-    grad <- function(t) { c(svf(t)/sigma, -sigma*cos(circle*t)*acf.grad(t), +sigma*t*sin(circle*t)*acf(t)) }
-  }
-
-  # add error term
-  if(CTMM$error)
-  {
-    err.svf <- function(t) { (if(t==0) {0} else {CTMM$error^2/2}) }
-    GRAD <- function(t) { c(grad(t) , (if(t==0) {0} else {CTMM$error}) ) }
-  }
-  else
-  {
-    err.svf <- function(t) { 0 }
-    GRAD <- grad
-  }
-
-  if(moment)
-  { drift <- get(CTMM$mean) }
-  else
-  { drift <- stationary }
-  MEAN <- drift@svf(CTMM)
-
-  SVF <- function(t) { svf(t) + err.svf(t) + MEAN$EST(t) }
-
-  # no error provided
-  if(is.null(COV)) { COV <- diag(0,nrow=length(GRAD(0))) }
-
-  # variance of SVF
-  VAR <- function(t)
-  {
-    g <- GRAD(t)
-    return( c(g %*% COV %*% g) + MEAN$VAR(t) )
-  }
-
-  # chi-square effective degrees of freedom
-  DOF <- function(t) { return( 2*SVF(t)^2/VAR(t) ) }
-
-  return(list(svf=SVF,VAR=VAR,DOF=DOF,ACF=ACF))
-}
-
-
-##########
-plot.svf <- function(lag,CTMM,error=0,alpha=0.05,col="red",type="l",...)
-{
-  # adjust model error to incorporate data HDOP average
-  if(CTMM$error)
-  {
-    if(error==0) { error <- 1/2 } # default HDOP=1
-    # effective UERE
-    error <- sqrt(2*error)
-    # UERE adjustment
-    CTMM$error <- CTMM$error * error
-    if(!is.null(CTMM$COV) && "error" %in% dimnames(CTMM$COV)[1])
-    {
-      CTMM$COV["error",] <- CTMM$COV["error",] * error
-      CTMM$COV[,"error"] <- CTMM$COV[,"error"] * error
-    }
-  }
-
-  SVF <- svf.func(CTMM,moment=TRUE)
-  svf <- SVF$svf
-  DOF <- SVF$DOF
-
-  # point estimate plot
-  SVF <- Vectorize(function(t) { svf(t) })
-  graphics::curve(SVF,from=0,to=lag,n=1000,add=TRUE,col=col,type=type,...)
-
-  # confidence intervals if COV provided
-  if(any(diag(CTMM$COV)>0))
-  {
-    Lags <- seq(0,lag,lag/1000)
-
-    for(j in 1:length(alpha))
-    {
-      svf.lower <- Vectorize(function(t){ svf(t) * CI.lower(DOF(t),alpha[j]) })
-      svf.upper <- Vectorize(function(t){ svf(t) * CI.upper(DOF(t),alpha[j]) })
-
-      graphics::polygon(c(Lags,rev(Lags)),c(svf.lower(Lags),rev(svf.upper(Lags))),col=scales::alpha(col,0.1/length(alpha)),border=NA,...)
-    }
-  }
-
-}
-
-###########################################################
-# PLOT VARIOGRAM
-###########################################################
-plot.variogram <- function(x, CTMM=NULL, level=0.95, fraction=0.5, col="black", col.CTMM="red", xlim=NULL, ylim=NULL, ...)
-{
-  alpha <- 1-level
-
-  # number of variograms
-  if(class(x)=="variogram" || class(x)=="data.frame") { x <- list(x) }
-  n <- length(x)
-
-  # default single comparison model
-  # if(is.null(CTMM) && n==1 && !is.null(attr(x[[1]],"info")$CTMM)) { CTMM <- attr(x[[1]],"info")$CTMM }
-  ACF <- !is.null(attr(x[[1]],"info")$ACF)
-
-  # subset the data if xlim or fraction provided
-  if(!is.null(xlim))
-  {
-    fraction <- 1 # xlim overrides fraction
-    x <- lapply(x,function(y){ y[xlim[1]<=y$lag & y$lag<=xlim[2],] })
-  }
-  else
-  {
-    # maximum lag in data
-    max.lag <- sapply(x, function(v){ last(v$lag) } )
-    max.lag <- max(max.lag,xlim)
-    # subset fraction of data
-    max.lag <- fraction*max.lag
-
-    # subset all data to fraction of total period
-    if(fraction<1) { x <- lapply(x, function(y) { y[y$lag<=max.lag,] }) }
-
-    xlim <- c(0,max.lag)
-  }
-
-  # calculate ylimits from all variograms
-  if(is.null(ylim)) { ylim <- extent(x,level=max(level))$y }
-
-  if(!ACF) # SVF plot
-  {
-    # choose SVF units
-    SVF.scale <- unit(ylim,"area")
-    SVF.name <- SVF.scale$name
-    SVF.scale <- SVF.scale$scale
-
-    SVF.name <- c(SVF.name,unit(ylim,"area",concise=TRUE)$name)
-    SVF.name[3] <- SVF.name[2]
-
-    ylab <- "Semi-variance"
-    ylab <- c(ylab,ylab,"SVF")
-
-    # range of possible ylabs with decreasing size
-    ylab <- paste(ylab, " (", SVF.name, ")", sep="")
-
-  }
-  else # ACF plot
-  {
-    SVF.scale <- 1
-    ylab <- "Autocorrelation"
-    ylab <- c(ylab,ylab,"ACF")
-  }
-
-  # choose lag units
-  lag.scale <- unit(xlim,"time",2)
-  lag.name <- lag.scale$name
-  lag.scale <- lag.scale$scale
-
-  lag.name <- c(lag.name,unit(xlim,"time",thresh=2,concise=TRUE)$name)
-  lag.name[3] <- lag.name[2]
-
-  xlab <- "Time-lag"
-  xlab <- c(xlab,xlab,"Lag")
-
-  xlab <- paste(xlab, " (", lag.name, ")", sep="")
-
-  # choose appropriately sized axis labels for base plot
-  lab <- rbind(xlab,ylab)
-
-  # string width max
-  max.cex.w <- lab # copy dimensions and preserve below
-  max.cex.w[] <- graphics::par('pin')/graphics::strwidth(lab,'inches')
-  # string height max
-  max.cex.h <- lab
-  max.cex.h[] <- (graphics::par('mai')[1:2]/graphics::par('mar')[1:2])/graphics::strheight(lab,'inches')
-
-  # min of x & y
-  max.cex.w <- pmin(max.cex.w[1,],max.cex.w[2,])
-  max.cex.h <- pmin(max.cex.h[1,],max.cex.h[2,])
-  # min of width and height
-  max.cex <- pmin(max.cex.w,max.cex.h)
-
-  lab <- 1
-  if(max.cex[lab]<1) { lab <- lab + 1 }
-  if(max.cex[lab]<1) { lab <- lab + 1 }
-
-  # unit convert scales if supplied
-  xlim <- xlim/lag.scale
-  ylim <- ylim/SVF.scale
-
-  # fix base plot layer
-  plot(xlim,ylim, xlim=xlim, ylim=ylim, xlab=xlab[lab], ylab=ylab[lab], col=grDevices::rgb(1,1,1,0), ...)
-
-  # color array for plots
-  col <- array(col,n)
-
-  for(i in 1:n)
-  {
-    lag <- x[[i]]$lag/lag.scale
-    SVF <- x[[i]]$SVF/SVF.scale
-    DOF <- x[[i]]$DOF
-
-    # make sure plot looks nice and appropriate for data resolution
-    type <- "l"
-    if(length(lag) < 100) { type <- "p" }
-
-    graphics::points(lag, SVF, type=type, col=col[[i]])
-
-    for(j in 1:length(alpha))
-    {
-      # chi-square CIs for semi-variance
-      if(!ACF)
-      {
-        SVF.lower <- SVF * CI.lower(DOF,alpha[j])
-        SVF.upper <- SVF * CI.upper(DOF,alpha[j])
-      }
-      else # Fisher CIs for autocorrelation
-      {
-        # subset relevant data for Fisher transformation
-        STUFF <- data.frame(lag=lag,SVF=SVF,DOF=DOF)
-        STUFF <- STUFF[DOF>3,]
-        lag <- STUFF$lag
-        SVF <- STUFF$SVF
-        DOF <- STUFF$DOF
-        # Fisher transformation
-        FISH <- atanh(SVF)
-        SD <- 1/sqrt(DOF-3)
-        SVF.lower <- tanh(stats::qnorm(alpha[j]/2,mean=FISH,sd=SD,lower.tail=TRUE))
-        SVF.upper <- tanh(stats::qnorm(alpha[j]/2,mean=FISH,sd=SD,lower.tail=FALSE))
-
-        graphics::abline(h=c(-1,0,1)/sqrt(DOF[1])*stats::qnorm(1-alpha[j]/2),col="red",lty=c(2,1,2))
-      }
-
-      graphics::polygon(c(lag,rev(lag)),c(SVF.lower,rev(SVF.upper)),col=scales::alpha(col[[i]],alpha=0.1),border=NA)
-    }
-  }
-
-  # NOW PLOT THE MODELS
-  if(!is.null(CTMM))
-  {
-    if(class(CTMM)=="ctmm") { CTMM <- list(CTMM) }
-    n <- length(CTMM)
-
-    # color array for plots
-    col <- array(col.CTMM,n)
-    type <- "l"
-
-    for(i in 1:n)
-    {
-      # units conversion
-      CTMM[[i]] <- unit.ctmm(CTMM[[i]],length=sqrt(SVF.scale),time=lag.scale)
-
-      # include errors in svf plot
-      error <- FALSE
-      if(CTMM[[i]]$error)
-      {
-        j <- FALSE
-        # choose relevant data
-        if(length(x)==1) { j <- 1 }
-        else if(length(x)==n) { j <- i }
-        else warning("Ambiguity in who's error to plot.")
-
-        if(j) { error <- attr(x[[j]],"info")$error }
-      }
-
-      plot.svf(xlim[2],CTMM[[i]],error=error,alpha=alpha,type=type,col=col[[i]])
-    }
-  }
-
-}
-# PLOT.VARIOGRAM METHODS
-#methods::setMethod("plot",signature(x="variogram",y="missing"), function(x,y,...) plot.variogram(x,...))
-#methods::setMethod("plot",signature(x="variogram",y="variogram"), function(x,y,...) plot.variogram(list(x,y),...))
-#methods::setMethod("plot",signature(x="variogram",y="ctmm"), function(x,y,...) plot.variogram(x,model=y,...))
-#methods::setMethod("plot",signature(x="variogram"), function(x,...) plot.variogram(x,...))
-
-
-#######################################
-# plot a variogram with zoom slider
-#######################################
-zoom.variogram <- function(x, fraction=0.5, ...)
-{
-  # R CHECK CRAN BUG WORKAROUND
-  z <- NULL
-
-  # number of variograms
-  n <- 1
-  if(class(x)=="list") { n <- length(x) }
-  else {x <- list(x) } # promote to list of one
-
-  # maximum lag in data
-  max.lag <- sapply(x, function(v){ last(v$lag) } )
-  max.lag <- max(max.lag)
-
-  min.lag <- sapply(x, function(v){ v$lag[2] } )
-  min.lag <- min(min.lag)
-
-  b <- 4
-  min.step <- min(fraction,10*min.lag/max.lag)
-  manipulate::manipulate( { plot.variogram(x, fraction=b^(z-1), ...) }, z=manipulate::slider(1+log(min.step,b),1,initial=1+log(fraction,b),label="zoom") )
-}
-methods::setMethod("zoom",signature(x="variogram"), function(x,fraction=0.5,...) zoom.variogram(x,fraction=fraction,...))
-
-
-####################################
-# guess variogram model parameters #
-####################################
-variogram.guess <- function(variogram,CTMM=ctmm())
-{
-  # guess at some missing parameters
-  n <- length(variogram$lag)
-
-  # variance estimate
-  sigma <- mean(variogram$SVF[2:n])
-
-  # peak curvature estimate
-  # should occur at short lags
-  v2 <- 2*max((variogram$SVF/variogram$lag^2)[2:n])
-
-  # free frequency
-  Omega2 <- v2/sigma
-  Omega <- sqrt(Omega2)
-
-  # peak diffusion rate estimate
-  # should occur at intermediate lags
-  # diffusion parameters
-  D <- (variogram$SVF/variogram$lag)[2:n]
-  # index of max diffusion
-  tauD <- which.max(D)
-  # max diffusion
-  D <- D[tauD]
-  # time lag of max diffusion
-  tauD <- variogram$lag[tauD]
-
-  # average f-rate
-  f <- -log(D/(sigma*Omega))/tauD
-
-  CPF <- CTMM$CPF
-  if(CPF) # frequency, rate esitmate
-  {
-    omega2 <- Omega2 - f^2
-    if(f>0 && omega2>0)
-    { tau <- c(2*pi/sqrt(omega2),1/f) }
-    else # bad backup estimate
-    {
-      tau <- sqrt(2)/Omega
-      tau <- c(2*pi*tau , tau)
-    }
-  }
-  else # position, velocity timescale estimate
-  { tau <- c(sigma/D,D/v2)}
-
-  if(!CTMM$range) { sigma <- D ; tau[1] <- Inf }
-
-  if(length(CTMM$tau)==0) { CTMM$tau <- tau }
-  #else if(length(CTMM$tau)==1) { CTMM$tau[2] <- tau[2] }
-
-  # preserve orientation and eccentricity if available/necessary
-  if(is.null(CTMM$sigma))
-  { CTMM$sigma <- sigma }
-  # else
-  # {
-  #   CTMM$sigma <- CTMM$sigma@par
-  #   CTMM$sigma[1] <- sigma / cosh(CTMM$sigma[2]/2)
-  # }
-
-  # don't overwrite or lose ctmm parameters not considered here
-  model <- as.list(CTMM) # getDataPart deletes names()
-  model$info <- attr(variogram,"info")
-  model <- do.call("ctmm",model)
-  return(model)
-}
-
-
-######################################################################
-# visual fit of the variogram
-######################################################################
-variogram.fit <- function(variogram,CTMM=ctmm(),name="GUESS",fraction=0.5,interactive=TRUE,...)
-{
-  if(interactive && !manipulate::isAvailable()) { interactive <- FALSE }
-  envir <- .GlobalEnv
-
-  RES <- 1000
-
-  # R CHECK CRAN BUG WORKAROUNDS
-  z <- NULL
-  tau1 <- 1
-  tau2 <- 0
-  error <- CTMM$error
-  store <- NULL ; rm(store)
-
-  m <- 2 # slider length relative to point guestimate
-  n <- length(variogram$lag)
-
-  # fill in missing parameters non-destructively
-  CTMM <- variogram.guess(variogram,CTMM)
-  if(!interactive) { return(CTMM) }
-
-  # parameters for logarithmic slider
-  b <- 4
-  min.step <- 10*variogram$lag[2]/variogram$lag[n]
-  #min.step <- max(min.step,fraction)
-
-  # manipulation controls
-  manlist <- list(z = manipulate::slider(1+log(min.step,b),1,initial=1+log(fraction,b),label="zoom"))
-
-  K <- length(CTMM$tau)
-  if(K==1) { CTMM$tau[2] <- 0 }
-
-  range <- CTMM$range
-  sigma <- mean(diag(CTMM$sigma))
-  if(range)
-  {
-    sigma.unit <- unit(sigma,"area",concise=TRUE)
-    sigma <- sigma / sigma.unit$scale
-    label <- paste("sigma variance (",sigma.unit$name,")",sep="")
-    manlist <- c(manlist, list(sigma = manipulate::slider(0,m*sigma,initial=sigma,step=sigma/RES,label=label)))
-  }
-  else
-  {
-    sigma.unit <- unit(sigma,"diffusion",concise=TRUE)
-    sigma <- sigma / sigma.unit$scale
-    label <- paste("sigma diffusion (",sigma.unit$name,")",sep="")
-    manlist <- c(manlist, list(sigma = manipulate::slider(0,m*sigma,initial=sigma,step=sigma/RES,label=label)))
-  }
-
-  CPF <- CTMM$CPF
-  tau <- CTMM$tau
-  tau1.unit <- unit(tau[1],"time",2,concise=TRUE)
-  tau2.unit <- unit(tau[2],"time",2,concise=TRUE)
-  tau[1] <- tau[1] / tau1.unit$scale
-  tau[2] <- tau[2] / tau2.unit$scale
-  if(CPF)
-  {
-    label <- paste("tau period (",tau1.unit$name,")",sep="")
-    manlist <- c(manlist, list(tau1 = manipulate::slider(0,m*tau[1],initial=tau[1],step=tau[1]/RES,label=label)))
-
-    label <- paste("tau decay (",tau2.unit$name,")",sep="")
-    manlist <- c(manlist, list(tau2 = manipulate::slider(0,m*tau[2],initial=tau[2],step=tau[2]/RES,label=label)))
-
-    tau2 <- NULL # not sure why necessary
-  }
-  else
-  {
-    label <- paste("tau position (",tau1.unit$name,")",sep="")
-    manlist <- c(manlist, list(tau1 = manipulate::slider(0,m*tau[1],initial=tau[1],step=tau[1]/RES,label=label)))
-
-    label <- paste("tau velocity (",tau2.unit$name,")",sep="")
-    manlist <- c(manlist, list(tau2 = manipulate::slider(0,m*tau[2],initial=tau[2],step=tau[2]/RES,label=label)))
-  }
-
-  # circulation
-  circle <- CTMM$circle
-  if(circle)
-  {
-    circle.period <- 2*pi/circle
-    circle.unit <- unit(circle.period,"time",concise=TRUE)
-    circle.period <- circle.period / circle.unit$scale
-    label <- paste("circulation period (",circle.unit$name,")",sep="")
-    c1 <- min(0,m*circle)
-    c2 <- max(0,m*circle)
-    manlist <- c(manlist, list(circle.period = manipulate::slider(c1,c2,initial=circle.period,step=circle.period/RES,label=label)))
-  }
-
-  # error
-  e2 <- max(100,2*error)
-  manlist <- c(manlist, list(error = manipulate::slider(0,e2,initial=as.numeric(error),step=e2/RES/2,label="error (m)")))
-
-  # storage button
-  manlist <- c(manlist, list(store = manipulate::button(paste("Save to",name))))
-
-  if(!range)
-  {
-    manlist$tau1 <- NULL
-    tau1 <- Inf
-  }
-
-  if(K==1)
-  {
-    manlist$tau2 <- NULL
-    tau2 <- 0
-  }
-
-  # non-destructive parameter overwrite
-  manipulate::manipulate(
-    {
-      # store trace, but preserve angle & eccentricity
-      if(length(CTMM$axes)==2)
-      {
-        CTMM$sigma <- CTMM$sigma@par
-        CTMM$sigma[1] <- sigma * sigma.unit$scale / cosh(CTMM$sigma[2]/2)
-      }
-      else
-      { CTMM$sigma <- sigma }
-
-      CTMM$tau <- c(tau1*tau1.unit$scale, tau2*tau2.unit$scale)
-      if(circle) { CTMM$circle <- 2*pi/(circle.period * circle.unit$scale) }
-      CTMM$error <- error
-
-      CTMM <- as.list(CTMM)
-      CTMM$info <- attr(variogram,"info")
-      CTMM <- do.call("ctmm",CTMM)
-      if(any(CTMM$tau>0)) { CTMM$tau <- CTMM$tau[CTMM$tau>0] }
-      else { CTMM$tau <- NULL }
-
-      fraction <- b^(z-1)
-      if(store) { assign(name,CTMM,envir=envir) }
-      plot.variogram(variogram,CTMM=CTMM,fraction=fraction,...)
-    },
-    manlist
-  )
-}

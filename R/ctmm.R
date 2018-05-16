@@ -88,10 +88,7 @@ ctmm.ctmm <- function(CTMM)
 # 2D covariance matrix universal format
 covm <- function(pars,isotropic=FALSE,axes=c("x","y"))
 {
-  if(is.null(pars))
-  { return(NULL) }
-  else if(class(pars)=="covm")
-  { return(pars) }
+  if(is.null(pars)) { return(NULL) }
 
   if(length(axes)==1)
   {
@@ -112,7 +109,8 @@ covm <- function(pars,isotropic=FALSE,axes=c("x","y"))
     else if(length(pars)==4)
     {
       sigma <- pars
-      pars <- sigma.destruct(sigma)
+      if(class(pars)=="covm") { pars <- attr(pars,'par') }
+      else { pars <- sigma.destruct(sigma,isotropic=isotropic) }
     }
 
     # isotropic error check
@@ -155,7 +153,7 @@ sigma.construct <- function(pars)
 }
 
 # reduce covariance matrix to 1-3 parameters
-sigma.destruct <- function(sigma)
+sigma.destruct <- function(sigma,isotropic=FALSE) # last arg not implemented
 {
   stuff <- eigen(sigma)
 
@@ -180,6 +178,7 @@ COV.covm <- function(sigma,n,k=1)
   isotropic <- sigma@isotropic
   par <- sigma@par
   sigma <- methods::getDataPart(sigma)
+  DIM <- sqrt(length(sigma))
 
   A <- par["area"]
   ecc <- par["eccentricity"]
@@ -188,26 +187,30 @@ COV.covm <- function(sigma,n,k=1)
   DOF.mu <- n
   COV.mu <- sigma/n
 
-  if(isotropic || length(sigma)==1)
+  n <- n-k
+
+  if(isotropic || DIM==1)
   {
-    COV <- cbind( A^2/n )
+    COV <- cbind( 2*A^2/(n*DIM) )
     dimnames(COV) <- list("area","area")
   }
-  else
+  else # 2D
   {
     # orient eccentricity
-    ecc <- sign(sigma[1,1]-sigma[2,2]) * ecc
+    # ecc <- sign(sigma[1,1]-sigma[2,2]) * ecc
 
     # covariance matrix for c( sigma_xx , sigma_yy , sigma_xy )
-    n <- n-k
     COV <- diag(0,3)
     COV[1:2,1:2] <- 2/n * sigma^2
     COV[3,] <- c( 2*sigma[1,1]*sigma[1,2] , 2*sigma[2,2]*sigma[1,2] , sigma[1,1]*sigma[2,2]+sigma[1,2]^2 )/n
     COV[,3] <- COV[3,]
 
     # gradient matrix d sigma / d par
+    # d matrix / d area
     grad <- c( sigma[1,1] , sigma[2,2] , sigma[1,2] )/A
+    # d matrix / d eccentricity
     grad <- cbind( grad, A/2*c( sinh(ecc/2)+cosh(ecc/2)*cos(2*theta) , sinh(ecc/2)-cosh(ecc/2)*cos(2*theta) , cosh(ecc/2)*sin(2*theta) ) )
+    # d matrix / d angle
     grad <- cbind( grad, c( -2*sigma[1,2] , 2*sigma[1,2] , A*sinh(ecc/2)*2*cos(2*theta) ) )
 
     # gradient matrix d par / d sigma via inverse function theorem
@@ -250,52 +253,62 @@ pars.tauv <- function(tau,tauc=tau)
 ############################
 # coarce infinite parameters into finite parameters appropriate for numerics
 ###########################
-ctmm.prepare <- function(data,CTMM,REML=FALSE)
+ctmm.prepare <- function(data,CTMM,precompute=TRUE,tau=TRUE)
 {
-  K <- length(CTMM$tau)  # dimension of hidden state per spatial dimension
-  axes <- CTMM$axes
-  range <- TRUE
-
-  if(K>0)
+  # prepare timescale related info
+  if(tau)
   {
-    # numerical limit for rangeless processes
-    if(CTMM$tau[1]==Inf)
+    K <- length(CTMM$tau)  # dimension of hidden state per spatial dimension
+    axes <- CTMM$axes
+    range <- TRUE
+
+    if(K>0)
     {
-      range <- FALSE
-      # aim for OU/OUF decay that is half way to machine epsilon
-      CTMM$tau[1] <- log(2^((.Machine$double.digits-1)/2))*(last(data$t)-data$t[1])
-      # CTMM$tau[1] <- (last(data$t)-data$t[1]) / (.Machine$double.eps)^(1/4)
-
-      # diffusion -> variance
-      if(!is.null(CTMM$sigma))
+      # numerical limit for rangeless processes
+      if(CTMM$tau[1]==Inf)
       {
-        TAU <- CTMM$tau[1]
-        CTMM$sigma <- CTMM$sigma*TAU
-        CTMM$sigma@par[1] <- CTMM$sigma@par[1]*TAU
+        range <- FALSE
+        # aim for OU/OUF decay that is half way to machine epsilon
+        CTMM$tau[1] <- log(2^((.Machine$double.digits-1)/2))*(last(data$t)-data$t[1])
+        # CTMM$tau[1] <- (last(data$t)-data$t[1]) / (.Machine$double.eps)^(1/4)
+
+        # diffusion -> variance
+        if(!is.null(CTMM$sigma))
+        {
+          TAU <- CTMM$tau[1]
+          CTMM$sigma <- CTMM$sigma*TAU
+          CTMM$sigma@par[1] <- CTMM$sigma@par[1]*TAU
+        }
       }
+
+      # continuity reduction
+      CTMM$tau = CTMM$tau[CTMM$tau!=0]
+      K <- length(CTMM$tau)
     }
+    # I am this lazy
+    # if(K==0) { K <- 1 ; CTMM$tau <- 0 }
 
-    # continuity reduction
-    CTMM$tau = CTMM$tau[CTMM$tau!=0]
-    K <- length(CTMM$tau)
+    CTMM$range <- range
   }
-  # I am this lazy
-  # if(K==0) { K <- 1 ; CTMM$tau <- 0 }
-
-  CTMM$range <- range
 
   # evaluate mean function for this data set if no vector is provided
-  if(is.null(CTMM$mean.vec))
+  if(precompute && (is.null(CTMM$mean.vec) || is.null(CTMM$error.mat)))
   {
     drift <- get(CTMM$mean)
     U <- drift(data$t,CTMM)
     CTMM$mean.vec <- U
 
-    if(REML)
-    {
-      UU <- t(U) %*% U
-      CTMM$REML.loglike <- (length(axes)/2)*(log(det(UU)) + ncol(U)*log(2*pi))
-    }
+    UU <- t(U) %*% U
+    CTMM$UU <- UU
+    CTMM$REML.loglike <- length(CTMM$axes)/2*log(det(UU)) # extra term for REML likelihood
+
+    # necessary spatial dimension of Kalman filter
+    if(CTMM$error && CTMM$circle && !CTMM$isotropic) { DIM <- 2 } else { DIM <- 1 }
+    # construct error matrix, if UERE is unknown construct error matrix @ UERE=1
+    ERROR <- CTMM
+    ERROR$error <- as.logical(ERROR$error)
+    CTMM$error.mat <- get.error(data,ERROR,DIM=DIM) # store error matrix (modulo UERE if fit)
+    # this is more of an error structure matrix (modulo variance)
   }
 
   return(CTMM)
@@ -305,7 +318,8 @@ ctmm.prepare <- function(data,CTMM,REML=FALSE)
 ctmm.repair <- function(CTMM,K=length(CTMM$tau))
 {
   # repair dropped zero timescales
-  if(K) { CTMM$tau <- replace(numeric(K),1:length(CTMM$tau),CTMM$tau) }
+  if(K && length(CTMM$tau)) { CTMM$tau <- replace(numeric(K),1:length(CTMM$tau),CTMM$tau) }
+  else if(K) { CTMM$tau <- numeric(K) }
 
   if(!CTMM$range)
   {
@@ -325,75 +339,13 @@ ctmm.repair <- function(CTMM,K=length(CTMM$tau))
 
   # erase evaluated mean vector from ctmm.prepare
   CTMM$mean.vec <- NULL
+  CTMM$UU <- NULL
+  CTMM$REML.loglike <- NULL # deleted in ctmm.fit
+  CTMM$error.mat <- NULL
 
   return(CTMM)
 }
 
-## prepare error array, also return a flag #
-# 0 : no error
-# 1 : constant error parameter fit
-# 2 : proportional error parameter fit to DOP value
-# 3 : full error no fit
-get.error <- function(DATA,CTMM,flag=FALSE)
-{
-  n <- length(DATA$t)
-  axes <- CTMM$axes
-  COLS <- names(DATA)
-
-  # model the error
-  if(CTMM$error)
-  {
-    # is the data supplied with error estimates
-    if(any(is.element(axes,c("x","y"))))
-    {
-      if(is.element("HERE",COLS))
-      {
-        error <- DATA$HERE^2/2
-        FLAG <- 3
-      }
-      else if(is.element("HDOP",COLS))
-      {
-        error <- (CTMM$error * DATA$HDOP)^2/2
-        FLAG <- 2
-      }
-      else
-      {
-        error <- rep(CTMM$error^2/2,n)
-        FLAG <- 1
-      }
-    }
-    else if(axes=="z")
-    {
-      if(is.element("VERE",COLS))
-      {
-        error <- DATA$VERE^2
-        FLAG <- 3
-      }
-      else if(is.element("VDOP",COLS))
-      {
-        error <- (CTMM$error * DATA$VDOP)^2
-        FLAG <- 2
-      }
-      else
-      {
-        error <- rep(CTMM$error^2,n)
-        FLAG <- 1
-      }
-    }
-  }
-  else
-  {
-    error <- rep(0,n)
-    FLAG <- 0
-  }
-
-  if(flag) { return(FLAG) }
-  else
-  {
-    attr(error,"flag") <- FLAG
-    return(error)
-  }
-}
 
 # degree of continuity in the model
 continuity <- function(CTMM)

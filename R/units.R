@@ -74,12 +74,18 @@ unit <- function(data,dimension,thresh=1,concise=FALSE)
 ## rescale the units of telemetry object
 unit.telemetry <- function(data,length=1,time=1)
 {
-  data$x <- data$x/length
-  data$y <- data$y/length
-  data$t <- data$t/length
+  convert <- function(NAMES,scale) { for(NAME in NAMES) { if(NAME %in% names(data)) { data[[NAME]] <<- data[[NAME]]/scale } } }
 
-  # error in meters
-  if("HERE" %in% names(data)) { data$HERE <- data$HERE/length }
+  convert(DOP.LIST$horizontal$axes,length)
+  convert('t',time)
+  convert(DOP.LIST$speed$axes,length/time)
+
+  convert(DOP.LIST$horizontal$VAR,length^2)
+  convert(DOP.LIST$horizontal$COV,length^2)
+
+  convert(DOP.LIST$speed$VAR,(length/time)^2)
+  convert(DOP.LIST$speed$COV,(length/time)^2)
+
   # HDOP is unitless
 
   return(data)
@@ -97,7 +103,7 @@ unit.ctmm <- function(CTMM,length=1,time=1)
   drift <- get(CTMM$mean)
   CTMM <- drift@scale(CTMM,time)
 
-  CTMM$error <- CTMM$error/length
+  if(class(CTMM$error)=='numeric') { CTMM$error <- CTMM$error/length } # don't divide logicals
   CTMM$sigma <- CTMM$sigma/length^2
   CTMM$sigma@par["area"] <- CTMM$sigma@par["area"]/length^2
 
@@ -108,31 +114,38 @@ unit.ctmm <- function(CTMM,length=1,time=1)
     CTMM$sigma@par["area"] <- CTMM$sigma@par["area"]*time
   }
 
-  if(!is.null(CTMM$COV))
+  if("COV.mu" %in% names(CTMM)) { CTMM$COV.mu <- CTMM$COV.mu/length^2 }
+
+  if("COV" %in% names(CTMM))
   {
-    CTMM$COV.mu <- CTMM$COV.mu/length^2
+    NAMES <- dimnames(CTMM$COV)[[1]]
 
-    CTMM$COV["area",] <- CTMM$COV["area",]/length^2
-    CTMM$COV[,"area"] <- CTMM$COV[,"area"]/length^2
-
-    if(!CTMM$range)
+    if("area" %in% NAMES)
     {
-      CTMM$COV["area",] <- CTMM$COV["area",]*time
-      CTMM$COV[,"area"] <- CTMM$COV[,"area"]*time
+      CTMM$COV["area",] <- CTMM$COV["area",]/length^2
+      CTMM$COV[,"area"] <- CTMM$COV[,"area"]/length^2
+
+      if(!CTMM$range)
+      {
+        CTMM$COV["area",] <- CTMM$COV["area",]*time
+        CTMM$COV[,"area"] <- CTMM$COV[,"area"]*time
+      }
     }
 
     tau <- CTMM$tau
     tau <- tau[tau<Inf]
     if(length(tau))
     {
-      tau <- names(tau)
-      tau <- paste("tau",tau)
-
-      CTMM$COV[tau,] <- CTMM$COV[tau,]/time
-      CTMM$COV[,tau] <- CTMM$COV[,tau]/time
+      tau <- paste("tau",names(tau))
+      tau <- tau[tau %in% NAMES]
+      if(length(tau))
+      {
+        CTMM$COV[tau,] <- CTMM$COV[tau,]/time
+        CTMM$COV[,tau] <- CTMM$COV[,tau]/time
+      }
     }
 
-    if(CTMM$circle)
+    if("circle" %in% NAMES)
     {
       CTMM$COV["circle",] <- CTMM$COV["circle",] * time
       CTMM$COV[,"circle"] <- CTMM$COV[,"circle"] * time
@@ -154,6 +167,16 @@ unit.UD <- function(UD,length=1)
   return(UD)
 }
 
+
+##################
+unit.variogram <- function(SVF,time=1,area=1)
+{
+  SVF$lag <- SVF$lag / time
+  SVF$SVF <- SVF$SVF / area
+  if("MSE" %in% names(SVF)) { SVF$MSE <- SVF$MSE / area }
+
+  return(SVF)
+}
 
 
 # convert units

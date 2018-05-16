@@ -1,41 +1,40 @@
 # drift/mean function models
-new.drift <- methods::setClass("drift", representation("function",init="function",scale="function",svf="function",refine="function",name="function",speed="function",summary="function"))
-
-#################################
-# stationary mean/drift function
-#################################
-stationary.drift <- function(t,CTMM) { cbind( array(1,length(t)) ) }
-
 # guess some parameters and check the model parameter sanity
-stationary.init <- function(data,CTMM)
+drift.init <- function(data,CTMM)
 {
   z <- get.telemetry(data,CTMM$axes)
 
   # weights from errors
-  error <- get.error(data,CTMM)
-  if(CTMM$error) { w <- 1/error }
-  else { w <- rep(1,length(data$t)) }
+  if(CTMM$error)
+  {
+    error <- get.error(data,CTMM,circle=TRUE)
+    w <- 1/error
+  }
+  else
+  { w <- rep(1,length(data$t)) }
   # normalize weights
-  w <- w/sum(w)
+  # w <- w/sum(w)
 
-  CTMM$mu <- c(w %*% z)
-
-  z <- t(t(z)-CTMM$mu)
-
-  CTMM$sigma <- t(z) %*% z
-
-  # remove error from variability
-  error <- sum(error)
-  if(CTMM$error) { CTMM$sigma <- CTMM$sigma - error * diag(length(CTMM$axes)) }
+  drift <- get(CTMM$mean)
+  u <- drift(data$t,CTMM)
+  # IID estimate for (error + 0 movement) || (movement + 0 error)
+  CTMM$mu <- PDsolve(t(u) %*% (w * u)) %*% (t(u) %*% (w * z))
 
   n <- length(data$t)
-  CTMM$sigma <- CTMM$sigma / (n-1)
-  error <- error/(n-1)
+  z <- z - (u %*% CTMM$mu)
+  CTMM$sigma <- (t(z) %*% z) / (n-1)
 
-  # don't let variance estimate go below error estimate (or can become negative)
-  STUFF <- eigen(CTMM$sigma)
-  STUFF$values <- pmax(STUFF$values,error)
-  CTMM$sigma <- STUFF$vectors %*% diag(STUFF$values) %*% t(STUFF$vectors)
+  # remove error from variability
+  if(CTMM$error)
+  {
+    error <- sum(error) / (n-1)
+    CTMM$sigma <- CTMM$sigma - error * diag(length(CTMM$axes))
+
+    # don't let variance estimate go below error estimate (or can become negative)
+    STUFF <- eigen(CTMM$sigma)
+    STUFF$values <- pmax(STUFF$values,error)
+    CTMM$sigma <- STUFF$vectors %*% diag(STUFF$values,nrow=length(STUFF$values)) %*% t(STUFF$vectors)
+  }
 
   CTMM$sigma <- covm(CTMM$sigma,isotropic=CTMM$isotropic,axes=CTMM$axes)
 
@@ -43,7 +42,50 @@ stationary.init <- function(data,CTMM)
 }
 
 # how do we rescale time
-stationary.scale <- function(CTMM,time) { CTMM }
+drift.scale <- function(CTMM,time) { CTMM }
+
+# how do we shift the mean by a constant location
+# this assumes the first mean term is always the stationary mean value and all others are deviations
+stationary.shift <- function(mu,dmu)
+{
+  mu[1,] <- mu[1,] + dmu
+  return(mu)
+}
+
+# for when all mean coefficients are centered on the origin and must be shifted
+uniform.shift <- function(mu,dmu)
+{
+  mu <- t(t(mu) + dmu)
+  return(mu)
+}
+
+# increase number of linear model parameters
+drift.refine <- function(CTMM) { list() }
+
+# name of mean function
+drift.name <- function(CTMM) { NULL }
+
+# place to put optional summary information
+drift.summary <- function(CTMM,level,level.UD) { NULL }
+
+prototype.drift <- function(t,CTMM) { rep(1,length(t)) }
+attr(prototype.drift,"init") <- drift.init
+attr(prototype.drift,"name") <- drift.name
+attr(prototype.drift,"refine") <- drift.refine
+attr(prototype.drift,"scale") <- drift.scale
+attr(prototype.drift,"shift") <- stationary.shift
+attr(prototype.drift,"summary") <- drift.summary
+attr(prototype.drift,"velocity") <- function(t,CTMM) { rep(0,length(t)) }
+
+new.drift <- methods::setClass("drift",
+              representation("function",speed="function",svf="function",init="function",name="function",refine="function",scale="function",shift="function",summary="function",velocity="function"),
+              prototype=prototype.drift)
+
+#################################
+# stationary mean/drift function
+#################################
+stationary.drift <- function(t,CTMM) { cbind( array(1,length(t)) ) }
+stationary.velocity <- function(t,CTMM) { cbind( array(0,length(t)) ) }
 
 # svf of mean function
 stationary.svf <- function(CTMM)
@@ -55,20 +97,11 @@ stationary.svf <- function(CTMM)
   return(list(EST=EST,VAR=VAR))
 }
 
-# increase number of linear model parameters
-stationary.refine <- function(CTMM) { list() }
-
-# name of mean function
-stationary.name <- function(CTMM) { NULL }
-
 # mean square speed function: point estimate and variance
 stationary.speed <- function(CTMM) { list(EST=0,VAR=0) }
 
-# place to put optional summary information
-stationary.summary <- function(CTMM,level,level.UD) { NULL }
-
 # combine this all together for convenience
-stationary <- new.drift(stationary.drift,init=stationary.init,scale=stationary.scale,svf=stationary.svf,refine=stationary.refine,name=stationary.name,speed=stationary.speed,summary=stationary.summary)
+stationary <- new.drift(stationary.drift,svf=stationary.svf,speed=stationary.speed,velocity=stationary.velocity)
 
 ############################
 # Periodic drift function
@@ -80,13 +113,32 @@ periodic.drift <- function(t,CTMM)
   period <- CTMM$period
 
   # constant term
-  U <- cbind( stationary.drift(t,CTMM) )
+  U <- stationary.drift(t,CTMM)
 
   omega <- periodic.omega(CTMM)
   if(length(omega))
   {
     omega <- t %o% omega
     U <- cbind( U , cos(omega) , sin(omega) )
+  }
+
+  return(U)
+}
+
+# periodic velocity mean
+periodic.velocity <- function(t,CTMM)
+{
+  harmonic <- CTMM$harmonic
+  period <- CTMM$period
+
+  # constant term
+  U <- stationary.velocity(t,CTMM)
+
+  omega <- periodic.omega(CTMM)
+  if(length(omega))
+  {
+    theta <- omega %o% t # backwards for multiplication by first dimension
+    U <- cbind( U , -t(omega*sin(theta)) , t(omega*cos(theta)) )
   }
 
   return(U)
@@ -101,7 +153,9 @@ periodic.init <- function(data,CTMM)
   # default harmonics is none
   if(is.null(CTMM$harmonic)) { CTMM$harmonic <- numeric(length(CTMM$period)) }
 
-  if(is.null(CTMM$mu)) { CTMM <- stationary.init(data,CTMM) }
+  if(is.null(CTMM$mu)) { CTMM <- drift.init(data,CTMM) }
+
+  # !!! maybe run generic drift here
 
   return(CTMM)
 }
@@ -168,7 +222,7 @@ periodic.speed <- function(CTMM)
 periodic.summary <- function(CTMM,level,level.UD)
 {
   alpha <- 1-level
-  SUM <- stationary.summary(CTMM,level,level.UD)
+  SUM <- NULL
 
   if(sum(CTMM$harmonic)==0) { return(SUM) }
 
@@ -211,7 +265,7 @@ periodic.summary <- function(CTMM,level,level.UD)
   if(length(CTMM$tau)>1)
   {
     ROT <- sum((omega*A)^2)/2 # sine and cosine average 1/2
-    Omega <- if(CTMM$circle) { 2*pi/CTMM$circle } else { 0 }
+    Omega <- CTMM$circle
     RAN <- 2*area*cosh(ecc/2) * ( 1/prod(CTMM$tau) + Omega^2 )
     MLE <- ROT/(ROT+RAN)
 
@@ -227,7 +281,7 @@ periodic.summary <- function(CTMM,level,level.UD)
     }
     if(CTMM$circle)
     {
-      GRAD <- c(GRAD,-4*area*cosh(ecc/2)*Omega^2/CTMM$circle)
+      GRAD <- c(GRAD,4*area*cosh(ecc/2)*Omega)
       PARS <- c(PARS,"circle")
     }
     COV.RAN <- CTMM$COV[PARS,PARS]
@@ -267,9 +321,6 @@ periodic.refine <- function(CTMM)
 
   return(GUESS)
 }
-
-# combine this all together for convenience
-periodic <- new.drift(periodic.drift,init=periodic.init,scale=periodic.scale,svf=periodic.svf,refine=periodic.refine,name=periodic.name,speed=periodic.speed,summary=periodic.summary)
 
 # list of non-zero frequencies of model
 periodic.omega <- function(CTMM)
@@ -327,6 +378,9 @@ periodic.stuff <- function(CTMM)
 
   return(list(A=A,COV=COV,omega=omega))
 }
+
+# combine this all together for convenience
+periodic <- new.drift(periodic.drift,init=periodic.init,scale=periodic.scale,svf=periodic.svf,refine=periodic.refine,name=periodic.name,speed=periodic.speed,summary=periodic.summary,velocity=periodic.velocity)
 
 #################################
 # continuous uniform spline mean functions
@@ -392,7 +446,7 @@ uspline.init <- function(data,CTMM)
   # default domain of spline grid
   if(is.null(CTMM$domain)) { CTMM$domain <- c(data$t[1],last(data$t)) }
 
-  if(is.null(CTMM$mu)) { CTMM <- stationary.init(CTMM) }
+  if(is.null(CTMM$mu)) { CTMM <- drift.init(CTMM) }
 
   return(CTMM)
 }
@@ -463,9 +517,6 @@ uspline.speed <- function(CTMM)
 
 # summary
 
-# convenience function
-uspline <- new.drift(uspline.drift,init=uspline.init,scale=uspline.scale,refine=uspline.refine,name=uspline.name)
-
 # calculate spline grid
 uspline.stuff <- function(CTMM)
 {
@@ -487,3 +538,59 @@ uspline.stuff <- function(CTMM)
 
   return(list(tknot=tknot,dt=dt))
 }
+
+# convenience function
+uspline <- new.drift(uspline.drift,init=uspline.init,scale=uspline.scale,shift=uniform.shift,refine=uspline.refine,name=uspline.name)
+
+#################################
+# piecewise-stationary mean/drift function
+#################################
+pwstationary.drift <- function(t,CTMM)
+{
+  breaks <- CTMM$breaks
+  id <- factor(breaks$id)
+  start <- breaks$start
+  stop <- breaks$stop
+
+  IDS <- levels(id)
+  u <- array(0,c(length(t),length(IDS)))
+  colnames(u) <- IDS
+
+  i <- 1
+  for(r in 1:nrow(breaks))
+  {
+    # stationary mode
+    while(t[i] <= stop[r] && i <= length(t))
+    {
+      u[i,id[r]] <- 1
+      i <- i + 1
+    }
+
+    # linear transition mode
+    if(r < nrow(breaks))
+    {
+      while(t[i] < start[r+1])
+      {
+        frac <- (t[i]-stop[r])/(start[r+1]-stop[r])
+        u[i,id[r]] <- frac
+        u[i,id[r+1]] <- 1 - frac
+        i <- i + 1
+      }
+    }
+  }
+
+  return(u)
+}
+
+############ init handle posixct start & stop
+
+#############
+pwstationary.scale <- function(CTMM,time)
+{
+  CTMM$breaks[,c('start','stop')] <- CTMM$breaks[,c('start','stop')] / time
+
+  return(CTMM)
+}
+
+# combine this all together for convenience
+pwstationary <- new.drift(pwstationary.drift,shift=uniform.shift,speed=stationary.speed,svf=stationary.svf)

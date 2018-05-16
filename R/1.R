@@ -26,10 +26,13 @@ new.variogram <- methods::setClass("variogram",representation("data.frame",info=
 #SpatialPolygonsDataFrame.SpatialPolygons <- function(object,...) sp::SpatialPolygonsDataFrame(Sr=object,...)
 
 # existing S4 generic functions
+methods::setGeneric("projection", getGeneric("projection", package="raster"))
+methods::setGeneric("projection<-", getGeneric("projection<-", package="raster"))
 methods::setGeneric("raster", getGeneric("raster", package="raster"))
 methods::setGeneric("zoom", getGeneric("zoom", package="raster"))
 
 # new S3 generic functions
-writeShapefile <- function(object,...) UseMethod("writeShapefile")
+writeShapefile <- function(object,folder,file=NULL,...) UseMethod("writeShapefile")
 emulate <- function(object,...) UseMethod("emulate")
 AICc <- function(object,...) UseMethod("AICc")
+speed <- function(object,...) UseMethod("speed")

@@ -1,6 +1,9 @@
 # is a package installed?
 is.installed <- function(pkg) is.element(pkg, utils::installed.packages()[,1])
 
+# does this thing exist and, if so, is it true
+true <- function(x) { !is.null(x) & !is.na(x) & x }
+
 # generic FFT functions
 FFT <- function(X,inverse=FALSE)
 {
@@ -35,21 +38,10 @@ FFTW <- function(X,inverse=FALSE)
   return(X)
 }
 
-# parallel functions
-detectCores <- parallel::detectCores
-mclapply <- parallel::mclapply
-
 .onLoad <- function(...)
 {
   # choose FFTW if installed
   if(is.installed("fftw")) { utils::assignInMyNamespace("FFT", FFTW) }
-
-  # don't try to fork if winblows
-  if(.Platform$OS.type=="windows")
-  {
-    utils::assignInMyNamespace("detectCores", function(...) { 1 })
-    utils::assignInMyNamespace("mclapply", function(X,FUN,mc.cores=1,...) { lapply(X,FUN,...) })
-  }
 }
 .onAttach <- .onLoad
 
@@ -75,6 +67,17 @@ sinch <- Vectorize( function(x)
 } )
 
 
+# multivariate polygamma function
+mpsigamma <- function(x,deriv=0,dim=1)
+{
+  PSI <- 1 - 1:dim
+  PSI <- x + PSI/2
+  PSI <- sapply(PSI,function(p) psigamma(p,deriv=deriv))
+  PSI <- sum(PSI)
+  return(PSI)
+}
+
+
 # forwarding function for list of a particular datatype
 zoom.list <- function(x,...)
 {
@@ -95,6 +98,14 @@ mean.list <- function(x,...)
 
 
 # forwarding function for list of a particular datatype
+median.list <- function(x,na.rm=FALSE,...)
+{
+  CLASS <- class(x[[1]])
+  utils::getS3method("median",CLASS)(x,na.rm=na.rm,...)
+}
+
+
+# forwarding function for list of a particular datatype
 plot.list <- function(x,...)
 {
   CLASS <- class(x[[1]])
@@ -107,6 +118,13 @@ summary.list <- function(object,...)
 {
   CLASS <- class(object[[1]])
   utils::getS3method("summary",CLASS)(object,...)
+}
+
+# forwarding function for list of a particular datatype
+writeShapefile.list <- function(object,folder,file=NULL,...)
+{
+  CLASS <- class(object[[1]])
+  utils::getS3method("writeShapefile",CLASS)(object,folder,file=file,...)
 }
 
 
@@ -123,26 +141,6 @@ na.replace <- function(x,rep)
 is.even <- Vectorize(function(x) {x %% 2 == 0})
 
 is.odd <- Vectorize(function(x) {x %% 2 != 0})
-
-
-# 2D rotation matrix
-rotate <- function(theta)
-{
-  COS <- cos(theta)
-  SIN <- sin(theta)
-  R <- rbind( c(COS,-SIN), c(SIN,COS) )
-  return(R)
-}
-
-
-# statistical mode
-Mode <- function(x)
-{
-  ux <- unique(x)
-  tab <- tabulate(match(x, ux))
-  ux[tab == max(tab)]
-  mean(ux)
-}
 
 
 # generalized covariance from -likelihood derivatives
@@ -214,72 +212,6 @@ cov.loglike <- function(hess,grad=rep(0,nrow(hess)))
   return(COV)
 }
 
-# confidence interval functions
-CI.upper <- Vectorize(function(k,Alpha){stats::qchisq(Alpha/2,k,lower.tail=FALSE)/k})
-CI.lower <- Vectorize(function(k,Alpha){stats::qchisq(Alpha/2,k,lower.tail=TRUE)/k})
-
-
-# calculate chi^2 confidence intervals from MLE and COV estimates
-chisq.ci <- function(MLE,COV=NULL,alpha=0.05,DOF=2*MLE^2/COV)
-{
-  # try to do something reasonable on failure cases
-  if(DOF==0)
-  { CI <- c(0,MLE,Inf) }
-  else if(MLE==0)
-  { CI <- c(0,0,0) }
-  else if(MLE==Inf)
-  { CI <- c(Inf,Inf,Inf) }
-  else if(!is.null(COV) && COV<0) # try an exponential distribution?
-  {
-    warning("VAR[Area] = ",COV," < 0")
-    CI <- c(1,1,1)*MLE
-    CI[1] <- stats::qexp(alpha/2,rate=1/min(sqrt(-COV),MLE))
-    CI[3] <- stats::qexp(1-alpha/2,rate=1/max(sqrt(-COV),MLE))
-  }
-  else     # regular estimate
-  {
-    CI <- MLE * c(CI.lower(DOF,alpha),1,CI.upper(DOF,alpha))
-
-    # qchisq upper.tail is too small when DOF<<1
-    # probably an R bug that no regular use of chi-square/gamma would come across
-    if(is.null(COV)) { COV <- 2*MLE^2/DOF }
-    # Normal backup for upper.tail
-    UPPER <- norm.ci(MLE,COV,alpha=alpha)[3]
-    if(CI[3]<UPPER) { CI[3] <- UPPER }
-  }
-
-  names(CI) <- c("low","ML","high")
-  return(CI)
-}
-
-# normal confidence intervals
-norm.ci <- function(MLE,COV,alpha=0.05)
-{
-  # z-values for low, ML, high estimates
-  z <- stats::qnorm(1-alpha/2)*c(-1,0,1)
-
-  # normal ci
-  CI <- MLE + z*sqrt(COV)
-
-  names(CI) <- c("low","ML","high")
-  return(CI)
-}
-
-# calculate log-normal confidence intervals from MLE and COV estimates
-lognorm.ci <- function(MLE,COV,alpha=0.05)
-{
-  # log transform of variance
-  COV <- COV/MLE^2
-  # log transform of point estimate
-  MLE <- log(MLE)
-
-  CI <- norm.ci(MLE,COV,alpha=alpha)
-
-  # transform back
-  CI <- exp(CI)
-
-  return(CI)
-}
 
 
 # last element of array
@@ -331,4 +263,22 @@ rpad <- function(mat,size,padding=0,side="right")
 rm.name <- function(object,name)
 {
   object[!rownames(object) %in% name,!colnames(object) %in% name]
+}
+
+
+# put in a list if not in a list already
+listify <- function(x)
+{
+  if(is.null(x)) { return(x) }
+  if(class(x) != "list") { x <- list(x) }
+  return(x)
+}
+
+
+# rename elements of an object
+rename <- function(object,name1,name2)
+{
+  IND <- which(names(object)==name1)
+  names(object)[IND] <- name2
+  return(object)
 }

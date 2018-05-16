@@ -1,30 +1,80 @@
-PERIODIC 0.4.0
-* test simulation fits of circulation isotropic=T/F, pREML
+PRIORITY
+* Error in sinch(nu * dt) * Exp : non-numeric argument to binary operator ??? Random R bug?
+* reference Guillaume's paper at the beginning of the periodogram vignette
+* UERE needs to return an AIC value
+
+ERROR PAPER
+* how does error change variogram DOF calculation?
+* errors on x,y,z variograms
+* errors on periodograms?
+* exact 4x4 matrix inverse relations in PDsolve()
+* UERE error propagation from calibration (do not use as prior!)
+* email ARGOS about McClintock formula
+* kGcluster with tpeqd projection suggestion
+* predict can return VAR.xy for isotropic with UERE<4
+
+PROJECTION
+* projection() <- on all plottable objects + plot option
+* project()<- ignores simulated/predicted velocities & covariances without headings & magnitudes
+* error as.telemetry if user attempts lon-lat projection
+* check latlon projection stop code against KT's input
+* document projection projection<- dispatch methods
+
+PARALLELIZATION
+* parallelize akde.list & document overlap
+* overlap() man example akde() first
+* simulate nsim>1 with plapply
+* parallel derivatives with upper/lower/etc.
+
+MISC WORK
+* functionalize detrend & retrend in simulate/predict
+* predict.ctmm cov
+* spline velocity mean function
+* variogram discrepancy rank function
+* color array -> spatial segregation
+* plot axes=c('x','y') by default or axes=c('t','z')
+* catch optimizer failure (last best) in global variable and finish optimize() with warning
+* specify grid partially/totally in akde/occurrence
+* pre-standardize length data in ctmm.fit & ctmm.loglike (if not already) - ctmm.prepare?
+* times can be pre-standardized according to tau_velocity as well?
+* opacity option for plot
+* predict isotropic VAR.xy output
+* SpatialPolygonsDataFrame.ctmm
+* writeShapefile.ctmm
+* define print.ctmm and see if that works
+* simulate prior=FALSE
+* remove mean from kalman smoother - detrend, then add back
+* change all sapply to vapply
+* make sure terms of kalman filter are sorted by |magnitude|
+* resort all arrays to put time in last index
+* FAQ entry on automated time format reading in as.telemetry breaking with R update
+* non-range resident in vignette
+* default labels not working for UD contours
+* occurrence error option
+* boundry warning in help(ctmm.fit)
+* standardize x,y prior to likelihood calculation
+* plot3D of 2D UD
+* ltraj export
+* export ellipse drawing function
+* effective DOF for diffusion rate?
+
+PERIODIC 0.4.X
+* AIC/MSPE hybrid model selection
+* mean derivative not included in simulate/predict/etc?
+* T-test on high frequency amplitudes
 * variogram on mean detrended data with CTMM argument
 * simulate.telemetry (not pure ctmm)
-* smoother (velocity vector--check)
+* smoother (non-uniform u(t) and velocity vector)
 * akde... slow exact and fast approximation or block toeplitz matrix (stationary Laplace approximation?)
 * plot ctmm (fall back on kde code)
 * vignette: periodogram, ctmm.select
-
-pREML PAPER
-* document pREML
-* autocorrelated AICc
-
-ERROR PAPER
-* ctmm.select for error
-* standardize x,y prior to likelihood calculation
-* prior on error from calibration?
-
-VELOCITY PAPER
-* predict -> velocity
-* as.telemetry <- velocity
-* ctmm.fit <- velocity
 
 VIGNETTES & EXAMPLES
 * explain effective sample sizes (DOF of summary)
 
 OPTIMIZER
+* split-parameter optimization (for periodic parameters like angle) with funnelling error target
+* convex perimeter tracker
 * Somehow optimizer can stop on stage 1 without proceeding to stage 2
 * Stop on encapsulated
 * local tangent transformation on periodic variables
@@ -38,16 +88,19 @@ Aligned Krige UDs
 pregridder composite dimension?
 
 LOW HANGING FRUIT & Nagging issues
+* add acf of calibration residuals to uere diagnostic
+* sort.ctmm by IC argument
+* simulate conditionally with t=t returns data and t times. predict does not. (lots of low-level changes here)
+* move object coordinate x1,x2 lat-lon
+* Bayesian=FALSE argument for simulate() leveraging emulate()
 * project(telemetry) <- function
 * check IID AICc formula for isotropic case
 * change default gap skip in occurrence?
 * rbind on telemetry objects
-* as.telemetry drop=TRUE/FALSE for single individuals
 * grid fix regression - weight to coarse scale when appropriate
 * detrend mean in correlogram function
 * plot errors with HDOP & error model in CTMM
 * rainbow.telemetry
-* summary.telemetry.list like Dong's
 * plot telemetry/UD with reverse axes (preserve x&y orientation)s
 * give writeShapefile a default folder name, maybe also separate layers into different files
 * compass plot
@@ -55,13 +108,8 @@ LOW HANGING FRUIT & Nagging issues
 * individualized projections
 * 1-point azimuthal equidistant projection quick option
 * overload covm * / to apply to area & matrix
-* plot.telemetry with HDOP & UERE
 * str.ctmm, str.telemetry (show, print too?)
-* don't delete mean off of IOU and BM... need that to Krige I think...
-* IOU with drift not setup correctly
 * points methods units environment
-* UERE priors from calibration
-* store fixed error in data
 * have summary return a warning on occurrence distributions
 * variogram.list <- mean-lapply-variogram
 * occurrence.list
@@ -159,3 +207,7 @@ Repeated times in variograms -- account for as error -- fix cap
 dplyr, rolling for loops
 
 fixed mean parameter for boundary issues
+
+HIERARCHICAL___________
+* stochastic gradient Langevin dynamics
+* proximal methods of optimization

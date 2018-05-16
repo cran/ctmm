@@ -12,7 +12,7 @@ bandwidth(data,CTMM,VMM=NULL,weights=FALSE,fast=TRUE,dt=NULL,precision=1/2,PC="M
   \item{data}{ 2D timeseries telemetry data represented as a \code{telemetry} object. }
   \item{CTMM}{A \code{ctmm} movement model as from the output of \code{ctmm.fit}.}
   \item{VMM}{An optional vertical \code{ctmm} object for 3D bandwidth calculation.}
-  \item{weights}{By default, the weights are taken to be uniform. \code{weights=TRUE} will optimize the weights, while a \code{numeric} array will fix the weights.}
+  \item{weights}{By default, the weights are taken to be uniform, whereas \code{weights=TRUE} will optimize the weights.}
   \item{fast}{Use FFT algorithms for weight optimization.}
   \item{dt}{ Optional lag bin width for the FFT algorithm.}
   \item{precision}{Fraction of maximum possible digits of precision to target in weight optimization. \code{precision=1/2} results in about 7 decimal digits of precision if the preconditioner is stable.}
@@ -21,17 +21,17 @@ bandwidth(data,CTMM,VMM=NULL,weights=FALSE,fast=TRUE,dt=NULL,precision=1/2,PC="M
   \item{trace}{Produce tracing information on the progress of weight optimization.}
 }
 \details{
-The \code{weights} argument can be used to correct fixed sampling bias with a prescribed \code{numeric} array or to correct temporal sampling bias caused by autocorrelation with \code{weights=TRUE}.
+The \code{weights=TRUE} argument can be used to correct temporal sampling bias caused by autocorrelation.
 \code{weights=TRUE} will optimize \code{n=length(data$t)} weights via constrained & preconditioned conjugate gradient algorithms.
 These algorithms have a few options that should be considered if the data are very irregular.
 
-\code{FFT=TRUE} grids the data with grid width \code{dt} and applies FFT algorithms, for a computational cost as low as \eqn{O(n \log n)} with only \eqn{O(n)} function evaluations.
+\code{fast=TRUE} grids the data with grid width \code{dt} and applies FFT algorithms, for a computational cost as low as \eqn{O(n \log n)} with only \eqn{O(n)} function evaluations.
 If no \code{dt} is specified, the minimum sampling interval \code{min(diff(data$t))} is used.
 \strong{If the data are irregular (permitting gaps), then \code{dt} may need to be several times smaller} to avoid slow down. In this case, try setting \code{trace=TRUE} and decreasing \code{dt} until the interations speed up and the number of feasibility assessments becomes less than \eqn{O(n)}.
 On the other hand, if the data contain some very tiny time intervals, say 1 second among hourly sampled data, then the default \code{dt} setting will create an excessively high-resolution discretization of time, which will also cause slowdown. In this case \code{CTMM} should contain an error model and \code{dt} can likely be increased to a larger fraction of the median sampling interval.
 %With the sub-optimal \code{PC="IID"} preconditioner, \code{dt} can be relaxed to the median value, but the computational cost is then increased to \eqn{O(n^2 \log n)}.
 
-\code{FFT=FALSE} uses exact times and has a computational cost as low as \eqn{O(n^2)}, including \eqn{O(n^2)} function evaluations. With \code{PC="direct"} this method will produce a result that is exact to within machine precision, but with a computational cost of \eqn{O(n^3)}.
+\code{fast=FALSE} uses exact times and has a computational cost as low as \eqn{O(n^2)}, including \eqn{O(n^2)} function evaluations. With \code{PC="direct"} this method will produce a result that is exact to within machine precision, but with a computational cost of \eqn{O(n^3)}.
 
 }
 
@@ -47,6 +47,10 @@ D. Marcotte. Fast variogram computation with FFT. \emph{Computers and Geoscience
 C. H. Fleming, W. F. Fagan, T. Mueller, K. A. Olson, P. Leimgruber, J. M. Calabrese.
 Rigorous home-range estimation with movement data: A new autocorrelated kernel-density estimator.
 \href{http://www.esajournals.org/doi/abs/10.1890/14-2010.1}{Ecology, 96:5, 1182-1188 (2015)}.
+
+C. H. Fleming, D. Sheldon, W. F. Fagan, P. Leimgruber, T. Mueller, D. Nandintsetseg, M. J. Noonan, K. A. Olson, E. Setyawan, A. Sianipar, J. M. Calabrese.
+Correcting for missing and irregular data in home-range estimation.
+\href{https://esajournals.onlinelibrary.wiley.com/doi/abs/10.1002/eap.1704}{Ecological Applications, 10.1002/eap.1704 (2018)}.
 }
 
 \author{ C. H. Fleming. }

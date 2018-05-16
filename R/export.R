@@ -30,7 +30,7 @@ methods::setMethod("raster",signature(x="UD"), function(x,DF="CDF",...) raster.U
 ##########################
 writeRaster.UD <- function(x,filename,format,DF="CDF",...)
 {
-  x <- raster(x,DF="CDF") # ... here seems much less useful
+  x <- raster(x,DF=DF)
   writeRaster(x,filename,format,...)
 }
 methods::setMethod("writeRaster",signature(x="UD",filename="character"), function(x,filename,format,DF="CDF",...) writeRaster.UD(x,filename,format,DF=DF,...))
@@ -52,22 +52,20 @@ SpatialPolygonsDataFrame.UD <- function(object,level.UD=0.95,level=0.95,...)
 
   # populate arrays: level.UD versus level
   P <- NULL
-  NAMES <- NULL
+  ID <- NULL
   for(i in 1:length(level.UD))
   {
-    P <- cbind(P,CI.UD(UD,level.UD[i],level,P=TRUE))
-    NAMES <- cbind(NAMES,names(P[,i]))
+    p <- CI.UD(UD,level.UD[i],level,P=TRUE)
+    P <- cbind(P,p)
+    ID <- cbind(ID,paste(UD@info$identity," ",round(100*level.UD[i]),"% ",names(p),sep=""))
   }
 
   # flatten arrays
-  DIM <- prod(dim(P))
-  P <- array(P,DIM)
-  NAMES <- array(NAMES,DIM)
-
-  ID <- paste(UD@info$identity," ",round(100*level.UD),"% ",NAMES,sep="")
+  P <- c(P)
+  ID <- c(ID)
 
   polygons <- list()
-  for(i in 1:DIM)
+  for(i in 1:length(P))
   {
     CL <- grDevices::contourLines(UD$r,z=UD$CDF,levels=P[i])
 
@@ -116,9 +114,10 @@ SpatialPolygonsDataFrame.UD <- function(object,level.UD=0.95,level=0.95,...)
 
 
 ################
-writeShapefile.UD <- function(object, folder, file=UD@info$identity, level.UD=0.95 ,level=0.95,  ...)
+writeShapefile.UD <- function(object,folder,file=NULL,level.UD=0.95,level=0.95,...)
 {
   UD <- object
+  if(is.null(file)) { file <- attr(object,"info")$identity }
 
   SP <- SpatialPolygonsDataFrame.UD(UD,level.UD=level.UD,level=level)
 
@@ -130,16 +129,48 @@ writeShapefile.UD <- function(object, folder, file=UD@info$identity, level.UD=0.
 # convert to spatialpoints object
 SpatialPoints.telemetry <- function(object,...)
 {
-  data <- object
+  CLASS <- class(object)
+  # promote to list if not already
+  object <- listify(object)
 
-  if(class(data)=="telemetry" || class(data)=="data.frame")
-  {
-    return( sp::SpatialPoints( "[.data.frame"(data,c("x","y")), proj4string=sp::CRS(attr(data,"info")$projection) ) )
-  }
-  else if(class(data)=="list")
-  {
-    SPL <- lapply( data, function(d) { sp::SpatialPoints( "[.data.frame"(d,c("x","y")), proj4string=sp::CRS(attr(d,"info")$projection) ) } )
-    return(SPL)
-  }
+  SP <- lapply( object, function(d) { sp::SpatialPoints( "[.data.frame"(d,c("x","y")), proj4string=sp::CRS(attr(d,"info")$projection) ) } )
+
+  # rbind all together
+  SP <- do.call(sp::rbind.SpatialPoints,SP)
+
+  return(SP)
 }
 #methods::setMethod("SpatialPoints",signature(coords="telemetry"), function(coords) SpatialPoints.telemetry(coords))
+
+
+##############
+# convert to spatialpoints data.frame object
+SpatialPointsDataFrame.telemetry <- function(object,...)
+{
+  # promote to list if not already
+  object <- listify(object)
+
+  # make identity array
+  identity <- unlist(sapply(object,function(o){ rep(attr(o,"info")$identity,length(o$t)) }))
+
+  SP <- SpatialPoints.telemetry(object,...)
+
+  # make SPDF with identity information
+  SP <- sp::SpatialPointsDataFrame(SP,data.frame(identity=identity),match.ID=FALSE)
+
+  return(SP)
+}
+
+################
+writeShapefile.telemetry <- function(object,folder,file=NULL, ...)
+{
+  if(is.null(file)) { file <- mean.info(object) }
+
+  # make one long SPDF
+  SP <- SpatialPointsDataFrame.telemetry(object)
+
+  # make shape file from points
+  rgdal::writeOGR(SP, dsn=folder, layer=file, driver="ESRI Shapefile",...)
+
+  # no return value
+}

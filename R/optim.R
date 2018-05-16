@@ -8,8 +8,7 @@ Optimizer <- function(par,fn,...,method="Nelder-Mead",lower=-Inf,upper=Inf,perio
   default <- list(precision=1/2,maxit=.Machine$integer.max,parscale=pmin(abs(par),abs(par-lower),abs(upper-par)))
   control <- replace(default,names(control),control)
   # check does not like attach
-  NAMES <- names(control)
-  for(i in 1:length(control)) { assign(NAMES[i],control[[i]]) }
+  NAMES <- names(control) ; for(i in 1:length(control)) { assign(NAMES[i],control[[i]]) }
 
   if(any(parscale==0)) { parscale[parscale==0] <- 1 }
 
@@ -82,7 +81,7 @@ line.boxer <- function(dp,p0=dp[,1],lower=-Inf,upper=Inf,period=F,period.max=1/2
     if(any(UP)) { t.up <- (upper-p0)[UP]/dp[UP] } else { t.up <- 1 }
     t <- min(t.lo,t.up)
 
-    # don't go more than period.max fraction of a period in one step
+    # circular parameters prevented from going more than half a period
     PERIOD <- as.logical(period)
     if(any(PERIOD)) { t <- min(t,abs(period/dp)[PERIOD]*period.max) }
 
@@ -218,11 +217,11 @@ rank1update <- function(H.LINE,LINE,hessian,covariance)
   return(list(hessian=hessian,covariance=covariance,condition=FACT))
 }
 
-# best number of calculations to make with min count and mc.cores
-mc.min <- function(min,mc.cores=detectCores())
+# best number of calculations to make with min count and cores
+mc.min <- function(min,cores=detectCores())
 {
-  x <- ceiling(min/mc.cores)
-  x <- x * mc.cores
+  x <- ceiling(min/cores)
+  x <- x * cores
   return(x)
 }
 
@@ -238,14 +237,17 @@ mc.min <- function(min,mc.cores=detectCores())
 mc.optim <- function(par,fn,...,lower=-Inf,upper=Inf,period=F,control=list())
 {
   DEBUG <- FALSE
+  PMAP <- TRUE
   # check complains about visible bindings
-  fnscale <- parscale <- maxit <- precision <- trace <- mc.cores <- hessian <- covariance <- NULL
+  fnscale <- parscale <- maxit <- precision <- trace <- cores <- hessian <- covariance <- NULL
   # fix default control arguments
-  default <- list(fnscale=1,parscale=pmin(abs(par),abs(par-lower),abs(upper-par)),maxit=100,trace=FALSE,precision=NULL,mc.cores=detectCores(),hessian=NULL,covariance=NULL,stages=NULL)
+  default <- list(fnscale=1,parscale=pmin(abs(par),abs(par-lower),abs(upper-par)),maxit=100,trace=FALSE,precision=NULL,cores=NULL,hessian=NULL,covariance=NULL,stages=NULL)
   control <- replace(default,names(control),control)
   # check does not like attach
   NAMES <- names(control)
   for(i in 1:length(control)) { assign(NAMES[i],control[[i]]) }
+
+  cores <- resolveCores(cores)
 
   if(any(parscale==0)) { parscale[parscale==0] <- 1 }
 
@@ -297,10 +299,69 @@ mc.optim <- function(par,fn,...,lower=-Inf,upper=Inf,period=F,control=list())
   }
 
   # what we will actually be evaluating
-  # this objective function has the ability to approximately zero its objective value
-  if(ZERO) { func <- function(par,...) fn(par*parscale,zero=zero*fnscale,...)/fnscale }
-  else { func <- function(par,...) fn(par*parscale,...)/fnscale }
-  # ordinary objective function
+  PERIOD <- as.logical(period)
+  if(PMAP && any(PERIOD))
+  {
+    PSCALE <- period[PERIOD]/pi
+
+    # locally-tangent tangent transform that maps periods to infinity
+    pmap <- function(p,theta,inverse=FALSE)
+    {
+      if(inverse) { p[PERIOD] <- atan(p[PERIOD]/PSCALE)*PSCALE + theta }
+      else { p[PERIOD] <- tan((p[PERIOD]-theta)/PSCALE)*PSCALE }
+      return(p)
+    }
+
+    # extract better theta from better par (under tangent transformation)
+    get.theta <- function(p,theta) # theta here is old theta
+    {
+      p <- pmap(p,theta,inverse=TRUE)
+      return(p[PERIOD])
+    }
+
+    # update old theta to new theta (under tangent transformation)
+    put.theta <- function(p,theta.old,theta.new)
+    {
+      p <- pmap(p,theta.old,inverse=TRUE)
+      p <- pmap(p,theta.new)
+      return(p)
+    }
+
+    period <- rep(FALSE,length(period)) # don't treat parameters as periodic from now on
+
+    # all coordinates are now transformed coordinates
+    theta <- par[PERIOD]
+    par <- pmap(par,theta)
+  }
+  else
+  { PMAP <- FALSE }
+
+  func <- function(par,...)
+  {
+    if(PMAP) { par <- pmap(par,theta,inverse=TRUE) }
+
+    # this objective function has the ability to approximately zero its objective value
+    if(ZERO) { FN <- try(fn(par*parscale,zero=zero*fnscale,...)) }
+    else { FN <- try(fn(par*parscale,...)) }
+    # ordinary objective function
+
+    if(class(FN)=="numeric") { FN <- FN/fnscale }
+    else
+    {
+      # store to environmental variable so that I can debug?
+      par <- par*parscale
+      warning("Objective function failure at c(",paste(names(par),collapse=','),') = c(',paste(par,collapse=','),')')
+
+      # strangely, the above is not working???
+      # debug(ctmm:::kalman)
+      # fn(par*parscale,zero=zero*fnscale,...) -> FN
+      # undebug(ctmm:::kalman)
+
+      FN <- Inf
+    }
+
+    return(FN)
+  }
 
   ##################
   # am I on a boundary and if so, align DIR
@@ -384,6 +445,18 @@ mc.optim <- function(par,fn,...,lower=-Inf,upper=Inf,period=F,control=list())
     # adjust zero shift
     if(ZERO && fn.par<Inf) { zero <- zero + fn.par }
 
+    # update local tangent frame
+    if(PMAP)
+    {
+      # update tangent origins
+      theta -> theta.old
+      theta <- get.theta(par,theta)
+      # update tangent variables
+      par <- put.theta(par,theta.old,theta)
+      par.target <- put.theta(par.target,theta.old,theta)
+      par.target.old <- put.theta(par.target.old,theta.old,theta)
+    }
+
     DIR <- diag(1,DIM)
     BOX <- is.boxed(par.target,fix.dir=TRUE)
 
@@ -448,9 +521,9 @@ mc.optim <- function(par,fn,...,lower=-Inf,upper=Inf,period=F,control=list())
     # mc evaluate all points
     P <- cbind(par,par.target,P1,P2)
     # par must be re-evaluated againt to prevent zero shift roundoff error
-    counts.diff <- ceiling(ncol(P)/mc.cores)
+    counts.diff <- ceiling(ncol(P)/cores)
     counts <- counts + counts.diff
-    fn.queue <- unlist(mclapply(split(P,col(P)),func,mc.cores=mc.cores))
+    fn.queue <- unlist(plapply(split(P,col(P)),func,cores=cores))
     # separate back into parts
     fn.par <- fn.queue[1]
     fn.target <- fn.queue[2]
@@ -612,8 +685,6 @@ mc.optim <- function(par,fn,...,lower=-Inf,upper=Inf,period=F,control=list())
           { par.diff <- c(gradient %*% par.dir) / c(par.dir %*% hessian %*% par.dir) * par.dir }
           else # don't divide by zero
           { par.diff <- par.dir }
-
-          # DEBUG <<- list(par.diff=par.diff,gradient=gradient,par.dir=par.dir,hessian=hessian,covariance=covariance,beta=beta,gradient.old=gradient.old)
         }
         else if(any(!TEST))
         {
@@ -695,13 +766,13 @@ mc.optim <- function(par,fn,...,lower=-Inf,upper=Inf,period=F,control=list())
         P <- line.boxer(2*par.diff,p0=par,lower=lower,upper=upper,period=period)
         par.diff <- P - par # twice the old par.diff with no boundary (reflection=1)
         M <- sqrt(sum(par.diff^2)) # total search magnitude
-        SEQ <- seq(0,M,length.out=mc.min(4,mc.cores)+1)[-1]
+        SEQ <- seq(0,M,length.out=mc.min(4,cores)+1)[-1]
       }
       else if(LINE.TYPE=="Enclosure")
       {
         # generate a linear sequence of points between par and par.target (already evaluated)
         M <- sqrt(sum(par.diff^2))
-        SEQ <- seq(0,M,length.out=mc.min(3,mc.cores)+2)[-1]
+        SEQ <- seq(0,M,length.out=mc.min(3,cores)+2)[-1]
         SEQ <- SEQ[-length(SEQ)]
 
         par.all <- cbind(par.all,par.target)
@@ -715,11 +786,11 @@ mc.optim <- function(par,fn,...,lower=-Inf,upper=Inf,period=F,control=list())
       # start iteration loop
       while(counts < maxit)
       {
-        counts <- counts + ceiling(ncol(P)/mc.cores)
+        counts <- counts + ceiling(ncol(P)/cores)
 
         # most expensive part
         # evaluate objective function at new P and store to fn.queue
-        fn.queue <- unlist(mclapply(split(P,col(P)),func,mc.cores=mc.cores))
+        fn.queue <- unlist(plapply(split(P,col(P)),func,cores=cores))
 
         # combine with older results
         par.all <- cbind(par.all,P)
@@ -741,6 +812,7 @@ mc.optim <- function(par,fn,...,lower=-Inf,upper=Inf,period=F,control=list())
         par <- par.all[,MIN]
         fn.par <- fn.all[MIN]
 
+        # DEBUG.LIST <<- list(par.all=par.all,fn.all=fn.all,parscale=parscale)
         if(trace) { message(sprintf("%s %s search",format(zero+fn.par,digits=16),LINE.TYPE)) }
 
         if(DEBUG)
@@ -784,7 +856,7 @@ mc.optim <- function(par,fn,...,lower=-Inf,upper=Inf,period=F,control=list())
           if(M.BOX<Inf)
           {
             # generate a linear sequence of points that terminate at the eventual boundary
-            SEQ <- seq(0,M.BOX,length.out=mc.cores+1)[-1]
+            SEQ <- seq(0,M.BOX,length.out=cores+1)[-1]
             P <- line.boxer((DIR.STEP %o% SEQ),p0=par,lower=lower,upper=upper,period=period)
           }
           else # we didn't hit a boundary and we never will, because there is no boundary
@@ -793,7 +865,7 @@ mc.optim <- function(par,fn,...,lower=-Inf,upper=Inf,period=F,control=list())
             M <- max(M,last(diff(SEQ)))
 
             # geometric sequence
-            SEQ <- 2^(1:mc.cores) * M
+            SEQ <- 2^(1:cores) * M
 
             P <- line.boxer((DIR.STEP %o% SEQ),p0=par,lower=lower,upper=upper,period=period,period.max=Inf)
           }
@@ -828,7 +900,7 @@ mc.optim <- function(par,fn,...,lower=-Inf,upper=Inf,period=F,control=list())
 
           # refining aims to make the grid even when filling in gaps adjacent to MIN
           # how many points to refine on each side of MIN
-          n <- mc.min(2,mc.cores)
+          n <- mc.min(2,cores)
           # left solution if points were continuous
           n1 <- ((n+1)*M1-M2)/(M1+M2)
           # positive constraints on n1, n2
@@ -872,7 +944,7 @@ mc.optim <- function(par,fn,...,lower=-Inf,upper=Inf,period=F,control=list())
           if(M2==Inf) { M2 <- M1 }
 
           # generate geometrically tightening sequence around par
-          SEQ <- (1/2)^(1:ceiling(mc.cores/2)-1)
+          SEQ <- (1/2)^(1:ceiling(cores/2)-1)
           SEQ <- c(-M1*SEQ,M2*rev(SEQ))
 
           # combine for evaluation
@@ -939,6 +1011,8 @@ mc.optim <- function(par,fn,...,lower=-Inf,upper=Inf,period=F,control=list())
 
   if(counts<maxit) { convergence <- 0} else { convergence <- 1 }
   if(trace) { message(sprintf("%s in %d parallel function evaluations.",ifelse(convergence,"No convergence","Convergence"),counts)) }
+
+  if(PMAP) { par <- pmap(par,theta,inverse=TRUE) }
 
   # return stuff in similar format to optim
   RETURN <- list()
