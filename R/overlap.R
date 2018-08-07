@@ -46,12 +46,33 @@ overlap.ctmm <- function(object,CTMM,level=0.95,debias=TRUE,...)
 
   # ML parameters
   par <- NULL
+  parscale <- NULL
+  lower <- NULL
+  upper <- NULL
 
-  par <- c(par,CTMM1$mu[1,])
+  # first mean
+  par <- c(par, CTMM1$mu[1,] )
+  parscale <- c(parscale, sqrt(diag(CTMM1$sigma)) )
+  lower <- c(lower, c(-Inf,-Inf) )
+  upper <- c(upper, c(Inf,Inf) )
+
+  # first covariance
   par <- c(par,CTMM1$sigma@par)
+  parscale <- c(parscale, c(CTMM1$sigma@par[1],log(2),pi/2) )
+  lower <- c(lower, c(0,-Inf,-Inf) )
+  upper <- c(upper, c(Inf,Inf,Inf) )
 
+  # second mean
   par <- c(par,CTMM2$mu[1,])
+  parscale <- c(parscale, sqrt(diag(CTMM2$sigma)) )
+  lower <- c(lower, c(-Inf,-Inf) )
+  upper <- c(upper, c(Inf,Inf) )
+
+  # second covariance
   par <- c(par,CTMM2$sigma@par)
+  parscale <- c(parscale, c(CTMM2$sigma@par[1],log(2),pi/2) )
+  lower <- c(lower, c(0,-Inf,-Inf) )
+  upper <- c(upper, c(Inf,Inf,Inf) )
 
   D <- function(p)
   {
@@ -64,8 +85,9 @@ overlap.ctmm <- function(object,CTMM,level=0.95,debias=TRUE,...)
     return(BhattacharyyaD(CTMM1,CTMM2))
   }
 
-  # propagate uncertainty
-  grad <- numDeriv::grad(D,par)
+  # propagate uncertainty - slightly wasteful if isotropic
+  # grad <- numDeriv::grad(D,par)
+  grad <- genD(par,D,lower=lower,upper=upper,parscale=parscale,mc.cores=1,order=1,...)$gradient
   VAR <- 0
 
   VAR <- VAR + grad[1:2] %*% CTMM1$COV.mu %*% grad[1:2]

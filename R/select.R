@@ -1,311 +1,3 @@
-###################################################
-# Calculate good CIs for other functions
-confint.ctmm <- function(model,alpha=0.05)
-{
-  tau <- model$tau
-  tau <- tau[tau<Inf]
-  K <- length(tau)
-
-  COV <- model$COV
-
-  par <- NULL
-  NAME <- NULL
-
-  # timescale uncertainty: can hit 0 and Inf
-  if(K>0)
-  {
-    NAME <- paste("tau",names(tau))
-    for(k in 1:K) { par <- rbind(par,ci.tau(tau[k],COV[NAME[k],NAME[k]],alpha=alpha)) }
-  }
-
-  # circulation period
-  circle <- model$circle
-  if(circle)
-  {
-    NAME <- c(NAME,"circle")
-    VAR <- COV["circle","circle"]
-    CI <- stats::qnorm(c(alpha/2,0.5,1-alpha/2),mean=circle,sd=sqrt(VAR))
-
-    # does frequency CI cross zero?
-    if(CI[1]*CI[3]<0)
-    {
-      # quick fix
-      CI <- abs(CI)
-      CI[3] <- max(CI)
-      CI[1] <- 0
-    }
-
-    # frequency to period
-    CI <- sort(2*pi/abs(CI))
-
-    par <- rbind(par,CI)
-  }
-
-  # standard area uncertainty: chi-square
-  NAME <- c("area",NAME)
-  GM.sigma <- model$sigma@par["area"]
-  COV <- COV["area","area"]
-  par <- rbind(chisq.ci(GM.sigma,COV=COV,alpha=alpha),par)
-
-  rownames(par) <- NAME
-
-  return(par)
-}
-
-# timescale uncertainty: can hit 0 and Inf
-ci.tau <- function(tau,COV,alpha=0.05,min=0,max=Inf)
-{
-  z <- stats::qnorm(1-alpha/2)
-
-  # tau normal for lower CI
-  CI <- tau + c(1,-1)*z*sqrt(COV)
-
-  # lower CI of f==1/tau normal for upper CI of tau
-  CI <- c(CI, (1/tau + c(1,-1)*z*sqrt(COV/tau^4))^-1)
-
-  # take most conservative estimates
-  CI <- range(CI,na.rm=TRUE)
-
-  # enforce boundary constraints
-  CI <- c(max(CI[1],min),min(CI[2],max))
-
-  CI <- c(CI[1],tau,CI[2])
-  return(CI)
-}
-
-###
-summary.ctmm <- function(object,level=0.95,level.UD=0.95,units=TRUE,IC="AICc",...)
-{
-  CLASS <- class(object)
-  if(CLASS=="ctmm")
-  { return(summary.ctmm.single(object,level=level,level.UD=level.UD,units=units)) }
-  else if(CLASS=="list")
-  { return(summary.ctmm.list(object,level=level,level.UD=level.UD,IC=IC)) }
-}
-
-######################################################
-# Summarize results
-summary.ctmm.single <- function(object, level=0.95, level.UD=0.95, units=TRUE, ...)
-{
-  # do we convert units
-  if(units) { thresh <- 1 } else { thresh <- Inf }
-
-  alpha <- 1-level
-  alpha.UD <- 1-level.UD
-
-  drift <- get(object$mean)
-
-  CPF <- object$CPF
-  circle <- object$circle
-  tau <- object$tau
-  if(length(tau)>0 && tau[1]==Inf) { range <- FALSE } else { range <- TRUE }
-  tau <- tau[tau<Inf]
-  K <- length(tau)
-
-  AM.sigma <- mean(diag(object$sigma))
-  GM.sigma <- object$sigma@par["area"]
-  ecc <- object$sigma@par["eccentricity"]
-
-  COV <- object$COV
-  P <- nrow(COV)
-
-  # where to store unit information
-  name <- character(K+1)
-  scale <- numeric(K+1)
-
-  par <- confint.ctmm(object,alpha=alpha)
-
-  # standard area to home-range area
-  par[1,] <- -2*log(alpha.UD)*pi*par[1,]
-
-  # pretty area units
-  unit.list <- unit(par[1,2],"area",thresh=thresh)
-  name[1] <- unit.list$name
-  scale[1] <- unit.list$scale
-
-  # pretty time units
-  P <- nrow(par)
-  if(P>1)
-  {
-    for(i in 2:P)
-    {
-      unit.list <- unit(par[i,2],"time",thresh=thresh)
-      name[i] <- unit.list$name
-      scale[i] <- unit.list$scale
-    }
-  }
-
-  # can we estimate speed?
-  if(continuity(object)>1)
-  {
-    COV <- area2var(object,MEAN=TRUE)
-    COV <- rm.name(COV,"error")
-
-    # RMS velocity
-    if(CPF)
-    {
-      Omega2 <- sum(c(2*pi,1)^2/tau^2)
-      grad <- -2*c(2*pi,1)^2/tau^3
-    }
-    else
-    {
-      Omega2 <- 1/prod(tau)
-      grad <- -Omega2/tau
-    }
-
-    # contribution from circulation
-    omega2 <- 0
-    if(circle)
-    {
-      omega2 <- circle^2
-      grad <- c(grad,2*circle)
-    }
-
-    # contribution from sigma
-    # GM.sigma <- cosh(ecc)*AM.sigma
-    ms <- (2*AM.sigma)*(Omega2+omega2)
-    grad <- 2*c(Omega2+omega2, AM.sigma*grad)
-    var.ms <- c((grad) %*% COV %*% (grad))
-
-    # include mean
-    MSPEED <- drift@speed(object)
-    ms <- ms + MSPEED$EST
-    var.ms <- var.ms + MSPEED$VAR
-
-    # root mean square velocity
-    # pretty units
-    rms <- sqrt(ms)
-    unit.list <- unit(rms,"speed",thresh=thresh)
-    name <- c(name,unit.list$name)
-    scale <- c(scale,unit.list$scale)
-
-    rms <- sqrt(chisq.ci(ms,COV=var.ms,alpha=alpha))
-    # rms <- sqrt(norm.ci(ms,var.ms,alpha=alpha))
-
-    par <- rbind(par,rms)
-    rownames(par)[nrow(par)] <- "speed"
-  }
-
-  # did we estimate errors?
-  if("error" %in% rownames(object$COV))
-  {
-    error <- object$error
-    VAR <- object$COV["error","error"]
-    # convert to chi^2
-    VAR <- (2*error)^2 * VAR
-    error <- error^2
-    # CIs
-    error <- chisq.ci(error,COV=VAR,alpha=alpha)
-    # back to meters/distance
-    error <- sqrt(error)
-    unit.list <- unit(error,"length",thresh=thresh)
-    name <- c(name,unit.list$name)
-    scale <- c(scale,unit.list$scale)
-
-    par <- rbind(par,error)
-    rownames(par)[nrow(par)] <- "error"
-  }
-
-  # Fix unit choice
-  par <- par/scale
-
-  # affix units
-  rownames(par) <- paste(rownames(par)," (",name,")",sep="")
-
-  if(!range) { par <- par[-1,] } # delete off "area" (really diffusion)
-
-  # anything else interesting from the mean function
-  par <- rbind(drift@summary(object,level,level.UD),par)
-
-  colnames(par) <- c("low","ML","high")
-
-  SUM <- list()
-
-  # affix DOF info
-  # only valid for processes with a stationary mean
-  if(object$range)
-  {
-    SUM$DOF <- c( DOF.mean(object) , DOF.area(object) )
-    names(SUM$DOF) <- c( "mean","area")
-  }
-
-  SUM$CI <- par
-
-  return(SUM)
-}
-#methods::setMethod("summary",signature(object="ctmm"), function(object,...) summary.ctmm(object,...))
-
-#DOF of area
-DOF.area <- function(CTMM) { CTMM$sigma@par["area"]^2/abs(CTMM$COV["area","area"]) }
-
-########
-sort.ctmm <- function(x, decreasing=FALSE, IC="AICc", ...)
-{
-  ICS <- sapply(x,function(m){m[[IC]]})
-  IND <- sort(ICS,method="quick",index.return=TRUE,decreasing=decreasing)$ix
-  x <- x[IND]
-}
-
-#########
-DOF.mean <- function(CTMM)
-{
-  DOF <- CTMM$DOF.mu
-  DIM <- dim(DOF)
-
-  if(!is.null(DIM))
-  {
-    # stationary contribution
-    if(length(DIM)==4) { DOF <- DOF[,1,1,] }
-    # average of x-y DOFs
-    DOF <- mean(diag(DOF))
-  }
-
-  return(DOF)
-}
-
-########
-summary.ctmm.list <- function(object, IC="AICc", ...)
-{
-  IC <- match.arg(IC,c("AIC","AICc","BIC","MSPE"))
-
-  object <- sort.ctmm(object,IC=IC)
-  ICS <- sapply(object,function(m){m[[IC]]})
-
-  CNAME <- IC
-
-  # convert to RMS
-  if(IC=="MSPE")
-  {
-    ICS <- sqrt(ICS)
-    CNAME <- paste0("R",CNAME)
-  }
-
-  # show relative IC
-  ICS <- ICS - ICS[[1]]
-  CNAME <- paste0("d",CNAME)
-
-  # convert to meters/kilometers
-  if(IC=="MSPE")
-  {
-    if(length(ICS)>1) { MIN <- ICS[2] } else { MIN <- ICS[1] }
-    UNIT <- unit(MIN,"length",concise=TRUE)
-    ICS <- ICS/UNIT$scale
-    CNAME <- paste0(CNAME," (",UNIT$name,")")
-  }
-
-  ICS <- cbind(ICS)
-  rownames(ICS) <- names(object)
-
-  DOF <- sapply(object,DOF.mean)
-  METH <- sapply(object,function(m){m$method})
-  ICS <- data.frame(ICS,DOF,METH)
-
-  colnames(ICS) <- c(CNAME,"DOF[mean]","method")
-
-  return(ICS)
-}
-
-
 # small sample size adjustment for ctmm.select to be more agressive
 alpha.ctmm <- function(CTMM,alpha)
 {
@@ -318,11 +10,13 @@ alpha.ctmm <- function(CTMM,alpha)
 
 ###############
 # keep removing uncertain parameters until AIC stops improving
-ctmm.select <- function(data,CTMM,verbose=FALSE,level=0.99,IC="AICc",trace=FALSE,...)
+ctmm.select <- function(data,CTMM,verbose=FALSE,level=0.99,IC="AICc",MSPE=TRUE,trace=FALSE,...)
 {
   alpha <- 1-level
-  method <- list(...)$method
-  pREML <- !is.null(method) && method=="pREML"
+  trace2 <- if(trace) { trace-1 } else { 0 }
+  if(MSPE) { mspe <- c('MSPE','MSPEV')[as.numeric(MSPE)] } else { mspe <- 'MSPE' }
+
+  UERE <- get.error(data,CTMM,flag=TRUE) # error flag only
 
   drift <- get(CTMM$mean)
   if(CTMM$mean=="periodic")
@@ -331,20 +25,128 @@ ctmm.select <- function(data,CTMM,verbose=FALSE,level=0.99,IC="AICc",trace=FALSE
     message("Nyquist frequency estimated at harmonic ",paste(Nyquist,collapse=" ")," of the period.")
   }
 
-    # fit the intital guess
-  if(trace) { message("* Fitting models ",name.ctmm(CTMM)) }
+  # initial guess in case of pREML (better for optimization)
+  get.mle <- function(FIT=CTMM)
+  {
+    MLE <- FIT
+    if(!get("EMPTY",pos=MLE.env)) # will have been set from ctmm.fit first run
+    {
+      MLE <- get("MLE",pos=MLE.env)
+      # check that structure is consistent
+      if(is.null(MLE) || name.ctmm(MLE)!=name.ctmm(FIT)) { MLE <- FIT }
+    }
+    return(MLE)
+  }
 
-  CTMM <- ctmm.fit(data,(if(!pREML || is.null(CTMM$MLE)) { CTMM } else { CTMM$MLE }),trace=trace,...)
-  OLD <- ctmm()
+  # function to simplify complexity of models
+  simplify <- function(M,par)
+  {
+    if("eccentricity" %in% par)
+    {
+      M$isotropic <- TRUE
+      M$sigma <- covm(M$sigma,isotropic=TRUE)
+    }
+    if("circle" %in% par) { M$circle <- FALSE }
+
+    return(M)
+  }
+
+  # consider a bunch of new models and update best model without duplication
+  iterate <- function(DROP,REFINE=list())
+  {
+    # name the proposed models
+    names(DROP) <- sapply(DROP,name.ctmm)
+    names(REFINE) <- sapply(REFINE,name.ctmm)
+
+    # remove models already fit
+    DROP <- DROP[!(names(DROP) %in% names(MODELS))]
+    REFINE <- REFINE[!(names(REFINE) %in% names(MODELS))]
+
+    N <- length(DROP)
+    M <- length(REFINE)
+    GUESS <- c(DROP,REFINE)
+
+    # fit every model
+    if(trace && length(GUESS)) { message("* Fitting models ",paste(names(GUESS),collapse=", ")) }
+    #? should I run select here instead of fit ?
+    GUESS <- lapply(GUESS,function(g){ctmm.fit(data,g,trace=trace2,...)})
+
+    MODELS <<- c(MODELS,GUESS)
+
+    # check MSPE for improvement in REFINEd models
+    if(M>0 && MSPE>0)
+    {
+      if(N>0) { DROP <- GUESS[1:N] } else { DROP <- list() }
+      REFINE <- GUESS[N + 1:M]
+
+      GOOD <- sapply(REFINE,function(M){M[[mspe]]}) <= CTMM[[mspe]]
+      REFINE <- REFINE[GOOD]
+
+      GUESS <- c(DROP,REFINE)
+    }
+
+    # what is the new best model?
+    OLD <<- CTMM
+    CTMM <<- min.ctmm(c(GUESS,list(CTMM)),IC=IC,MSPE=FALSE)
+  }
+
+  ########################
+  # PHASE 1: work our way up to complicated autocorrelation models
+  # all of the features we need to fit numerically
+  FEATURES <- id.parameters(CTMM,UERE=UERE)$NAMES
+  # consider only features unnecessary "compatibility"
+  FEATURES <- FEATURES[!(FEATURES=="area")]
+  FEATURES <- FEATURES[!(FEATURES=="error")]
+  FEATURES <- FEATURES[!grepl("tau",FEATURES)]
+
+  # start with the most basic "compatible" model
+  GUESS <- simplify(CTMM,FEATURES)
+  if(trace) { message("* Fitting model ",name.ctmm(GUESS)) }
+  TARGET <- CTMM
+  CTMM <- ctmm.fit(data,GUESS,trace=trace2,...)
   MODELS <- list(CTMM)
-  # while progress is being made, keep going, keep going, ...
+  names(MODELS) <- sapply(MODELS,name.ctmm)
+
+  OLD <- ctmm()
   while(!identical(CTMM,OLD))
   {
     GUESS <- list()
-    beta <- alpha.ctmm(CTMM,alpha)
-    # initial guess in case of pREML (better for optimization)
-    MLE <- (if(pREML && !is.null(CTMM$MLE)) { CTMM$MLE } else { CTMM })
+    MLE <- get.mle()
 
+    # consider non-zero eccentricity
+    if(("eccentricity" %in% FEATURES) && MLE$isotropic)
+    {
+      GUESS <- c(GUESS,list(MLE))
+      n <- length(GUESS)
+      GUESS[[n]]$isotropic <- FALSE
+      # copy over target angle, but leave eccentricity zero to start (featureless)
+      sigma <- attr(GUESS[[n]]$sigma,"par")
+      sigma["angle"] <- attr(TARGET$sigma,"par")['angle']
+      sigma <- covm(sigma,isotropic=FALSE,axes=TARGET$axes)
+      GUESS[[n]]$sigma <- sigma
+    }
+
+    # consider circulation
+    if(("circle" %in% FEATURES) && !MLE$circle)
+    {
+      GUESS <- c(GUESS,list(MLE))
+      GUESS[[length(GUESS)]]$circle <- 2 * .Machine$double.eps * sign(TARGET$circle)
+    }
+
+    # consider a bunch of new models and update best model without duplication
+    iterate(GUESS)
+  }
+
+  #############################
+  # PHASE 2: work our way down to simpler autocorrelation models & work our way up to more complex trend models
+  OLD <- ctmm()
+  # CTMM <- min.ctmm(MODELS)
+  while(!identical(CTMM,OLD))
+  {
+    GUESS <- list()
+    MLE <- get.mle()
+
+    beta <- alpha.ctmm(CTMM,alpha)
     # consider if some timescales are actually zero
     CI <- confint.ctmm(CTMM,alpha=beta)
 
@@ -353,8 +155,8 @@ ctmm.select <- function(data,CTMM,verbose=FALSE,level=0.99,IC="AICc",trace=FALSE
       Q <- CI["tau velocity",1]
       if(is.nan(Q) || (Q<=0))
       {
-         GUESS[[length(GUESS)+1]] <- MLE
-         GUESS[[length(GUESS)]]$tau <- MLE$tau[-length(MLE$tau)]
+        GUESS <- c(GUESS,list(MLE))
+        GUESS[[length(GUESS)]]$tau <- MLE$tau[-length(MLE$tau)]
       }
     }
     else if(length(CTMM$tau)==1)
@@ -362,31 +164,16 @@ ctmm.select <- function(data,CTMM,verbose=FALSE,level=0.99,IC="AICc",trace=FALSE
       Q <- CI["tau position",1]
       if(is.nan(Q) || (Q<=0))
       {
-        GUESS[[length(GUESS)+1]] <- MLE
+        GUESS <- c(GUESS,list(MLE))
         GUESS[[length(GUESS)]]$tau <- NULL
       }
     }
-
-    # consider if there is no telemetry error
-    # if(CTMM$error)
-    # {
-    #   Q <- CI["error",1]
-    #   if(is.nan(Q) || (Q<=0)) # This will never happen wich chi-square error model
-    #   {
-    #     GUESS[[length(GUESS)+1]] <- MLE
-    #     GUESS[[length(GUESS)]]$error <- FALSE
-    #   }
-    # }
 
     # consider if there is no circulation
     if(CTMM$circle)
     {
       Q <- CI["circle",3]
-      if(is.nan(Q) || (Q==Inf))
-      {
-        GUESS[[length(GUESS)+1]] <- MLE
-        GUESS[[length(GUESS)]]$circle <- FALSE
-      }
+      if(is.nan(Q) || (Q==Inf)) { GUESS <- c(GUESS,list(simplify(MLE,"circle"))) }
     }
 
     # consider if eccentricity is zero
@@ -394,38 +181,28 @@ ctmm.select <- function(data,CTMM,verbose=FALSE,level=0.99,IC="AICc",trace=FALSE
     {
       Q <- "eccentricity"
       Q <- stats::qnorm(beta/2,mean=CTMM$sigma@par[Q],sd=sqrt(CTMM$COV[Q,Q]))
-      if(Q <= 0)
-      {
-        GUESS[[length(GUESS)+1]] <- MLE
-        GUESS[[length(GUESS)]]$isotropic <- TRUE
-        GUESS[[length(GUESS)]]$sigma <- covm(MLE$sigma,isotropic=T)
-      }
+      if(Q <= 0) { GUESS <- c(GUESS,list(simplify(MLE,"eccentricity"))) }
     }
 
     # consider if the mean could be more detailed
-    GUESS <- c(GUESS,drift@refine(MLE))
+    REFINE <- drift@refine(MLE)
 
-    # fit every model
-    if(trace && length(GUESS)) { message("* Fitting models ",paste(sapply(GUESS,name.ctmm),collapse=", ")) }
-    GUESS <- lapply(GUESS,function(g){ctmm.fit(data,g,trace=trace,...)})
-    MODELS <- c(MODELS,GUESS)
-
-    # what is the new best model?
-    OLD <- CTMM
-    MODELS <- sort.ctmm(MODELS)
-    CTMM <- MODELS[[1]]
+    # consider a bunch of new models and update best model without duplication
+    iterate(GUESS,REFINE)
   }
 
-  # name all of the models
-  names(MODELS) <- sapply(MODELS,name.ctmm)
-
   # return the best or return the full list of models
-  if(verbose) { return(MODELS) }
-  else { return(MODELS[[1]]) }
+  if(verbose)
+  {
+    MODELS <- sort.ctmm(MODELS,IC=IC,MSPE=MSPE)
+    return(MODELS)
+  }
+  else
+  { return(CTMM) }
 }
 
-
-name.ctmm <- function(CTMM)
+################
+name.ctmm <- function(CTMM,whole=TRUE)
 {
   # base model
   if(length(CTMM$tau)==2)
@@ -443,7 +220,7 @@ name.ctmm <- function(CTMM)
 
   # circulation
   if(CTMM$circle)
-  { NAME <- c(NAME,"circle") }
+  { NAME <- c(NAME,"circulation") }
 
   # error
   if(CTMM$error)
@@ -451,9 +228,130 @@ name.ctmm <- function(CTMM)
 
   # mean
   drift <- get(CTMM$mean)
-  NAME <- c(NAME,drift@name(CTMM))
+  DNAME <- drift@name(CTMM)
 
   NAME <- paste(NAME,sep="",collapse=" ")
+
+  if(whole && !is.null(DNAME))
+  { NAME <- paste(NAME,DNAME) }
+  else if(!whole)
+  {
+    if(is.null(DNAME)) { DNAME <- "stationary" }
+    NAME <- c(NAME,DNAME)
+  }
+
   return(NAME)
+}
+
+########
+sort.ctmm <- function(x,decreasing=FALSE,IC="AICc",MSPE=TRUE,flatten=TRUE,...)
+{
+  if(IC %in% c("MSPE","MSPEV")) { MSPE <- FALSE }
+
+  if(!MSPE)
+  {
+    ICS <- sapply(x,function(m){m[[IC]]})
+    IND <- sort(ICS,index.return=TRUE,decreasing=decreasing)$ix
+    x <- x[IND]
+    if(!flatten) { x <- list(x) }
+    return(x)
+  }
+
+  mspe <- c("MSPE","MSPEV")[as.numeric(MSPE)]
+
+  # model type names
+  NAMES <- sapply(x,function(fit) name.ctmm(fit,whole=FALSE) )
+  ACOV <- NAMES[1,]
+  MEAN <- NAMES[2,]
+
+  # group by ACOV
+  ACOVS <- unique(ACOV)
+  MEANS <- unique(MEAN)
+
+  # partition into ACF-identical blocks for MSPE sorting, and then all-identical blocks for likelihood sorting
+  y <- list()
+  ICS <- numeric(length(ACOVS)) # ICs of best MSPE models
+  for(i in 1:length(ACOVS))
+  {
+    # ACF-identical block
+    SUB <- (ACOV==ACOVS[i])
+    y[[i]] <- x[SUB]
+    MEAN.SUB <- MEAN[SUB]
+    MEANS.SUB <- unique(MEAN.SUB)
+
+    z <- list()
+    MSPES <- numeric(length(MEANS.SUB))
+    for(j in 1:length(MEANS.SUB)) # sort exactly same models by IC
+    {
+      # all-identical block
+      SUB <- (MEAN.SUB==MEANS.SUB[j])
+      z[[j]] <- sort.ctmm(y[[i]][SUB],IC=IC,MSPE=FALSE)
+      MSPES[j] <- z[[j]][[1]][[mspe]] # associate block with best's MSPE
+    }
+    IND <- sort(MSPES,index.return=TRUE,decreasing=decreasing)$ix
+    y[[i]] <- do.call(c,z[IND]) # flatten to ACF blocks
+    ICS[i] <- y[[i]][[1]][[IC]] # associate block with best's IC
+  }
+  # sort blocks by IC and flatten
+  IND <- sort(ICS,index.return=TRUE,decreasing=decreasing)$ix
+  y <- y[IND]
+
+  if(flatten) { y <- do.call(c,y) }
+
+  return(y)
+}
+
+############
+min.ctmm <- function(x,IC="AICc",MSPE=TRUE,...)
+{
+  x <- sort.ctmm(x,IC=IC,MSPE=MSPE,...)
+  return(x[[1]])
+}
+
+########
+summary.ctmm.list <- function(object, IC="AICc", MSPE=TRUE, units=TRUE, ...)
+{
+  IC <- match.arg(IC,c("AIC","AICc","BIC"))
+  mspe <- if(MSPE) { c("MSPE","MSPEV")[as.numeric(MSPE)] } else { "MSPE" }
+
+  N <- length(object)
+  object <- sort.ctmm(object,IC=IC,MSPE=MSPE,flatten=FALSE)
+  M <- length(object)
+
+  if(N==M) { MSPE <- FALSE } # don't need to sort MSPE
+  if(M==1 && MSPE) { ICB <- FALSE } else { ICB <- TRUE } # don't need to sort AIC
+  object <- do.call(c,object)
+  ICS <- sapply(object,function(m){m[[IC]]})
+  MSPES <- sapply(object,function(m){m[[mspe]]})
+
+  # show relative IC
+  ICS <- ICS - ICS[1]
+  ICS <- cbind(ICS)
+  colnames(ICS) <- paste0("d",IC)
+  if(!ICB) { ICS <- NULL }
+
+  # convert to meters/kilometers
+  CNAME <- "dRMSPE"
+  MSPES <- sqrt(MSPES)
+  MSPES <- MSPES - MSPES[1]
+  MIN <- min(c(abs(MSPES[MSPES!=0]),Inf))
+  UNIT <- unit(MIN,if(MSPE==1){"length"}else{"speed"},concise=TRUE,SI=!units)
+  MSPES <- MSPES/UNIT$scale
+  CNAME <- paste0(CNAME," (",UNIT$name,")")
+  MSPES <- cbind(MSPES)
+  colnames(MSPES) <- CNAME
+  if(!MSPE) { MSPES <- NULL }
+
+  ICS <- cbind(ICS,MSPES)
+  rownames(ICS) <- names(object)
+
+  DOF <- sapply(object,DOF.mean)
+  METH <- sapply(object,function(m){m$method})
+  DOF <- data.frame(DOF,METH)
+  colnames(DOF) <- c("DOF[mean]","method")
+
+  ICS <- cbind(ICS,DOF)
+
+  return(ICS)
 }
 

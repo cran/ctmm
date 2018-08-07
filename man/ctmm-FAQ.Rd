@@ -56,7 +56,7 @@
 
 \bold{North is no longer up after importing data}
 
-{The default projection in \code{ctmm} does not preserve the direction of North, but better preserves distances for elongated distributions. See the \code{projection} argument in \code{\link{as.telemetry}} and the example in \code{\link[ctmm]{projection,telemetry-method}}.}
+{The default projection in \code{ctmm} does not preserve the direction of North, but better preserves distances for elongated distributions. See the \code{projection} argument in \code{\link{as.telemetry}} and the example in \code{\link[ctmm]{projection}}.}
 
 \bold{\code{\link{variogram.fit}} has no save button}
 

@@ -139,17 +139,25 @@ ctmm.loglike <- function(data,CTMM=ctmm(),REML=FALSE,profile=TRUE,zero=0,verbose
     M.sigma["eccentricity"] <- 0
     M.sigma <- COVM(M.sigma)
 
-    if(UERE) { error <- squeeze.mat(error,ecc) } # squeeze error circles into ellipses
+    # squeeze error circles into ellipses
+    if(UERE) { error <- squeeze.mat(error,ecc) }
+
+    # mean functions can requires squeezing (below)
+    # how does !error && circle && !isotropic avoid this?
   }
 
-  ## some cases need separate x & y meen functions
+  ## some cases need separate x & y mean functions
   if(DIM==2) # u -> cbind( (u,0) , (0,u) )
   {
-    u <- vapply(1:ncol(u),function(i){cbind(u[,i],rep(0,n),rep(0,n),u[,i])},array(0,c(n,4))) # (n,2,2*M)
-    dim(u) <- c(n,4*M)
+    if(!SQUEEZE)
+    { u <- vapply(1:ncol(u),function(i){cbind(u[,i],rep(0,n),rep(0,n),u[,i])},array(0,c(n,4))) }
+    else
+    { u <- vapply(1:ncol(u),function(i){cbind(u[,i]*exp(-ecc/4),rep(0,n),rep(0,n),u[,i]*exp(+ecc/4))},array(0,c(n,4))) }
+    dim(u) <- c(n,4*M) # <- (n,2,2*M)
   }
   else if(circle) # 1D circle can use symmetry with just u -> (u,0) mean function for x
   {
+    # this relies on trickery later on, because of no SQUEEZE
     u <- vapply(1:ncol(u),function(i){cbind(u[,i],rep(0,n))},array(0,c(n,2))) # (n,2,M)
     dim(u) <- c(n,2*M)
   }
@@ -205,8 +213,8 @@ ctmm.loglike <- function(data,CTMM=ctmm(),REML=FALSE,profile=TRUE,zero=0,verbose
   {
     # prepare variance/covariance of 1D/2D Kalman filters
     if(PROFILE==2 || (PROFILE && DIM==1)) { CTMM$sigma <- 1 } # could be rotated & squeezed
-    else if(PROFILE && DIM==2) { CTMM$sigma <- COVM(c(1,if(SQUEEZE){0}else{ecc},if(ROTATE){0}else{theta})) } # circle, !isotropic, UERE=1,2
     else if(DIM==1) { CTMM$sigma <- area }
+    else if(DIM==2) { CTMM$sigma <- COVM(c(if(PROFILE){1}else{area},if(SQUEEZE){0}else{ecc},if(ROTATE){0}else{theta})) } # circle, !isotropic, UERE=1,2
     # else sigma is full covariance matrix
 
     KALMAN <- kalman(z,u,dt=dt,CTMM=CTMM,error=error)
@@ -272,20 +280,23 @@ ctmm.loglike <- function(data,CTMM=ctmm(),REML=FALSE,profile=TRUE,zero=0,verbose
 
   if(SQUEEZE) # de-squeeze
   {
-    R <- exp(c(+1,-1)*ecc/4)
-    mu <- t(R * t(mu)) # (M,2)
-
     sigma <- attr(sigma,"par")
     sigma["eccentricity"] <- ecc
     sigma <- COVM(sigma)
 
-    dim(COV.mu) <- c(2,M*2*M)
-    COV.mu <- R * COV.mu
-    dim(COV.mu) <- c(2,M,2,M)
-    COV.mu <- aperm(COV.mu,c(3,4,1,2))
-    dim(COV.mu) <- c(2,M*2*M)
-    COV.mu <- R * COV.mu
-    dim(COV.mu) <- c(2*M,2*M)
+    if(DIM==1) # DIM==2 squeezed u(t), so beta and COV[beta] have normal scale already
+    {
+      R <- exp(c(+1,-1)*ecc/4)
+      mu <- t(R * t(mu)) # (M,2)
+
+      dim(COV.mu) <- c(2,M*2*M)
+      COV.mu <- R * COV.mu
+      dim(COV.mu) <- c(2,M,2,M)
+      COV.mu <- aperm(COV.mu,c(3,4,1,2))
+      dim(COV.mu) <- c(2,M*2*M)
+      COV.mu <- R * COV.mu
+      dim(COV.mu) <- c(2*M,2*M)
+    }
   }
 
   if(ROTATE) # transform results back
@@ -381,14 +392,37 @@ ctmm.loglike <- function(data,CTMM=ctmm(),REML=FALSE,profile=TRUE,zero=0,verbose
 }
 
 
+# environment for storing MLE when using pREML/pHREML/HREML
+MLE.env <- new.env()
+empty.env(MLE.env) # default to empty
+
+
+# smallest resolutions in data (for soft bounding parameter guesstimates)
+telemetry.mins <- function(data,axes=c('x','y'))
+{
+  dt <- stats::median(diff(data$t)) # median time difference
+
+  df <- 2*pi/(last(data$t)-data$t[1]) # smallest frequency
+
+  dz <- get.telemetry(data,axes)
+  dz <- apply(dz,2,diff)
+  dz <- rowSums( dz^2 )
+  dz <- sqrt(min(dz[dz>0])) # smallest nonzero distance
+
+  return(list(dt=dt,df=df,dz=dz))
+}
+
 ###########################################################
 # FIT MODEL WITH LIKELIHOOD FUNCTION (convenience wrapper to optim)
 ctmm.fit <- function(data,CTMM=ctmm(),method="ML",COV=TRUE,control=list(),trace=FALSE)
 {
   # used for minimum scale of parameter inspection
   n <- length(data$t)
-  dt <- stats::median(diff(data$t))
-  df <- 2*pi/(last(data$t)-data$t[1])
+  axes <- CTMM$axes
+  MINS <- telemetry.mins(data,axes)
+  dt <- MINS$dt
+  df <- MINS$df
+  dz <- MINS$dz
 
   method <- match.arg(method,c("ML","pREML","pHREML","HREML","REML"))
 
@@ -401,14 +435,10 @@ ctmm.fit <- function(data,CTMM=ctmm(),method="ML",COV=TRUE,control=list(),trace=
   if(method=="REML") { REML <- TRUE }
   else { REML <- FALSE }
 
-  # fit from MLE and not perturbed MLE
-  if(!is.null(CTMM$MLE)) { CTMM <- CTMM$MLE }
-
   # clean/validate
   CTMM <- ctmm.ctmm(CTMM)
   drift <- get(CTMM$mean)
   CTMM$mu <- NULL # can always profile mu analytically
-  axes <- CTMM$axes
   range <- CTMM$range
   if(is.null(CTMM$sigma)) { CTMM$sigma <- covm(stats::cov(get.telemetry(data,axes)),isotropic=CTMM$isotropic,axes=axes) }
 
@@ -425,14 +455,13 @@ ctmm.fit <- function(data,CTMM=ctmm(),method="ML",COV=TRUE,control=list(),trace=
 
   # evaluate mean function and error matrices for this data once upfront
   CTMM <- ctmm.prepare(data,CTMM,tau=FALSE) # don't muck with taus
-  UU <- CTMM$UU # always need this for MSPE
   UERE <- attr(CTMM$error.mat,"flag") # do we fit the error? Need to know for optimization
 
   # id and characterize parameters for profiling
   pars <- NAMES <- parscale <- lower <- upper <- period <- NULL
   setup.parameters <- function(CTMM,profile=TRUE,linear=FALSE)
   {
-    STUFF <- id.parameters(CTMM,profile=profile,linear=linear,UERE=UERE,dt=dt,df=df)
+    STUFF <- id.parameters(CTMM,profile=profile,linear=linear,UERE=UERE,dt=dt,df=df,dz=dz)
     NAMES <<- STUFF$NAMES
     parscale <<- STUFF$parscale
     lower <<- STUFF$lower
@@ -526,7 +555,7 @@ ctmm.fit <- function(data,CTMM=ctmm(),method="ML",COV=TRUE,control=list(),trace=
     if(COV || method %in% c("pREML","pHREML","HREML"))
     {
       if(trace) { message("Calculating Hessian.") }
-      DIFF <- genD(par=pars,fn=fn,zero=-CTMM$loglike,lower=lower,upper=upper,covariance=covariance(),parscale=parscale,Richardson=2,mc.cores=1)
+      DIFF <- genD(par=pars,fn=fn,zero=-CTMM$loglike,lower=lower,upper=upper,parscale=parscale,Richardson=2,mc.cores=1)
       hess <- DIFF$hessian
       grad <- DIFF$gradient
 
@@ -535,20 +564,25 @@ ctmm.fit <- function(data,CTMM=ctmm(),method="ML",COV=TRUE,control=list(),trace=
       dimnames(CTMM$COV) <- list(NAMES,NAMES)
     }
 
+    # store MLE for faster model selection (ML is what is optimized, not pREML or HREML)
+    if(method %in% c("pREML","pHREML","HREML"))
+    {
+      assign("EMPTY",FALSE,pos=MLE.env)
+      assign("MLE",CTMM,pos=MLE.env)
+    }
+    else
+    { empty.env(MLE.env) }
+
     # pREML correction ############################### only do pREML if sufficiently away from boundaries
     TEST <- method %in% c("pREML","pHREML")
     if(TEST) { TEST <- all( eigen(hess,only.values=TRUE)$values > .Machine$double.eps*length(NAMES) ) }
     if(TEST)
     {
-      # store MLE for faster model selection (ML is what is optimized, not pREML or REML)
-      CTMM$MLE <- CTMM
-      CTMM$MLE$method <- "ML"
-
       # parameter correction
       REML <- TRUE
       #ML.grad <- grad # save old ML gradient
       if(trace) { message("Calculating REML gradient.") }
-      DIFF <- genD(par=pars,fn=fn,zero=-CTMM$loglike,lower=lower,upper=upper,covariance=CTMM$COV,parscale=parscale,Richardson=2,order=1,mc.cores=1,jacobian=FALSE)
+      DIFF <- genD(par=pars,fn=fn,zero=-CTMM$loglike,lower=lower,upper=upper,parscale=parscale,Richardson=2,order=1,mc.cores=1)
 
       # trying to make this robust here
       # COV is -1/Hessian, grad is of -loglike
@@ -610,7 +644,7 @@ ctmm.fit <- function(data,CTMM=ctmm(),method="ML",COV=TRUE,control=list(),trace=
 
       if(trace) { message("Calculating REML Hessian.") }
       # calcualte REML Hessian at pREML parameters
-      DIFF <- genD(par=pars,fn=fn,zero=-CTMM$loglike,lower=lower,upper=upper,covariance=covariance(),parscale=parscale,Richardson=2,mc.cores=1)
+      DIFF <- genD(par=pars,fn=fn,zero=-CTMM$loglike,lower=lower,upper=upper,parscale=parscale,Richardson=2,mc.cores=1)
       # Using MLE gradient, which should be zero off boundary
       CTMM$COV <- cov.loglike(DIFF$hessian,grad)
     }
@@ -618,7 +652,6 @@ ctmm.fit <- function(data,CTMM=ctmm(),method="ML",COV=TRUE,control=list(),trace=
     { CTMM$COV <- NULL }
 
     if(COV) { dimnames(CTMM$COV) <- list(NAMES,NAMES) }
-    if(COV && !is.null(CTMM$MLE)) { dimnames(CTMM$MLE$COV) <- list(NAMES,NAMES) }
   }
 
   # model likelihood
@@ -645,17 +678,40 @@ ctmm.fit <- function(data,CTMM=ctmm(),method="ML",COV=TRUE,control=list(),trace=
   { CTMM$AICc <- -2*CTMM$loglike + (q*n-q*k.mean) * 2*k/(q*n-k-nu) }
 
   # Mean square prediction error
-  MSPE <- CTMM$COV.mu
-  if(length(dim(MSPE))==2) # only 1 mean vector
-  { MSPE <- sum(diag(MSPE)) * c(UU) }
-  else if(length(dim(MSPE))==4) # k mean vectors
+  mspe <- function(K=1)
   {
-    MSPE <- lapply(1:length(axes),function(i) MSPE[i,,,i])
-    MSPE <- Reduce("+",MSPE)
-    MSPE <- sum(diag(MSPE %*% UU))
+    # velocity MSPE
+    if(K==2)
+    {
+      if(length(CTMM$tau)==1) { return(Inf) }
+      UU <- VV
+    }
+
+    MSPE <- CTMM$COV.mu
+    if(length(dim(MSPE))==2 && length(UU)==1) # multiple spatial dimensions and one trend component
+    { MSPE <- sum(diag(MSPE)) * c(UU) }
+    else if(length(dim(MSPE))==2 && length(UU)>1) # one spatial dimension and many trend components
+    { MSPE <- sum(diag(MSPE %*% UU)) }
+    else if(length(dim(MSPE))==4) # k trend components in multiple dimensions
+    {
+      MSPE <- lapply(1:length(axes),function(i) MSPE[i,,,i])
+      MSPE <- Reduce("+",MSPE)
+      MSPE <- sum(diag(MSPE %*% UU))
+    }
+
+    VAR <- sum(diag(CTMM$sigma))
+    if(K==2) { VAR <- VAR * (1/prod(CTMM$tau) + CTMM$circle^2) }
+
+    MSPE <- MSPE + VAR
+    return(MSPE)
   }
-  MSPE <- MSPE/n + sum(diag(CTMM$sigma))
-  CTMM$MSPE <- MSPE
+  STUFF <- drift@energy(CTMM)
+  UU <- STUFF$UU
+  VV <- STUFF$VV
+  # Mean square prediction error in locations
+  CTMM$MSPE <- mspe(K=1)
+  # mean suare predicton error in velocities
+  CTMM$MSPEV <- mspe(K=2)
 
   return(CTMM)
 }
@@ -686,6 +742,15 @@ area2var <- function(CTMM,MEAN=TRUE)
     }
 
     COV <- grad %*% COV %*% t(grad)
+    # backup for infinite covariances
+    for(i in 1:nrow(COV))
+    {
+      if(any(is.nan(COV[i,]) || any(is.nan(COV[,i]))))
+      {
+        COV[i,] <- COV[,i] <- 0
+        COV[i,i] <- Inf
+      }
+    }
   }
   else
   { NAMES <- c("variance",NAMES[-1]) }

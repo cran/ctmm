@@ -16,25 +16,25 @@ Péron et al (2017) <doi:10.1002/ecm.1260>,
 Fleming et al (2017) <doi:10.1016/j.ecoinf.2017.04.008>,
 Fleming et al (2018) <doi:10.1002/eap.1704>,
 and
-Winner & Noonan et al (2018) <doi:10.1111/2041-210X.13027>
+Winner & Noonan et al (2018) <doi:10.1111/2041-210X.13027>.
 }
 \details{
 \tabular{ll}{
 Package: \tab ctmm\cr
 Type: \tab Package\cr
-Version: \tab 0.5.0 \cr
-Date: \tab 2018-05-15 \cr
+Version: \tab 0.5.1 \cr
+Date: \tab 2018-08-06 \cr
 License: \tab GPL-3 \cr
 }
 
 \itemize{
-\item{ \link{ctmm-FAQ} }
 \item{ \href{http://biology.umd.edu/movement.html}{CTMM Initiative} }
-\item{ \href{http://www2.physics.umd.edu/~hfleming/}{Beta packages} }
-\item{ \href{https://github.com/ctmm-initiative/ctmm}{Github project} }
-\item{ \href{https://ctmm-initiative.github.io/ctmm/}{Github reference} }
 \item{ \href{https://CRAN.R-project.org/package=ctmm}{CRAN package} }
+\item{ \href{https://github.com/ctmm-initiative/ctmm}{Github project} }
+\item{ \href{http://www2.physics.umd.edu/~hfleming/}{Source packages} }
+\item{ \href{https://ctmm-initiative.github.io/ctmm/}{Github reference} }
 \item{ \href{https://groups.google.com/forum/#!forum/ctmm-user}{Google group} }
+\item{ \link{ctmm-FAQ} }
 }
 
 }
@@ -68,7 +68,7 @@ ctmm: an R package for analyzing animal relocation data as a continuous-time sto
 
 C. H. Fleming, W. F. Fagan, T. Mueller, K. A. Olson, P. Leimgruber, J. M. Calabrese.
 Estimating where and how animals travel: An optimal framework for path reconstruction from autocorrelated tracking data.
-\href{http://onlinelibrary.wiley.com/doi/10.1890/15-1607/full}{Ecology, DOI:10.1890/15-1607 (2016)}.
+\href{https://esajournals.onlinelibrary.wiley.com/doi/abs/10.1890/15-1607.1}{Ecology, 97:3, 576-582 (2016)}.
 
 G. Péron, C. H. Fleming,  R. C. de Paula, J. M. Calabrese.
 Uncovering periodic patterns of space use in animal tracking data with periodograms, including a new algorithm for the Lomb-Scargle periodogram and improved randomization tests.
@@ -87,7 +87,7 @@ Kálmán filters for continuous-time movement models.
 
 C. H. Fleming, D. Sheldon, W. F. Fagan, P. Leimgruber, T. Mueller, D. Nandintsetseg, M. J. Noonan, K. A. Olson, E. Setyawan, A. Sianipar, J. M. Calabrese.
 Correcting for missing and irregular data in home-range estimation.
-\href{https://esajournals.onlinelibrary.wiley.com/doi/10.1002/eap.1704}{Ecological Applications, DOI:10.1002/eap.1704 (2018)}.
+\href{https://esajournals.onlinelibrary.wiley.com/doi/10.1002/eap.1704}{Ecological Applications, 28:4, 1003-1010 (2018)}.
 
 K. Winner, M. J. Noonan, C. H. Fleming, K. Olson, T. Mueller, D. Sheldon, J. M. Calabrese.
 Statistical inference for home range overlap.

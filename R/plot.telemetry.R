@@ -15,6 +15,8 @@ methods::setMethod("zoom",signature(x="UD"), function(x,fraction=1,...) zoom.tel
 ##############
 new.plot <- function(data=NULL,CTMM=NULL,UD=NULL,level.UD=0.95,level=0.95,fraction=1,add=FALSE,xlim=NULL,ylim=NULL,...)
 {
+  RESIDUALS <- !is.null(data) && !is.null(attr(data[[1]],"info")$residual)
+
   dist <- list()
   dist$name <- "meters"
   dist$scale <- 1
@@ -34,6 +36,14 @@ new.plot <- function(data=NULL,CTMM=NULL,UD=NULL,level.UD=0.95,level=0.95,fracti
     # bounding locations from Gaussian CTMM
     if(!is.null(CTMM) & !any(is.na(level.UD)))
     { ext <- rbind(ext,extent(CTMM,level=level,level.UD=level.UD)) }
+
+    # # bounding locations from standard normal quantiles
+    # if(RESIDUALS && !any(is.na(level.UD)))
+    # {
+    #   Z <- c(1,1) * sqrt(-2*log(1-max(level.UD)))
+    #   ext <- rbind(ext,-Z)
+    #   ext <- rbind(ext,+Z)
+    # }
 
     # combine ranges
     ext <- extent.telemetry(ext)
@@ -69,7 +79,7 @@ new.plot <- function(data=NULL,CTMM=NULL,UD=NULL,level.UD=0.95,level=0.95,fracti
     ylab <- paste("y ", "(", dist$name, ")", sep="")
 
     # residuals have no units
-    if(!is.null(data) && !is.null(attr(data[[1]],"info")$residual))
+    if(RESIDUALS)
     {
       xlab <- "x"
       ylab <- "y"
@@ -106,6 +116,11 @@ plot.telemetry <- function(x,CTMM=NULL,UD=NULL,level.UD=0.95,level=0.95,DF="CDF"
   # median time step of data
   dt <- lapply(x,function(X){diff(X$t)})
   dt <- stats::median(unlist(dt))
+
+  # are we plotting residuals?
+  RESIDUALS <- !is.null(x) && !is.null(attr(x[[1]],"info")$residual)
+  # standard normal model
+  if(RESIDUALS) { CTMM <- list(ctmm(sigma=1,mu=c(0,0))) }
 
   dist <- new.plot(data=x,CTMM=CTMM,UD=UD,level.UD=level.UD,level=level,fraction=fraction,add=add,xlim=xlim,ylim=ylim,...)
 
@@ -168,7 +183,10 @@ plot.telemetry <- function(x,CTMM=NULL,UD=NULL,level.UD=0.95,level=0.95,DF="CDF"
     if(!is.list(pchar))
     {
       if(length(x)>1)
-      { pchar <- array(pchar,length(x)) }
+      {
+        pchar <- array(pchar,length(x))
+        pchar <- as.list(pchar)
+      }
       else if(!all)
       { pchar <- list(array(pchar,length(x[[1]]$t))) }
     }
@@ -303,7 +321,7 @@ plot.telemetry <- function(x,CTMM=NULL,UD=NULL,level.UD=0.95,level=0.95,DF="CDF"
       if(DOP.LIST$speed$VAR %in% names(x[[i]]))
       {
         # magnitude of estimate relative to uncertainty
-        ERROR <- get.error(x[[i]],ctmm(axes=c("vx","vy")),circle=TRUE)
+        ERROR <- get.error(x[[i]],ctmm(axes=c("vx","vy"),error=TRUE),circle=TRUE)
         alpha <- sqrt(rowSums(get.telemetry(x[[i]],axes=c("vx","vy"))^2)/ERROR)
         alpha <- clamp(alpha)
         col[[i]] <- scales::alpha(col[[i]],alpha)
@@ -479,7 +497,7 @@ plot.ctmm <- function(model,alpha=0.05,col="blue",bg=NA,...)
   mu <- model$mu # mean vector
   sigma <- model$sigma # covariance matrix
 
-  ellipsograph(mu=mu,sigma=sigma,level=1-alpha,fg=col,bg=bg,...)
+  lapply(alpha,function(a){ellipsograph(mu=mu,sigma=sigma,level=1-a,fg=col,bg=bg,...)})
 }
 
 ###################

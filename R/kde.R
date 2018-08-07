@@ -951,15 +951,14 @@ CI.UD <- function(object,level.UD=0.95,level=0.95,P=FALSE)
 
 #######################
 # summarize details of akde object
-summary.UD <- function(object,level.UD=0.95,level=0.95,units=TRUE,...)
+summary.UD <- function(object,level=0.95,level.UD=0.95,units=TRUE,...)
 {
-  # do we convert base units?
-  if(units) { thresh <- 1 } else { thresh <- Inf }
-
   area <- CI.UD(object,level.UD,level)
+  if(length(area)==1) { stop("Object is not a range distribution.") }
 
   # pretty units
-  unit.info <- unit(area[2],"area",thresh=thresh)
+  # do we convert base units?
+  unit.info <- unit(area[2],"area",SI=!units)
   name <- unit.info$name
   scale <- unit.info$scale
 
