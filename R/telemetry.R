@@ -1,19 +1,21 @@
 subset.telemetry <- function(x,...)
 {
    info <- attr(x,"info")
+   UERE <- attr(x,"UERE")
    x <- data.frame(x)
    x <- subset.data.frame(x,...)
-   x <- new.telemetry(x,info=info)
+   x <- new.telemetry(x,info=info,UERE=UERE)
    return(x)
 }
 
 `[.telemetry` <- function(x,...)
 {
   info <- attr(x,"info")
+  UERE <- attr(x,"UERE")
   x <- data.frame(x)
   x <- "[.data.frame"(x,...)
   # if(class(x)=="data.frame") { x <- new.telemetry(x,info=info) }
-  x <- new.telemetry(x,info=info)
+  x <- new.telemetry(x,info=info,UERE=UERE)
   return(x)
 }
 
@@ -65,35 +67,40 @@ get.telemetry <- function(data,axes=c("x","y"))
   # z <- as.matrix(z)
   # colnames(z) <- axes
   # return(z)
-  return(as.matrix(data.frame(data)[, axes], dimnames = axes))
+  if(all(axes %in% names(data)))
+  { data <- as.matrix(data.frame(data)[, axes], dimnames = axes) }
+  else
+  { data <- numeric(0) }
+
+  return(data)
 }
 
 #######################
 # Generic import function
-as.telemetry <- function(object,timeformat="",timezone="UTC",projection=NULL,UERE=NULL,timeout=Inf,na.rm="row",drop=TRUE,...) UseMethod("as.telemetry")
+as.telemetry <- function(object,timeformat="",timezone="UTC",projection=NULL,timeout=Inf,na.rm="row",drop=TRUE,...) UseMethod("as.telemetry")
 
 # MoveStack object
-as.telemetry.MoveStack <- function(object,timeformat="",timezone="UTC",projection=NULL,UERE=NULL,timeout=Inf,na.rm="row",drop=TRUE,...)
+as.telemetry.MoveStack <- function(object,timeformat="",timezone="UTC",projection=NULL,timeout=Inf,na.rm="row",drop=TRUE,...)
 {
   # need to first conglomerate to MoveBank format, then run as.telemetry
   object <- move::split(object)
-  DATA <- lapply(object,function(mv){ Move2CSV(mv,timeformat=timeformat,timezone=timezone,projection=projection,UERE=UERE) })
+  DATA <- lapply(object,function(mv){ Move2CSV(mv,timeformat=timeformat,timezone=timezone,projection=projection) })
   DATA <- do.call(rbind,DATA)
-  DATA <- as.telemetry.data.frame(DATA,timeformat=timeformat,timezone=timezone,projection=projection,UERE=UERE,timeout=timeout,na.rm=na.rm,drop=drop)
+  DATA <- as.telemetry.data.frame(DATA,timeformat=timeformat,timezone=timezone,projection=projection,timeout=timeout,na.rm=na.rm,drop=drop)
   return(DATA)
 }
 
 # Move object
-as.telemetry.Move <- function(object,timeformat="",timezone="UTC",projection=NULL,UERE=NULL,timeout=Inf,na.rm="row",drop=TRUE,...)
+as.telemetry.Move <- function(object,timeformat="",timezone="UTC",projection=NULL,timeout=Inf,na.rm="row",drop=TRUE,...)
 {
-  DATA <- Move2CSV(object,timeformat=timeformat,timezone=timezone,projection=projection,UERE=UERE)
+  DATA <- Move2CSV(object,timeformat=timeformat,timezone=timezone,projection=projection)
   # can now treat this as a MoveBank object
-  DATA <- as.telemetry.data.frame(DATA,timeformat=timeformat,timezone=timezone,projection=projection,UERE=UERE,timeout=timeout,na.rm=na.rm,drop=drop)
+  DATA <- as.telemetry.data.frame(DATA,timeformat=timeformat,timezone=timezone,projection=projection,timeout=timeout,na.rm=na.rm,drop=drop)
   return(DATA)
 }
 
 # convert Move object back to MoveBank CSV
-Move2CSV <- function(object,timeformat="",timezone="UTC",projection=NULL,UERE=NULL,...)
+Move2CSV <- function(object,timeformat="",timezone="UTC",projection=NULL,...)
 {
   DATA <- data.frame(timestamp=move::timestamps(object))
   if(raster::isLonLat(object))
@@ -130,16 +137,69 @@ pull.column <- function(object,NAMES,FUNC=as.numeric)
     {
       # preference non-empty columns
       COL <- FUNC(object[,NAME])
-      if(any(!is.na(COL))) {return(COL) }
+      if(!all(is.na(COL))) {return(COL) }
     }
   }
   # nothing non-empty matched
   return(NULL)
 }
 
+# some columns are missing when fix is inferior class
+# do we need a new location class for this
+missing.class <- function(DATA,TYPE)
+{
+  # column to check for NAs
+  if(TYPE=="speed") { COL <- "speed" }
+  else if(TYPE=="vertical") { COL <- "z" }
+
+  # some location classes are missing TYPE
+  NAS <- is.na(DATA[[COL]])
+  if(any(NAS))
+  {
+    # are these NAs specific to a location class
+    if('class' %in% names(DATA))
+    {
+      IN <- unique(DATA$class[NAS])
+      OUT <- unique(DATA$class[!NAS])
+      OVER <- intersect(IN,OUT)
+      # do we need an additional location class for missing TYPE?
+      if(length(OVER))
+      {
+        OVER <- as.factor(NAS)
+        levels(OVER) <- c(TYPE,"missing")
+        DATA$class <- paste(as.character(DATA$class),as.character(OVER))
+        DATA$class <- as.factor(DATA$class)
+        rm(OVER)
+      }
+      # otherwise, current location classes are sufficient
+    }
+    else # we need a location class for missing TYPE
+    {
+      DATA$class <- as.factor(NAS)
+      levels(DATA$class) <- c(TYPE,"missing")
+    }
+
+    # zero missing TYPE
+    DATA[[COL]][NAS] <- 0
+    if(TYPE=="speed") { DATA$heading[NAS] <- 0 }
+
+    # do we have TYPE DOP
+    DOP <- DOP.LIST[[TYPE]]$DOP
+    VAR <- DOP.LIST[[TYPE]]$VAR
+
+    if(!(DOP %in% names(DATA))) { DATA[[DOP]] <- 1 }
+    # adjust DOP values for missing TYPE
+    DATA[[DOP]][NAS] <- Inf
+    # adjust calibrated errors --- shouldn't be necessary
+    if(VAR %in% names(DATA)) { DATA[[VAR]][NAS] <- Inf }
+  }
+
+  return(DATA)
+}
+
 
 # read in a MoveBank object file
-as.telemetry.character <- function(object,timeformat="",timezone="UTC",projection=NULL,UERE=NULL,timeout=Inf,na.rm="row",drop=TRUE,...)
+as.telemetry.character <- function(object,timeformat="",timezone="UTC",projection=NULL,timeout=Inf,na.rm="row",drop=TRUE,...)
 {
   # read with 3 methods: fread, temp_unzip, read.csv, fall back to next if have error.
   # fread error message is lost, we can use print(e) for debugging.
@@ -155,13 +215,13 @@ as.telemetry.character <- function(object,timeformat="",timezone="UTC",projectio
       data <- utils::read.csv(object,...)
     }
   }
-  data <- as.telemetry.data.frame(data,timeformat=timeformat,timezone=timezone,projection=projection,UERE=UERE,timeout=timeout,na.rm=na.rm,drop=drop)
+  data <- as.telemetry.data.frame(data,timeformat=timeformat,timezone=timezone,projection=projection,timeout=timeout,na.rm=na.rm,drop=drop)
   return(data)
 }
 
 
 # this assumes a MoveBank data.frame
-as.telemetry.data.frame <- function(object,timeformat="",timezone="UTC",projection=NULL,UERE=NULL,timeout=Inf,na.rm="row",drop=TRUE,...)
+as.telemetry.data.frame <- function(object,timeformat="",timezone="UTC",projection=NULL,timeout=Inf,na.rm="row",drop=TRUE,...)
 {
   na.rm <- match.arg(na.rm,c("row","col"))
 
@@ -169,7 +229,7 @@ as.telemetry.data.frame <- function(object,timeformat="",timezone="UTC",projecti
   names(object) <- tolower(names(object))
 
   # timestamp column
-  COL <- c('timestamp','Acquisition.Start.Time','time')
+  COL <- c('timestamp','Acquisition.Start.Time','Acquisition.Time','time')
   COL <- pull.column(object,COL,FUNC=as.character)
   # fastPOSIXct doesn't have a timeformat argument and as.POSIXct doesn't accept this argument if empty/NA/NULL ???
   if(class(COL)=="character" && timeformat=="") { COL <- fasttime::fastPOSIXct(COL,tz=timezone) }
@@ -210,9 +270,6 @@ as.telemetry.data.frame <- function(object,timeformat="",timezone="UTC",projecti
 
   DATA$t <- as.numeric(DATA$timestamp)
 
-  ###################################
-  # ERROR INFORMATION
-
   ##################################
   # ARGOS error ellipse/circle (newer ARGOS data >2011)
   COL <- "Argos.orientation"
@@ -224,7 +281,7 @@ as.telemetry.data.frame <- function(object,timeformat="",timezone="UTC",projecti
     # according to ARGOS, the following can be missing on <4 message data... but it seems present regardless
     DATA[[DOP.LIST$horizontal$VAR]] <- pull.column(object,"Argos.error.radius")^2/2
     DATA$COV.major <- pull.column(object,"Argos.semi.major")^2/2
-    DATA$COV.major <- pull.column(object,"Argos.semi.minor")^2/2
+    DATA$COV.minor <- pull.column(object,"Argos.semi.minor")^2/2
     # 1/2 from McClintock et al (2014) & in line with HDOP conventions
   }
 
@@ -244,7 +301,7 @@ as.telemetry.data.frame <- function(object,timeformat="",timezone="UTC",projecti
     # error radii (average variance)
     ARGOS.radii <- (ARGOS.major+ARGOS.minor)/2
 
-    warning("ARGOS error ellipses not found. Using location class estimates from McClintock et al (2015).")
+    message("ARGOS error ellipses not found. Using location class estimates from McClintock et al (2015).")
     DATA$class <- COL
     COL <- as.character(COL) # factors are weird
     DATA$COV.minor <- ARGOS.minor[COL]
@@ -259,52 +316,51 @@ as.telemetry.data.frame <- function(object,timeformat="",timezone="UTC",projecti
   COL <- pull.column(object,COL)
   if(length(COL))
   {
-    COL <- 1.1778678310260233 * COL # estimated from Scott's calibration data
-    DATA$HDOP <- sqrt(2)*COL
-    DATA[[DOP.LIST$horizontal$VAR]] <- COL^2
+    # estimated from Scott's calibration data
+    DATA$HDOP <- COL
+    DATA[[DOP.LIST$horizontal$VAR]] <- 1.2304709680947150^2/2*COL^2
   }
 
   ###########
   # Telonics Gen4 GPS errors
-  COL <- c("GPS.Horizontal.Error","Telonics.Horizontal.Error")
+  COL <- c("Horizontal.Error","GPS.Horizontal.Error","Telonics.Horizontal.Error")
   COL <- pull.column(object,COL)
   if(length(COL))
   {
-    COL <- 0.14699275951173810 * COL # estimated from Patricia's calibration data
+    TELONICS <- TRUE
 
-    DATA$HDOP <- sqrt(2)*COL
-    DATA[[DOP.LIST$horizontal$VAR]] <- COL^2
-
-    # approximate UERE lower bound for cases where NA error and !NA HDOP
-    COL <- c("GPS.HDOP","HDOP","DOP","GPS.Horizontal.Dilution")
-    COL <- pull.column(object,COL)
-    if(length(COL))
+    if(FALSE) # this information does not seem worthwhile often
     {
-      NAS <- is.na(DATA$HDOP) & !is.na(COL) # errors that need to be calibrated
-      if(any(NAS))
-      {
-        DATA[[DOP.LIST$horizontal$VAR]][NAS] <- Inf # not yet calibrated
-        DATA$HDOP[NAS] <- COL[NAS] # could use further calibration data to rescale
-        if(is.null(UERE)) { warning("Telonics quick-fix HDOPs found, but UERE not specified and will have to be fit. See help(\"uere\").") }
-      }
-    }
+      COL <- COL/10 # put on similar scale with HDOP
 
-    # Telonics Gen4 location classes (use with HDOP information)
-    COL <- c("GPS.Fix.Attempt","Telonics.Fix.Attempt")
-    COL <- pull.column(object,COL,FUNC=as.factor)
-    if(length(COL)) { DATA$class <- COL }
+      DATA$HDOP <- sqrt(2)*COL
+
+      # approximate UERE lower bound for cases where NA error and !NA HDOP
+      COL <- c("GPS.HDOP","HDOP","DOP","Horizontal.Dilution","GPS.Horizontal.Dilution")
+      COL <- pull.column(object,COL)
+      if(length(COL))
+      {
+        NAS <- is.na(DATA$HDOP) & !is.na(COL) # errors that need to be calibrated
+        if(any(NAS)) { DATA$HDOP[NAS] <- COL[NAS] }
+        rm(NAS)
+      }
+      else
+      { stop("Telonics data detected, but missing HDOP column.") }
+    }
   }
+  else
+  { TELONICS <- FALSE }
 
   ###################################
   # HDOP
   if(!("HDOP" %in% names(DATA)))
   {
-    COL <- c("GPS.HDOP","HDOP","DOP","GPS.Horizontal.Dilution")
+    COL <- c("GPS.HDOP","HDOP","DOP","Horizontal.Dilution","GPS.Horizontal.Dilution")
     COL <- pull.column(object,COL)
     if(length(COL))
     {
       DATA$HDOP <- COL
-      if(is.null(UERE)) { warning("HDOP values found, but UERE not specified and will have to be fit. See help(\"uere\").") }
+      # message("HDOP values found; UERE will have to be fit. See help(\"uere\").")
     }
   }
 
@@ -315,36 +371,52 @@ as.telemetry.data.frame <- function(object,timeformat="",timezone="UTC",projecti
     COL <- pull.column(object,COL)
     if(length(COL))
     {
-      warning("HDOP values not found. Approximating via # satellites.")
+      message("HDOP values not found. Approximating via # satellites.")
       COL <- 10/(COL-2)
       DATA$HDOP <- COL
-
-      if(is.null(UERE)) { warning("HDOP values approximated, but UERE not specified and will have to be fit. See help(\"uere\").") }
+      # message("HDOP values approximated; UERE will have to be fit. See help(\"uere\").")
     }
   }
 
   ###########################
   # generic location classes
-  COL <- c("GPS.fix.type","fix.type")
+  # includes Telonics Gen4 location classes (use with HDOP information)
+  COL <- c("GPS.fix.type","fix.type","Fix.Attempt","GPS.Fix.Attempt","Telonics.Fix.Attempt")
   COL <- pull.column(object,COL,FUNC=as.factor)
   if(length(COL)) { DATA$class <- COL }
 
-  COL <- c("GPS.time.to.fix","time.to.fix","fix.time","time.to.get.fix")
-  COL <- pull.column(object,COL)
-  if(length(COL))
+  # consolidate Telonics location classes as per manual
+  if(TELONICS && "class" %in% names(DATA))
   {
-    if(class(timeout)=="function") { timeout <- timeout(COL) }
-    COL <- (COL<timeout)
-    COL <- as.factor(COL)
-    levels(COL) <- c("timeout","in-time")
+    CLASS <- levels(DATA$class)
+    SUB <- CLASS %in% c("Succeeded (3D)","Succeeded (2D)")
+    if(any(SUB)) { CLASS[SUB] <- "Succeeded" }
+    SUB <- CLASS %in% c("Resolved QFP","Resolved QFP (Uncertain)","Unresolved QFP")
+    if(any(SUB)) { CLASS[SUB] <- "QFP" }
+    levels(DATA$class) <- CLASS
+  }
 
-    if("class" %in% names(DATA)) # combine with existing class information
+  #######################
+  # timed-out fixes
+  if(timeout<Inf)
+  {
+    COL <- c("GPS.time.to.fix","time.to.fix","fix.time","time.to.get.fix")
+    COL <- pull.column(object,COL)
+    if(length(COL))
     {
-      DATA$class <- paste(as.character(DATA$class),as.character(COL))
-      DATA$class <- as.factor(DATA$class)
+      if(class(timeout)=="function") { timeout <- timeout(COL) }
+      COL <- (COL<timeout)
+      COL <- as.factor(COL)
+      levels(COL) <- c("timeout","in-time")
+
+      if("class" %in% names(DATA)) # combine with existing class information
+      {
+        DATA$class <- paste(as.character(DATA$class),as.character(COL))
+        DATA$class <- as.factor(DATA$class)
+      }
+      else # only class information so far
+      { DATA$class <- COL }
     }
-    else # only class information so far
-    { DATA$class <- COL }
   }
 
   ################################
@@ -361,7 +433,7 @@ as.telemetry.data.frame <- function(object,timeformat="",timezone="UTC",projecti
     if(length(COL))
     {
       DATA$VDOP <- COL
-      if(is.null(UERE)) { warning("VDOP values found, but UERE not specified and will have to be fit. See help(\"uere\").") }
+      # message("VDOP values found; UERE will have to be fit. See help(\"uere\").")
     }
     # need to know where the ground is too
 
@@ -369,8 +441,11 @@ as.telemetry.data.frame <- function(object,timeformat="",timezone="UTC",projecti
     if(!("VDOP" %in% names(DATA)) && ("HDOP" %in% names(DATA)))
     {
       DATA$VDOP <- DATA$HDOP
-      warning("VDOP not found. HDOP used as an approximate VDOP, which will require a separate UERE. See help(\"uere\").")
+      message("VDOP not found. HDOP used as an approximate VDOP.")
     }
+
+    # do we need a location class for missing heights?
+    DATA <- missing.class(DATA,"vertical")
   }
 
   ########################################
@@ -392,14 +467,19 @@ as.telemetry.data.frame <- function(object,timeformat="",timezone="UTC",projecti
     COL <- pull.column(object,COL)
     if(length(COL)) # assuming same form as EOBS horizontal accuracy estimate
     {
-      DATA[[DOP.LIST$speed$VAR]] <- COL^2
-      # UERE['speed'] <- TRUE # flag UERE as fixed
+      # UERE from Scott's calibration data
+      DATA[[DOP.LIST$speed$DOP]] <- COL
+      DATA[[DOP.LIST$speed$VAR]] <- 0.0499190708866745^2/2 * COL^2
     }
     else if("HDOP" %in% names(DATA)) # USE HDOP as approximate SDOP
     {
       DATA$SDOP <- DATA$HDOP
-      warning("HDOP used as an approximate speed DOP, which will require a separate UERE. See help(\"uere\").")
+      message("HDOP used as an approximate speed DOP.")
     }
+
+    # do we need a location class for missing speeds?
+    if("speed" %in% names(DATA))
+    { DATA <- missing.class(DATA,"speed") }
   } # END SPEED IMPORT
 
   #######################################
@@ -418,18 +498,6 @@ as.telemetry.data.frame <- function(object,timeformat="",timezone="UTC",projecti
     # clean through duplicates, etc..
     telist[[i]] <- telemetry.clean(telist[[i]],id=id[i])
 
-    # check that error columns are present for UERE=TRUE
-    UERE.ID <- NULL
-    for(j in 2:length(DOP.LIST))
-    {
-      if(DOP.LIST[[j]]$VAR %in% names(telist[[i]]) || all(DOP.LIST[[j]]$COV %in% names(telist[[i]])))
-      { UERE.ID[ names(DOP.LIST)[j] ] <- TRUE }
-    }
-
-    # combine data.frame with ancillary info
-    info <- list(identity=id[i], timezone=timezone, projection=projection, UERE=UERE.ID)
-    telist[[i]] <- new.telemetry( telist[[i]] , info=info )
-
     # delete empty columns in case collars/tags are different
     for(COL in names(telist[[i]]))
     {
@@ -439,10 +507,39 @@ as.telemetry.data.frame <- function(object,timeformat="",timezone="UTC",projecti
     }
 
     # delete incomplete vector data (caused by partial NAs)
-    COL <- c("speed","heading")
-    telist[[i]] <- rm.incomplete(telist[[i]],COL)
-    COL <- c("COV.angle","COV.major","COV.minor")
-    telist[[i]] <- rm.incomplete(telist[[i]],COL)
+    # i've seen speeds without headings...
+    # COL <- c("speed","heading")
+    # telist[[i]] <- rm.incomplete(telist[[i]],COL)
+    # should rather return an error below?
+    # COL <- c("COV.angle","COV.major","COV.minor")
+    # telist[[i]] <- rm.incomplete(telist[[i]],COL)
+
+    # drop missing levels and set UERE according to calibration
+    telist[[i]] <- droplevels(telist[[i]])
+    # NA UERE object given data.frame columns
+    UERE <- uere.null(telist[[i]])
+    # which UERE values were specified
+    for(TYPE in colnames(UERE))
+    {
+      # is data calibrated
+      VAR <- DOP.LIST[[TYPE]]$VAR
+      if(VAR %in% names(telist[[i]]))
+      {
+        VAR <- (telist[[i]][[VAR]] < Inf) # is calibrated
+
+        for(CLASS in levels(telist[[i]]$class))
+        { if(all(VAR[telist[[i]]$class==CLASS])) { UERE[CLASS,TYPE] <- 1 } }
+
+        if(!nlevels(telist[[i]]$class) && all(VAR)) { UERE["all",TYPE] <- 1 }
+      }
+    }
+
+    # combine data.frame with ancillary info
+    info <- list(identity=id[i], timezone=timezone, projection=projection)
+    AICc <- NA*UERE[1,]
+    names(AICc) <- colnames(UERE) # R drops dimnames...
+    UERE <- new.UERE(UERE,DOF=NA*UERE,AICc=AICc)
+    telist[[i]] <- new.telemetry( telist[[i]] , info=info, UERE=UERE )
   }
   rm(DATA)
   names(telist) <- id
@@ -451,9 +548,6 @@ as.telemetry.data.frame <- function(object,timeformat="",timezone="UTC",projecti
   if(is.null(projection)) { projection <- median.telemetry(telist,k=2) }
   # enforce projection
   telist <- "projection<-.list"(telist,projection)
-
-  # finally set the UERE if present and precalibrated
-  if(!is.null(UERE)) { uere(telist) <- UERE }
 
   # return single or list
   if (n>1 || !drop) { return(telist) }

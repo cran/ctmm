@@ -1,7 +1,7 @@
 Encoding: UTF-8
 Package: ctmm
-Version: 0.5.1
-Date: 2018-08-06
+Version: 0.5.2
+Date: 2018-09-04
 Title: Continuous-Time Movement Modeling
 Authors@R: c(person(c("Christen","H."),"Fleming",email="flemingc@si.edu",role=c("aut","cre")),
              person(c("Justin","M."),"Calabrese",email="calabresej@si.edu",role="aut"),
@@ -41,7 +41,7 @@ License: GPL-3
 VignetteBuilder: knitr
 NeedsCompilation: no
 RoxygenNote: 6.1.0
-Packaged: 2018-08-07 02:13:15 UTC; Christen
+Packaged: 2018-09-04 18:46:56 UTC; chris
 Author: Christen H. Fleming [aut, cre],
   Justin M. Calabrese [aut],
   Xianghui Dong [ctb],
@@ -58,4 +58,4 @@ Author: Christen H. Fleming [aut, cre],
   Jonathan Drescher-Lehman [dtc]
 Maintainer: Christen H. Fleming <flemingc@si.edu>
 Repository: CRAN
-Date/Publication: 2018-08-07 09:30:07 UTC
+Date/Publication: 2018-09-10 14:30:03 UTC

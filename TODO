@@ -1,12 +1,10 @@
 PRIORITY
+* multi-class UERE in ctmm(), ctmm.guess(), ctmm.fit(), variogram.fit(), etc., etc.
+* uere() select for identical UEREs (location class , axes) ?
+* should standardization be moved to ctmm.select?
 * reference Guillaume's paper at the beginning of the periodogram vignette
 * use perturb.ctmm in ctmm.guess / variogram.fit ?
 * reduce uere() warning in as.telemetry to once... remove other crap... too much
-* properly fillout UERE & UERE.DOF on the fly
-* uere() return doesn't check for missing UEREs (in as.telemetry too)
-* is.calibrated()
-* uere() factor estimation
-* get.error, get/set params, fit, summary, etc..
 * error vignette - check back on variogram
 * quiet uere() example
 
@@ -34,6 +32,7 @@ PARALLELIZATION
 * parallel derivatives with upper/lower/etc.
 
 MISC WORK
+* akde/occurrence grid=UD/raster
 * p-value test for trend terms using variance of mu_alt-mu_null
 * significant digits argument to summary()
 * functionalize detrend & retrend in simulate/predict
