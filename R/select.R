@@ -8,13 +8,65 @@ alpha.ctmm <- function(CTMM,alpha)
 }
 
 
+#########
+get.MSPE <- function(CTMM,MSPE="position")
+{
+  if(!is.na(MSPE)) { MSPE <- CTMM$MSPE[MSPE] }
+  else { MSPE <- Inf }
+  return(MSPE)
+}
+
+
+########
+get.IC <- function(CTMM,IC="AICc")
+{
+  if(!is.na(IC)) { IC <- CTMM[[IC]] }
+  else { IC <- Inf }
+  return(IC)
+}
+
+
+##################
+# function to simplify complexity of models
+simplify.ctmm <- function(M,par)
+{
+  if("eccentricity" %in% par)
+  {
+    M$isotropic <- TRUE
+    M$sigma <- covm(M$sigma,isotropic=TRUE,axes=M$axes)
+    if("COV" %in% names(M)) { M$COV <- rm.name(M$COV,"eccentricity") }
+  }
+
+  if("circle" %in% par) { M$circle <- FALSE }
+
+  if("range" %in% par)
+  {
+    M$tau[1] <- Inf
+    M$range <- FALSE
+  }
+
+  # autocorrelation timescales can't be distinguished
+  if("diff.tau" %in% par)
+  {
+    M$tau <- c(1,1)/mean(1/M$tau)
+    M$omega <- FALSE
+  }
+
+  return(M)
+}
+
+
 ###############
 # keep removing uncertain parameters until AIC stops improving
-ctmm.select <- function(data,CTMM,verbose=FALSE,level=0.99,IC="AICc",MSPE=TRUE,trace=FALSE,...)
+ctmm.select <- function(data,CTMM,verbose=FALSE,level=0.99,IC="AICc",MSPE="position",trace=FALSE,...)
 {
+  IC <- match.arg(IC,c("AICc","AIC","BIC",NA))
+  MSPE <- match.arg(MSPE,c("position","velocity",NA))
+
   alpha <- 1-level
   trace2 <- if(trace) { trace-1 } else { 0 }
-  if(MSPE) { mspe <- c('MSPE','MSPEV')[as.numeric(MSPE)] } else { mspe <- 'MSPE' }
+  IC <- match.arg(IC,c("AICc","AIC","BIC",NA))
+  MSPE <- match.arg(MSPE,c("position","velocity",NA))
 
   UERE <- get.error(data,CTMM,flag=TRUE) # error flag only
 
@@ -38,19 +90,6 @@ ctmm.select <- function(data,CTMM,verbose=FALSE,level=0.99,IC="AICc",MSPE=TRUE,t
     return(MLE)
   }
 
-  # function to simplify complexity of models
-  simplify <- function(M,par)
-  {
-    if("eccentricity" %in% par)
-    {
-      M$isotropic <- TRUE
-      M$sigma <- covm(M$sigma,isotropic=TRUE)
-    }
-    if("circle" %in% par) { M$circle <- FALSE }
-
-    return(M)
-  }
-
   # consider a bunch of new models and update best model without duplication
   iterate <- function(DROP,REFINE=list())
   {
@@ -67,27 +106,27 @@ ctmm.select <- function(data,CTMM,verbose=FALSE,level=0.99,IC="AICc",MSPE=TRUE,t
     GUESS <- c(DROP,REFINE)
 
     # fit every model
-    if(trace && length(GUESS)) { message("* Fitting models ",paste(names(GUESS),collapse=", ")) }
+    if(trace && length(GUESS)) { message("* Fitting models ",paste(names(GUESS),collapse=", "),".") }
     #? should I run select here instead of fit ?
     GUESS <- lapply(GUESS,function(g){ctmm.fit(data,g,trace=trace2,...)})
 
     MODELS <<- c(MODELS,GUESS)
 
     # check MSPE for improvement in REFINEd models
-    if(M>0 && MSPE>0)
-    {
-      if(N>0) { DROP <- GUESS[1:N] } else { DROP <- list() }
-      REFINE <- GUESS[N + 1:M]
-
-      GOOD <- sapply(REFINE,function(M){M[[mspe]]}) <= CTMM[[mspe]]
-      REFINE <- REFINE[GOOD]
-
-      GUESS <- c(DROP,REFINE)
-    }
+    # if(M>0 && !is.na(MSPE))
+    # {
+    #   if(N>0) { DROP <- GUESS[1:N] } else { DROP <- list() }
+    #   REFINE <- GUESS[N + 1:M]
+    #
+    #   GOOD <- sapply(REFINE,function(M){get.MSPE(M,MSPE)}) <= get.MSPE(CTMM,MSPE)
+    #   REFINE <- REFINE[GOOD]
+    #
+    #   GUESS <- c(DROP,REFINE)
+    # }
 
     # what is the new best model?
     OLD <<- CTMM
-    CTMM <<- min.ctmm(c(GUESS,list(CTMM)),IC=IC,MSPE=FALSE)
+    CTMM <<- min.ctmm(c(GUESS,list(CTMM)),IC=IC,MSPE=MSPE)
   }
 
   ########################
@@ -98,10 +137,11 @@ ctmm.select <- function(data,CTMM,verbose=FALSE,level=0.99,IC="AICc",MSPE=TRUE,t
   FEATURES <- FEATURES[!(FEATURES=="area")]
   FEATURES <- FEATURES[!(FEATURES=="error")]
   FEATURES <- FEATURES[!grepl("tau",FEATURES)]
+  FEATURES <- FEATURES[!(FEATURES=="omega")]
 
   # start with the most basic "compatible" model
-  GUESS <- simplify(CTMM,FEATURES)
-  if(trace) { message("* Fitting model ",name.ctmm(GUESS)) }
+  GUESS <- simplify.ctmm(CTMM,FEATURES)
+  if(trace) { message("* Fitting model ",name.ctmm(GUESS),".") }
   TARGET <- CTMM
   CTMM <- ctmm.fit(data,GUESS,trace=trace2,...)
   MODELS <- list(CTMM)
@@ -145,12 +185,11 @@ ctmm.select <- function(data,CTMM,verbose=FALSE,level=0.99,IC="AICc",MSPE=TRUE,t
   {
     GUESS <- list()
     MLE <- get.mle()
-
     beta <- alpha.ctmm(CTMM,alpha)
+
     # consider if some timescales are actually zero
     CI <- confint.ctmm(CTMM,alpha=beta)
-
-    if(length(CTMM$tau)==2)
+    if(length(CTMM$tau)==2 && !CTMM$omega && CTMM$tau[1]!=CTMM$tau[2] && !is.na(IC))
     {
       Q <- CI["tau velocity",1]
       if(is.nan(Q) || (Q<=0))
@@ -159,7 +198,7 @@ ctmm.select <- function(data,CTMM,verbose=FALSE,level=0.99,IC="AICc",MSPE=TRUE,t
         GUESS[[length(GUESS)]]$tau <- MLE$tau[-length(MLE$tau)]
       }
     }
-    else if(length(CTMM$tau)==1)
+    else if(length(CTMM$tau)==1 && !is.na(IC))
     {
       Q <- CI["tau position",1]
       if(is.nan(Q) || (Q<=0))
@@ -169,11 +208,39 @@ ctmm.select <- function(data,CTMM,verbose=FALSE,level=0.99,IC="AICc",MSPE=TRUE,t
       }
     }
 
+    # can autocorrelation timescales be distinguished?
+    if(length(CTMM$tau)==2 && (CTMM$tau[1]!=CTMM$tau[2] || CTMM$omega))
+    {
+      TEMP <- get.taus(CTMM,zeroes=TRUE)
+      nu <- TEMP$f.nu[2] # frequency/difference
+      J <- TEMP$J.nu.tau[2,] # Jacobian of nu WRT canonical parameters
+      Q <- TEMP$tau.names
+      Q <- c(J %*% CTMM$COV[Q,Q] %*% J) # variance of nu
+      Q <- ci.tau(nu,Q,alpha=beta)[1]
+
+      if(Q<=0 || is.na(IC))
+      { GUESS <- c(GUESS,list(simplify.ctmm(MLE,"diff.tau"))) }
+    }
+    else if(length(CTMM$tau)==2) # try other side if boundary if choosen model is critically damped
+    {
+      # try overdamped
+      TEMP <- MLE
+      TEMP$omega <- 0
+      TEMP$tau <- TEMP$tau * exp(c(1,-1)*sqrt(.Machine$double.eps))
+      GUESS <- c(GUESS,list(TEMP))
+
+      # try underdamped
+      TEMP <- MLE
+      TEMP$tau <- c(1,1)/mean(1/TEMP$tau)
+      TEMP$omega <- sqrt(.Machine$double.eps)
+      GUESS <- c(GUESS,list(TEMP))
+    }
+
     # consider if there is no circulation
     if(CTMM$circle)
     {
       Q <- CI["circle",3]
-      if(is.nan(Q) || (Q==Inf)) { GUESS <- c(GUESS,list(simplify(MLE,"circle"))) }
+      if(is.nan(Q) || (Q==Inf) || is.na(IC)) { GUESS <- c(GUESS,list(simplify.ctmm(MLE,"circle"))) }
     }
 
     # consider if eccentricity is zero
@@ -181,8 +248,12 @@ ctmm.select <- function(data,CTMM,verbose=FALSE,level=0.99,IC="AICc",MSPE=TRUE,t
     {
       Q <- "eccentricity"
       Q <- stats::qnorm(beta/2,mean=CTMM$sigma@par[Q],sd=sqrt(CTMM$COV[Q,Q]))
-      if(Q <= 0) { GUESS <- c(GUESS,list(simplify(MLE,"eccentricity"))) }
+      if(Q<=0 || is.na(IC)) { GUESS <- c(GUESS,list(simplify.ctmm(MLE,"eccentricity"))) }
     }
+
+    # consider if we can relax range residence (non-likelihood comparison only)
+    if(CTMM$range && is.na(IC))
+    { GUESS <- c(GUESS,list(simplify.ctmm(MLE,"range"))) }
 
     # consider if the mean could be more detailed
     REFINE <- drift@refine(MLE)
@@ -195,6 +266,12 @@ ctmm.select <- function(data,CTMM,verbose=FALSE,level=0.99,IC="AICc",MSPE=TRUE,t
   if(verbose)
   {
     MODELS <- sort.ctmm(MODELS,IC=IC,MSPE=MSPE)
+
+    # remove redundant models
+    NAMES <- sapply(MODELS,name.ctmm)
+    KEEP <- c(TRUE, NAMES[-1]!=NAMES[-length(NAMES)] )
+    MODELS <- MODELS[KEEP]
+
     return(MODELS)
   }
   else
@@ -205,11 +282,17 @@ ctmm.select <- function(data,CTMM,verbose=FALSE,level=0.99,IC="AICc",MSPE=TRUE,t
 name.ctmm <- function(CTMM,whole=TRUE)
 {
   # base model
-  if(length(CTMM$tau)==2)
-  { NAME <- "OUF" }
-  else if(length(CTMM$tau)==1)
-  { NAME <- "OU" }
-  else if(length(CTMM$tau)==0)
+  tau <- CTMM$tau
+  if(length(tau)==2)
+  {
+    if(tau[1]==Inf) { NAME <- "IOU" }
+    else if(tau[1]>tau[2]) { NAME <- "OUF" }
+    else if(CTMM$omega) { NAME <- "OU\u03A9" } # underdamped
+    else { NAME <- "OUf" } # identical timescales
+  }
+  else if(length(tau)==1)
+  { if(tau[1]<Inf) { NAME <- "OU" } else { NAME <- "BM" } }
+  else if(length(tau)==0)
   { NAME <- "IID" }
 
   # isotropy
@@ -244,20 +327,25 @@ name.ctmm <- function(CTMM,whole=TRUE)
 }
 
 ########
-sort.ctmm <- function(x,decreasing=FALSE,IC="AICc",MSPE=TRUE,flatten=TRUE,...)
+sort.ctmm <- function(x,decreasing=FALSE,IC="AICc",MSPE="position",flatten=TRUE,...)
 {
-  if(IC %in% c("MSPE","MSPEV")) { MSPE <- FALSE }
-
-  if(!MSPE)
+  if(is.na(MSPE))
+  { ICS <- sapply(x,function(m){get.IC(m,IC)}) }
+  else if(is.na(IC))
+  { ICS <- sapply(x,function(m){get.MSPE(m,MSPE)}) }
+  if(is.na(MSPE) || is.na(IC))
   {
-    ICS <- sapply(x,function(m){m[[IC]]})
     IND <- sort(ICS,index.return=TRUE,decreasing=decreasing)$ix
     x <- x[IND]
-    if(!flatten) { x <- list(x) }
+
+    if(flatten) { return(x) }
+
+    # structure the same as below
+    if(is.na(IC)) { x <- list(x) }
+    if(is.na(MSPE)) { x <- lapply(x,list) }
+
     return(x)
   }
-
-  mspe <- c("MSPE","MSPEV")[as.numeric(MSPE)]
 
   # model type names
   NAMES <- sapply(x,function(fit) name.ctmm(fit,whole=FALSE) )
@@ -285,12 +373,12 @@ sort.ctmm <- function(x,decreasing=FALSE,IC="AICc",MSPE=TRUE,flatten=TRUE,...)
     {
       # all-identical block
       SUB <- (MEAN.SUB==MEANS.SUB[j])
-      z[[j]] <- sort.ctmm(y[[i]][SUB],IC=IC,MSPE=FALSE)
-      MSPES[j] <- z[[j]][[1]][[mspe]] # associate block with best's MSPE
+      z[[j]] <- sort.ctmm(y[[i]][SUB],IC=IC,MSPE=NA)
+      MSPES[j] <- get.MSPE(z[[j]][[1]],MSPE) # associate block with best's MSPE
     }
     IND <- sort(MSPES,index.return=TRUE,decreasing=decreasing)$ix
     y[[i]] <- do.call(c,z[IND]) # flatten to ACF blocks
-    ICS[i] <- y[[i]][[1]][[IC]] # associate block with best's IC
+    ICS[i] <- get.IC(y[[i]][[1]],IC) # associate block with best's IC
   }
   # sort blocks by IC and flatten
   IND <- sort(ICS,index.return=TRUE,decreasing=decreasing)$ix
@@ -302,53 +390,66 @@ sort.ctmm <- function(x,decreasing=FALSE,IC="AICc",MSPE=TRUE,flatten=TRUE,...)
 }
 
 ############
-min.ctmm <- function(x,IC="AICc",MSPE=TRUE,...)
-{
-  x <- sort.ctmm(x,IC=IC,MSPE=MSPE,...)
-  return(x[[1]])
-}
+min.ctmm <- function(x,IC="AICc",MSPE="position",...)
+{ sort.ctmm(x,IC=IC,MSPE=MSPE,...)[[1]] }
+
 
 ########
-summary.ctmm.list <- function(object, IC="AICc", MSPE=TRUE, units=TRUE, ...)
+summary.ctmm.list <- function(object, IC="AICc", MSPE="position", units=TRUE, ...)
 {
-  IC <- match.arg(IC,c("AIC","AICc","BIC"))
-  mspe <- if(MSPE) { c("MSPE","MSPEV")[as.numeric(MSPE)] } else { "MSPE" }
+  IC <- match.arg(IC,c("AICc","AIC","BIC",NA))
+  MSPE <- match.arg(MSPE,c("position","velocity",NA))
 
   N <- length(object)
   object <- sort.ctmm(object,IC=IC,MSPE=MSPE,flatten=FALSE)
   M <- length(object)
 
-  if(N==M) { MSPE <- FALSE } # don't need to sort MSPE
-  if(M==1 && MSPE) { ICB <- FALSE } else { ICB <- TRUE } # don't need to sort AIC
+  # if(N==M) { MSPE <- NA } # don't need to sort MSPE
+  # if(M==1) { IC <- NA } # don't need to sort IC
   object <- do.call(c,object)
-  ICS <- sapply(object,function(m){m[[IC]]})
-  MSPES <- sapply(object,function(m){m[[mspe]]})
 
-  # show relative IC
-  ICS <- ICS - ICS[1]
-  ICS <- cbind(ICS)
-  colnames(ICS) <- paste0("d",IC)
-  if(!ICB) { ICS <- NULL }
+  if(!is.na(IC))
+  {
+    ICS <- sapply(object,function(m){get.IC(m,IC)})
 
-  # convert to meters/kilometers
-  CNAME <- "dRMSPE"
-  MSPES <- sqrt(MSPES)
-  MSPES <- MSPES - MSPES[1]
-  MIN <- min(c(abs(MSPES[MSPES!=0]),Inf))
-  UNIT <- unit(MIN,if(MSPE==1){"length"}else{"speed"},concise=TRUE,SI=!units)
-  MSPES <- MSPES/UNIT$scale
-  CNAME <- paste0(CNAME," (",UNIT$name,")")
-  MSPES <- cbind(MSPES)
-  colnames(MSPES) <- CNAME
-  if(!MSPE) { MSPES <- NULL }
+    # show relative IC
+    ICS <- ICS - ICS[1]
+    ICS <- cbind(ICS)
+    colnames(ICS) <- paste0("\u0394",IC)
+  }
+  else { ICS <- NULL }
+
+  if(!is.na(MSPE))
+  {
+    MSPES <- sapply(object,function(m){get.MSPE(m,MSPE)})
+
+    # convert to meters/kilometers
+    CNAME <- paste0("\u0394","RMSPE")
+    MSPES <- sqrt(MSPES)
+    MSPES <- MSPES - MSPES[1]
+    MIN <- min(c(abs(MSPES[MSPES!=0]),Inf))
+    UNIT <- unit(MIN,if(MSPE=="position"){"length"}else{"speed"},concise=TRUE,SI=!units)
+    MSPES <- MSPES/UNIT$scale
+    CNAME <- paste0(CNAME," (",UNIT$name,")")
+    MSPES <- cbind(MSPES)
+    colnames(MSPES) <- CNAME
+  }
+  else { MSPES <- NULL }
 
   ICS <- cbind(ICS,MSPES)
   rownames(ICS) <- names(object)
 
   DOF <- sapply(object,DOF.mean)
   METH <- sapply(object,function(m){m$method})
-  DOF <- data.frame(DOF,METH)
-  colnames(DOF) <- c("DOF[mean]","method")
+
+  DOF <- cbind(DOF)
+  colnames(DOF) <- "DOF[mean]"
+
+  if(FALSE) # only prints correctly in unicode locale (Windows R bug)
+  {
+    DOF <- data.frame(DOF,METH)
+    colnames(DOF) <- c("DOF[mean]","method")
+  }
 
   ICS <- cbind(ICS,DOF)
 

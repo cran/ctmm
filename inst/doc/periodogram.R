@@ -11,7 +11,7 @@ LSP <- periodogram(Gamba,fast=2,res.time=2)
 plot(LSP,max=TRUE,diagnostic=TRUE,cex=0.5)
 
 ## ------------------------------------------------------------------------
-PROTO <- ctmm(mean="periodic",period=c(1 %#% "day",1 %#% "month"),circle=TRUE)
+PROTO <- ctmm(mean="periodic",period=c(24 %#% "hours",1 %#% "month"),circle=TRUE)
 
 ## ------------------------------------------------------------------------
 SVF <- variogram(Gamba,res=3)
@@ -24,16 +24,17 @@ control <- list(method="pNewton",cores=2) # CRAN policy limits to 2 processes
 FITS <- ctmm.select(Gamba,GUESS,verbose=TRUE,control=control)
 
 ## ------------------------------------------------------------------------
-summary(FITS,units=FALSE)
+summary(FITS)
 
 ## ------------------------------------------------------------------------
-# sorted by MSPE
+# these are sorted by MSPE
 summary(FITS[1:7])
-# sorted by IC
+# these are sorted by IC
 summary(FITS[c(5,8:10)])
 
 ## ------------------------------------------------------------------------
-summary(FITS,MSPE=FALSE)
+# sorting by IC only
+summary(FITS,MSPE=NA)
 
 ## ------------------------------------------------------------------------
 "hour" %#% stats::median(diff(Gamba$t))

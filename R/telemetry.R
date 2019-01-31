@@ -77,35 +77,53 @@ get.telemetry <- function(data,axes=c("x","y"))
 
 #######################
 # Generic import function
-as.telemetry <- function(object,timeformat="",timezone="UTC",projection=NULL,timeout=Inf,na.rm="row",drop=TRUE,...) UseMethod("as.telemetry")
+as.telemetry <- function(object,timeformat="",timezone="UTC",projection=NULL,timeout=Inf,na.rm="row",mark.rm=FALSE,drop=TRUE,...) UseMethod("as.telemetry")
+
 
 # MoveStack object
-as.telemetry.MoveStack <- function(object,timeformat="",timezone="UTC",projection=NULL,timeout=Inf,na.rm="row",drop=TRUE,...)
+as.telemetry.MoveStack <- function(object,timeformat="",timezone="UTC",projection=NULL,timeout=Inf,na.rm="row",mark.rm=FALSE,drop=TRUE,...)
 {
-  # need to first conglomerate to MoveBank format, then run as.telemetry
+  # get individual names
+  NAMES <- move::trackId(object)
+  NAMES <- levels(NAMES)
+
+  # convert individually
   object <- move::split(object)
-  DATA <- lapply(object,function(mv){ Move2CSV(mv,timeformat=timeformat,timezone=timezone,projection=projection) })
-  DATA <- do.call(rbind,DATA)
-  DATA <- as.telemetry.data.frame(DATA,timeformat=timeformat,timezone=timezone,projection=projection,timeout=timeout,na.rm=na.rm,drop=drop)
+  object <- lapply(object,function(mv){ as.telemetry.Move(mv,timeformat=timeformat,timezone=timezone,projection=projection,timeout=timeout,na.rm=na.rm,mark.rm=mark.rm,...) })
+  # name by MoveStack convention
+  names(object) <- NAMES
+  for(i in 1:length(object)) { attr(object,"info")$identity <- NAMES[i] }
+
+  if(drop && length(object)==1) { object <- object[[1]] }
+
+  return(object)
+}
+
+
+# Move object
+as.telemetry.Move <- function(object,timeformat="",timezone="UTC",projection=NULL,timeout=Inf,na.rm="row",mark.rm=FALSE,drop=TRUE,...)
+{
+  # preserve Move object projection if possible
+  if(is.null(projection) && !raster::isLonLat(object)) { projection <- raster::projection(object) }
+
+  DATA <- Move2CSV(object,timeformat=timeformat,timezone=timezone,projection=projection)
+  # can now treat this as a MoveBank object
+  DATA <- as.telemetry.data.frame(DATA,timeformat=timeformat,timezone=timezone,projection=projection,timeout=timeout,na.rm=na.rm,mark.rm=mark.rm,drop=drop)
   return(DATA)
 }
 
-# Move object
-as.telemetry.Move <- function(object,timeformat="",timezone="UTC",projection=NULL,timeout=Inf,na.rm="row",drop=TRUE,...)
-{
-  DATA <- Move2CSV(object,timeformat=timeformat,timezone=timezone,projection=projection)
-  # can now treat this as a MoveBank object
-  DATA <- as.telemetry.data.frame(DATA,timeformat=timeformat,timezone=timezone,projection=projection,timeout=timeout,na.rm=na.rm,drop=drop)
-  return(DATA)
-}
 
 # convert Move object back to MoveBank CSV
 Move2CSV <- function(object,timeformat="",timezone="UTC",projection=NULL,...)
 {
   DATA <- data.frame(timestamp=move::timestamps(object))
-  if(raster::isLonLat(object))
-  { DATA[,c('location.long','location.lat')] <- sp::coordinates(object) }
-  else
+
+  if(raster::isLonLat(object)) # projection will be automated
+  {
+    DATA[,c('location.long','location.lat')] <- sp::coordinates(object)
+    if(is.null(projection)) { warning("Move objects in geographic coordinates are automatically projected.") }
+  }
+  else # projection will be preserved, but still need long-lat
   { DATA[,c('location.long','location.lat')] <- sp::coordinates(sp::spTransform(object,sp::CRS("+proj=longlat +datum=WGS84"))) }
 
   # break Move object up into data.frame and idData
@@ -126,10 +144,15 @@ Move2CSV <- function(object,timeformat="",timezone="UTC",projection=NULL,...)
 # consider alternative spellings of NAMES, but preserve order (preference) of NAMES
 pull.column <- function(object,NAMES,FUNC=as.numeric)
 {
-  canonical <- function(NAME) { unique(tolower(gsub("[.:_ ]","",NAME))) }
+  canonical <- function(NAME,UNIQUE=TRUE)
+  {
+    NAME <- tolower(gsub("[.:_ -]","",NAME))
+    if(UNIQUE) { NAME <- unique(NAME) }
+    return(NAME)
+  }
 
   NAMES <- canonical(NAMES)
-  names(object) <- canonical(names(object)) -> COLS
+  names(object) <- canonical(names(object),FALSE) -> COLS
 
   for(NAME in NAMES)
   {
@@ -151,6 +174,7 @@ missing.class <- function(DATA,TYPE)
   # column to check for NAs
   if(TYPE=="speed") { COL <- "speed" }
   else if(TYPE=="vertical") { COL <- "z" }
+  else { COL <- TYPE }
 
   # some location classes are missing TYPE
   NAS <- is.na(DATA[[COL]])
@@ -183,15 +207,20 @@ missing.class <- function(DATA,TYPE)
     DATA[[COL]][NAS] <- 0
     if(TYPE=="speed") { DATA$heading[NAS] <- 0 }
 
-    # do we have TYPE DOP
-    DOP <- DOP.LIST[[TYPE]]$DOP
-    VAR <- DOP.LIST[[TYPE]]$VAR
+    # do we have an associated TYPE DOP
+    if(TYPE %in% names(DOP.LIST))
+    {
+      DOP <- DOP.LIST[[TYPE]]$DOP
+      VAR <- DOP.LIST[[TYPE]]$VAR
 
-    if(!(DOP %in% names(DATA))) { DATA[[DOP]] <- 1 }
-    # adjust DOP values for missing TYPE
-    DATA[[DOP]][NAS] <- Inf
-    # adjust calibrated errors --- shouldn't be necessary
-    if(VAR %in% names(DATA)) { DATA[[VAR]][NAS] <- Inf }
+      if(!(DOP %in% names(DATA))) { DATA[[DOP]] <- 1 }
+      # adjust DOP values for missing TYPE
+      DATA[[DOP]][NAS] <- Inf
+      # adjust calibrated errors --- shouldn't be necessary
+      if(VAR %in% names(DATA)) { DATA[[VAR]][NAS] <- Inf }
+    }
+    else if(TYPE=="HDOP")
+    { DATA[[COL]][NAS] <- 100 }
   }
 
   return(DATA)
@@ -199,7 +228,7 @@ missing.class <- function(DATA,TYPE)
 
 
 # read in a MoveBank object file
-as.telemetry.character <- function(object,timeformat="",timezone="UTC",projection=NULL,timeout=Inf,na.rm="row",drop=TRUE,...)
+as.telemetry.character <- function(object,timeformat="",timezone="UTC",projection=NULL,timeout=Inf,na.rm="row",mark.rm=FALSE,drop=TRUE,...)
 {
   # read with 3 methods: fread, temp_unzip, read.csv, fall back to next if have error.
   # fread error message is lost, we can use print(e) for debugging.
@@ -215,13 +244,34 @@ as.telemetry.character <- function(object,timeformat="",timezone="UTC",projectio
       data <- utils::read.csv(object,...)
     }
   }
-  data <- as.telemetry.data.frame(data,timeformat=timeformat,timezone=timezone,projection=projection,timeout=timeout,na.rm=na.rm,drop=drop)
+  data <- as.telemetry.data.frame(data,timeformat=timeformat,timezone=timezone,projection=projection,timeout=timeout,na.rm=na.rm,mark.rm=mark.rm,drop=drop)
   return(data)
 }
 
 
+# fastPOSIXct doesn't have a timeformat argument
+# fastPOSIXct requires GMT timezone
+# fastPOSIXct only works on times after the 1970 epoch !!!
+# as.POSIXct doesn't accept this argument if empty/NA/NULL ???
+asPOSIXct <- function(x,timeformat="",timezone="UTC",...)
+{
+  # try fastPOSIXct
+  if(class(x)=="character" && timeformat=="" && timezone %in% c("UTC","GMT"))
+  {
+    y <- fasttime::fastPOSIXct(x,tz=timezone)
+    # did fastPOSIXct fail?
+    if(!any(!is.na(x) & is.na(y))) { return(y) }
+  }
+
+  if(timeformat=="") { x <- as.POSIXct(x,tz=timezone) }
+  else { x <- as.POSIXct(x,tz=timezone,format=timeformat) }
+
+  return(x)
+}
+
+
 # this assumes a MoveBank data.frame
-as.telemetry.data.frame <- function(object,timeformat="",timezone="UTC",projection=NULL,timeout=Inf,na.rm="row",drop=TRUE,...)
+as.telemetry.data.frame <- function(object,timeformat="",timezone="UTC",projection=NULL,timeout=Inf,na.rm="row",mark.rm=FALSE,drop=TRUE,...)
 {
   na.rm <- match.arg(na.rm,c("row","col"))
 
@@ -229,12 +279,9 @@ as.telemetry.data.frame <- function(object,timeformat="",timezone="UTC",projecti
   names(object) <- tolower(names(object))
 
   # timestamp column
-  COL <- c('timestamp','Acquisition.Start.Time','Acquisition.Time','time')
+  COL <- c('timestamp','Acquisition.Start.Time','Acquisition.Time','time','Date.GMT','Date.Local')
   COL <- pull.column(object,COL,FUNC=as.character)
-  # fastPOSIXct doesn't have a timeformat argument and as.POSIXct doesn't accept this argument if empty/NA/NULL ???
-  if(class(COL)=="character" && timeformat=="") { COL <- fasttime::fastPOSIXct(COL,tz=timezone) }
-  else if(timeformat=="") { COL <- as.POSIXct(COL,tz=timezone) }
-  else { COL <- as.POSIXct(COL,tz=timezone,format=timeformat) }
+  COL <- asPOSIXct(COL,timeformat=timeformat,timezone=timezone)
   DATA <- data.frame(timestamp=COL)
 
   COL <- c("animal.ID","individual.local.identifier","local.identifier","individual.ID","Name","ID","tag.local.identifier","tag.ID","deployment.ID","track.ID")
@@ -253,6 +300,11 @@ as.telemetry.data.frame <- function(object,timeformat="",timezone="UTC",projecti
   COL <- c("location.lat","Latitude","lat","GPS.Latitude")
   COL <- pull.column(object,COL)
   DATA$latitude <- COL
+
+  # manually marked outliers
+  COL <- c("manually.marked.outlier","marked.outlier","outlier")
+  COL <- pull.column(object,COL,as.logical)
+  if(mark.rm && length(COL)) { object <- object[!COL,] }
 
   ###############################################
   # TIME & PROJECTION
@@ -319,6 +371,15 @@ as.telemetry.data.frame <- function(object,timeformat="",timezone="UTC",projecti
     # estimated from Scott's calibration data
     DATA$HDOP <- COL
     DATA[[DOP.LIST$horizontal$VAR]] <- 1.2304709680947150^2/2*COL^2
+
+    NAS <- is.na(DATA$HDOP)
+    if(any(NAS))
+    {
+      DATA$HDOP[NAS] <- 1000
+      DATA[[DOP.LIST$horizontal$VAR]][NAS] <- Inf
+      DATA$class <- as.factor(NAS)
+      levels(DATA$class) <- c('complete','incomplete')
+    }
   }
 
   ###########
@@ -329,7 +390,7 @@ as.telemetry.data.frame <- function(object,timeformat="",timezone="UTC",projecti
   {
     TELONICS <- TRUE
 
-    if(FALSE) # this information does not seem worthwhile often
+    if(FALSE) # this information does not generally perform well
     {
       COL <- COL/10 # put on similar scale with HDOP
 
@@ -355,7 +416,7 @@ as.telemetry.data.frame <- function(object,timeformat="",timezone="UTC",projecti
   # HDOP
   if(!("HDOP" %in% names(DATA)))
   {
-    COL <- c("GPS.HDOP","HDOP","DOP","Horizontal.Dilution","GPS.Horizontal.Dilution")
+    COL <- c("GPS.HDOP","HDOP","Horizontal.Dilution","GPS.Horizontal.Dilution","GPS.DOP","DOP","GPS.PDOP","PDOP","GPS.GDOP","GDOP")
     COL <- pull.column(object,COL)
     if(length(COL))
     {
@@ -367,7 +428,7 @@ as.telemetry.data.frame <- function(object,timeformat="",timezone="UTC",projecti
   # approximate DOP from # satellites if necessary
   if(!("HDOP" %in% names(DATA)))
   {
-    COL <- c("GPS.satellite.count","satellite.count","NumSats","Sats") # Counts? Messages?
+    COL <- c("GPS.satellite.count","satellite.count","NumSats","satellites.used","Satellites","Sats") # Counts? Messages?
     COL <- pull.column(object,COL)
     if(length(COL))
     {
@@ -378,10 +439,13 @@ as.telemetry.data.frame <- function(object,timeformat="",timezone="UTC",projecti
     }
   }
 
+  # account for missing DOP values
+  if("HDOP" %in% names(DATA)) { DATA <- missing.class(DATA,"HDOP") }
+
   ###########################
   # generic location classes
   # includes Telonics Gen4 location classes (use with HDOP information)
-  COL <- c("GPS.fix.type","fix.type","Fix.Attempt","GPS.Fix.Attempt","Telonics.Fix.Attempt")
+  COL <- c("GPS.fix.type","fix.type","Fix.Attempt","GPS.Fix.Attempt","Telonics.Fix.Attempt","Fix.Status")
   COL <- pull.column(object,COL,FUNC=as.factor)
   if(length(COL)) { DATA$class <- COL }
 
@@ -400,7 +464,7 @@ as.telemetry.data.frame <- function(object,timeformat="",timezone="UTC",projecti
   # timed-out fixes
   if(timeout<Inf)
   {
-    COL <- c("GPS.time.to.fix","time.to.fix","fix.time","time.to.get.fix")
+    COL <- c("GPS.time.to.fix","time.to.fix","fix.time","time.to.get.fix","Duration")
     COL <- pull.column(object,COL)
     if(length(COL))
     {
@@ -422,7 +486,7 @@ as.telemetry.data.frame <- function(object,timeformat="",timezone="UTC",projecti
   ################################
   # HEIGHT
   # Import third axis if available
-  COL <- c("height.above.ellipsoid","height.above.msl","height.above.mean.sea.level","height.raw","height.(raw)","barometric.height","height","Argos.altitude","GPS.Altitude","altitude","barometric.depth","depth")
+  COL <- c("height.above.ellipsoid","height.above.msl","height.above.mean.sea.level","height.raw","height.(raw)","barometric.height","height","Argos.altitude","GPS.Altitude","altitude","barometric.depth","depth","Alt")
   COL <- pull.column(object,COL)
   if(length(COL))
   {
@@ -458,28 +522,31 @@ as.telemetry.data.frame <- function(object,timeformat="",timezone="UTC",projecti
     DATA$speed <- COL
     COL <- c("heading","GPS.heading","Course")
     COL <- pull.column(object,COL)
-    if(length(COL)) { DATA$heading <- COL }
+    if(length(COL))
+    {
+      DATA$heading <- COL
+
+      ####################
+      # SPEED ERE
+      COL <- "eobs.speed.accuracy.estimate"
+      COL <- pull.column(object,COL)
+      if(length(COL) && FALSE) # e-obs column is terrible for error estimation, location error estimates are better
+      {
+        # UERE from Scott's calibration data
+        DATA[[DOP.LIST$speed$DOP]] <- COL
+        DATA[[DOP.LIST$speed$VAR]] <- 0.115475648329319^2/2 * COL^2
+      }
+      else if("HDOP" %in% names(DATA)) # USE HDOP as approximate SDOP
+      {
+        DATA$SDOP <- DATA$HDOP
+        # message("HDOP used as an approximate speed DOP.")
+      }
+
+      # do we need a location class for missing speeds?
+      if("speed" %in% names(DATA))
+      { DATA <- missing.class(DATA,"speed") }
+    }
     else { DATA$speed <- NULL }
-
-    ####################
-    # SPEED ERE
-    COL <- "eobs.speed.accuracy.estimate"
-    COL <- pull.column(object,COL)
-    if(length(COL)) # assuming same form as EOBS horizontal accuracy estimate
-    {
-      # UERE from Scott's calibration data
-      DATA[[DOP.LIST$speed$DOP]] <- COL
-      DATA[[DOP.LIST$speed$VAR]] <- 0.0499190708866745^2/2 * COL^2
-    }
-    else if("HDOP" %in% names(DATA)) # USE HDOP as approximate SDOP
-    {
-      DATA$SDOP <- DATA$HDOP
-      message("HDOP used as an approximate speed DOP.")
-    }
-
-    # do we need a location class for missing speeds?
-    if("speed" %in% names(DATA))
-    { DATA <- missing.class(DATA,"speed") }
   } # END SPEED IMPORT
 
   #######################################
@@ -636,7 +703,7 @@ summary.telemetry <- function(object,...)
 
     # unit conversions
     COL <- 1
-    units <- unit(stats::median(DT),"time",thresh=1,concise=TRUE)
+    units <- unit(stats::median(DT,na.rm=TRUE),"time",thresh=1,concise=TRUE)
     result[,COL] <- result[,COL]/units$scale
     colnames(result)[COL] <- paste0("interval (",units$name,")")
 

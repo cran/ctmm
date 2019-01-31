@@ -29,7 +29,7 @@ smoother <- function(DATA,CTMM,precompute=FALSE,sample=FALSE,residual=FALSE,...)
     theta <- 0
   }
 
-  K <- length(CTMM$tau)
+  K <- max(length(CTMM$tau),1)
 
   circle <- CTMM$circle
 
@@ -152,6 +152,7 @@ smoother <- function(DATA,CTMM,precompute=FALSE,sample=FALSE,residual=FALSE,...)
   {
     if(DIM==1) { CTMM$sigma <- area } # isotropic variance
     KALMAN <- kalman(z,u=NULL,dt=dt,CTMM=CTMM,error=error,precompute=precompute,sample=sample,residual=residual,...)
+    # point estimates will be correct but eccentricity is missing from variances
 
     if(residual) { return(KALMAN) }
 
@@ -170,8 +171,13 @@ smoother <- function(DATA,CTMM,precompute=FALSE,sample=FALSE,residual=FALSE,...)
 
     if(DIM<AXES && !sample) # promote from VAR to COV (2,2)
     {
-      COV <- drop(COV) %o% diag(AXES)
-      if(K>1) { vCOV <- drop(vCOV) %o% diag(AXES) }
+      # fix for zero-error eccentric smoother
+      MAT <- attr(sigma,'par') # keeps track of SQUEEZE and ROTATE
+      MAT[1] <- 1
+      MAT <- covm(MAT)
+      MAT <- methods::getDataPart(MAT)
+      COV <- drop(COV) %o% MAT
+      if(K>1) { vCOV <- drop(vCOV) %o% MAT }
     }
   }
 
@@ -225,42 +231,50 @@ smoother <- function(DATA,CTMM,precompute=FALSE,sample=FALSE,residual=FALSE,...)
 
 
 ########################################
-# fill in data gaps with missing observations of infinite error !!!
+# fill in data gaps with missing observations of infinite error
 ########################################
-fill.data <- function(data,CTMM=ctmm(tau=Inf),verbose=FALSE,t=NULL,dt=NULL,res=1,cor.min=0,dt.max=NULL)
+fill.data <- function(data,CTMM=ctmm(tau=Inf),verbose=FALSE,t=NULL,dt=NULL,res=1,cor.min=0,dt.max=NULL,DT=diff(t))
 {
   # is this recorded data or empty gap
   data$record <- TRUE
+
+  if(!length(CTMM$tau) || CTMM$tau[1]==0) { t <- data$t } # don't add further times
 
   # FIX THE TIME GRID TO AVOID TINY DT
   if(is.null(t))
   {
     t <- data$t
-    DT <- diff(t)
+    if(is.null(DT)) { DT <- diff(t) }
 
     # target resolution
     if(is.null(dt)){ dt <- stats::median(DT)/res }
 
     # maximum gap to bridge
     if(is.null(dt.max)) { dt.max <- -log(cor.min)*CTMM$tau[1] }
+    dt.max2 <- dt.max/2
 
     # this regularization is not perfectly regular, but holds up to sampling drift in caribou data
-    t.grid <- c()  # full (even-ish) grid
+    t.grid <- c()  # full (locally) even grid
     dt.grid <- c() # local (numeric) sampling resolution
     t.new <- c()   # new times in this even grid
     for(i in 1:length(DT))
     {
-      n.sub <- round(DT[i]/dt)+1
-      n.sub <- max(n.sub,2) # fix for crazy small time-steps
-      t.sub <- seq(from=t[i],to=t[i+1],length.out=n.sub)
-      dt.sub <- DT[i]/(n.sub-1)
+      if(DT[i]<=dt.max)
+      {
+        n.sub <- round(DT[i]/dt)+1
+        n.sub <- max(n.sub,2) # fix for crazy small time-steps
+        t.sub <- seq(from=t[i],to=t[i+1],length.out=n.sub)
+        dt.sub <- DT[i]/(n.sub-1)
+        dt.sub <- rep(dt.sub,n.sub)
+      }
+      else # skip bulk of gap
+      {
+        t.sub <- seq(from=0,to=dt.max2,by=dt)
+        t.sub <- c( t[i]+t.sub , t[i+1]-rev(t.sub) )
+        n.sub <- length(t.sub)
+        dt.sub <- rep(dt,n.sub)
+      }
 
-      # skip low correlation times in gaps
-      INCLUDE <- (t.sub-t[i])<=dt.max/2 | (t[i+1]-t.sub)<=dt.max/2
-      t.sub <- t.sub[INCLUDE]
-      n.sub <- length(t.sub)
-
-      dt.sub <- rep(dt.sub,n.sub)
       t.grid <- c(t.grid,t.sub)
       dt.grid <- c(dt.grid,dt.sub)
 
@@ -276,6 +290,10 @@ fill.data <- function(data,CTMM=ctmm(tau=Inf),verbose=FALSE,t=NULL,dt=NULL,res=1
   else # use a pre-specified time grid
   {
     t.new <- t[!(t %in% data$t)]
+    t.grid <- t
+    dt.grid <- diff(t)
+    dt.grid <- pmin(c(Inf,dt.grid),c(dt.grid,Inf))
+    w.grid <- rep(1,length(t))
   }
 
   # empty observation row for these times
@@ -315,7 +333,7 @@ occurrence <- function(data,CTMM,H=0,res.time=10,res.space=10,grid=NULL,cor.min=
   SIGMA <- CTMM$sigma # diffusion matrix for later
   CTMM <- ctmm.prepare(data,CTMM,precompute=FALSE) # not the final t for calculating u
   error <- get.error(data,CTMM,circle=TRUE)
-  MIN.ERR <- min(error) # !!! FIX ME !!!
+  MIN.ERR <- min(error) # Fix something here?
 
   # format data to be relatively evenly spaced with missing observations
   data <- fill.data(data,CTMM,verbose=TRUE,res=res.time,cor.min=cor.min,dt.max=dt.max)
@@ -356,20 +374,13 @@ occurrence <- function(data,CTMM,H=0,res.time=10,res.space=10,grid=NULL,cor.min=
 
   # estimate size of data blob
   dr <- diag(SIGMA)
-  if(CTMM$range)
-  {
-    if(length(CTMM$tau)==1) #OU
-    { dr <- dt/4 * dr/CTMM$tau[1] }
-    else if(length(CTMM$tau)==2) #OUF
-    { dr <- dt^2/24 * dr/prod(CTMM$tau)}
-  }
-  else # these sigmas are var/tau[1] diffusion limits
-  {
-    if(length(CTMM$tau)==1) #BM
-    { dr <- dt/4 * dr }
-    else if(length(CTMM$tau)==2) #IOU
-    { dr <- dt^2/24 * dr/CTMM$tau[2] }
-  }
+  if(CTMM$range && length(CTMM$tau)) { dr <- dr/CTMM$tau[1] }
+  # prefactors from mid-bridge variance
+  if(length(CTMM$tau)==1) #BM/OU
+  { dr <- dt/4 * dr }
+  else if(length(CTMM$tau)==2) #IOU/OUF
+  { dr <- dt^2/24 * dr/CTMM$tau[2] }
+
   if(CTMM$error){ dr <- dr + MIN.ERR }
   dr <- sqrt(dr)
 
@@ -383,11 +394,12 @@ occurrence <- function(data,CTMM,H=0,res.time=10,res.space=10,grid=NULL,cor.min=
 
 ##############################################
 # SIMULATE DATA over time array t
-simulate.ctmm <- function(object,nsim=1,seed=NULL,data=NULL,t=NULL,dt=NULL,res=1,precompute=FALSE,...)
+simulate.ctmm <- function(object,nsim=1,seed=NULL,data=NULL,t=NULL,dt=NULL,res=1,complete=FALSE,precompute=FALSE,...)
 {
   if(!is.null(seed)){ set.seed(seed) }
 
   info <- attr(object,"info")
+  if(!is.null(data)) { info$identity <- glue( attr(data,'info')$identity , info$identity ) }
   axes <- object$axes
   AXES <- length(axes)
 
@@ -489,10 +501,11 @@ simulate.ctmm <- function(object,nsim=1,seed=NULL,data=NULL,t=NULL,dt=NULL,res=1
       Sigma <- array(0,c(n,K,K))
 
       object$sigma <- 1
+      object <- get.taus(object) # pre-compute stuff for Langevin equation solutions
       for(i in 1:n)
       {
         # tabulate propagators if necessary
-        if((i==1)||(dt[i]!=dt[i-1])) { Langevin <- langevin(dt=dt[i],CTMM=object,K=K) }
+        if((i==1)||(dt[i]!=dt[i-1])) { Langevin <- langevin(dt=dt[i],CTMM=object) }
         Green[i,,] <- Langevin$Green
         Sigma[i,,] <- Langevin$Sigma
         # Sigma is now standardization matrix
@@ -572,19 +585,22 @@ simulate.ctmm <- function(object,nsim=1,seed=NULL,data=NULL,t=NULL,dt=NULL,res=1
   }
 
   data <- new.telemetry(data,info=info)
+  if(complete) { data <- pseudonymize(data,tz=info$timezone,proj=info$projection,origin=EPOCH)  }
   return(data)
 }
 #methods::setMethod("simulate",signature(object="ctmm"), function(object,...) simulate.ctmm(object,...))
 
-simulate.telemetry <- function(object,nsim=1,seed=NULL,CTMM=NULL,t=NULL,dt=NULL,res=1,precompute=FALSE,...)
-{ simulate.ctmm(CTMM,nsim=nsim,seed=seed,data=object,t=t,dt=dt,res=res,...) }
+simulate.telemetry <- function(object,nsim=1,seed=NULL,CTMM=NULL,t=NULL,dt=NULL,res=1,complete=FALSE,precompute=FALSE,...)
+{ simulate.ctmm(CTMM,nsim=nsim,seed=seed,data=object,t=t,dt=dt,res=res,complete=complete,precompute=precompute,...) }
+
 
 ##########################
 # predict locations at certaint times !!! make times unique
 ##########################
-predict.ctmm <- function(object,data=NULL,t=NULL,dt=NULL,res=1,...)
+predict.ctmm <- function(object,data=NULL,t=NULL,dt=NULL,res=1,complete=FALSE,...)
 {
   info <- attr(object,"info")
+  if(!is.null(data)) { info$identity <- glue( attr(data,'info')$identity , info$identity ) }
   axes <- object$axes
 
   # Gaussian simulation not conditioned off of any data
@@ -602,10 +618,27 @@ predict.ctmm <- function(object,data=NULL,t=NULL,dt=NULL,res=1,...)
     v <- get(object$mean)@velocity(t,object) %*% mu
     colnames(v) <- paste0("v",axes)
 
-    # missing COVs !!!
-
     data <- data.frame(r,v)
     data$t <- t
+
+    # missing COVs !!!
+    DOP <- DOP.match(axes)
+    sigma <- methods::getDataPart(object$sigma)
+    if(length(axes)==1 || object$isotropic)
+    {
+      sigma <- mean(diag(sigma,length(axes)))
+      data[[DOP.LIST[[DOP]]$VAR]] <- sigma
+      if(length(object$tau)>1) { data[[paste0("VAR.v",axes)]] <- sigma/prod(object$tau) }
+    }
+    else
+    {
+      sigma <- c(sigma)[-3]
+      for(i in 1:3)
+      {
+        data[[DOP.LIST[[DOP]]$COV[i]]] <- sigma[i]
+        if(length(object$tau)>1) { data[[DOP.LIST$speed$COV[i]]] <- sigma[i]/prod(object$tau) }
+      }
+    }
   }
   else # condition off of the data
   {
@@ -678,8 +711,9 @@ predict.ctmm <- function(object,data=NULL,t=NULL,dt=NULL,res=1,...)
   }
 
   data <- new.telemetry(data,info=info)
+  if(complete) { data <- pseudonymize(data,tz=info$timezone,proj=info$projection,origin=EPOCH)  }
   return(data)
 }
 
-predict.telemetry <- function(object,CTMM=NULL,t=NULL,dt=NULL,res=1,...)
-{ predict.ctmm(CTMM,data=object,t=t,dt=dt,res=res,...) }
+predict.telemetry <- function(object,CTMM=NULL,t=NULL,dt=NULL,res=1,complete=FALSE,...)
+{ predict.ctmm(CTMM,data=object,t=t,dt=dt,res=res,complete=complete,...) }

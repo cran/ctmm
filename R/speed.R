@@ -3,11 +3,24 @@ speed.telemetry <- function(object,CTMM,level=0.95,robust=FALSE,units=TRUE,prior
 
 speed.ctmm <- function(object,data=NULL,level=0.95,robust=FALSE,units=TRUE,prior=TRUE,fast=TRUE,cor.min=0.5,dt.max=NULL,error=0.01,cores=1,...)
 {
+  # bad return value
+  INF <- c(0,Inf,Inf)
+  names(INF) <- c("low","ML","high")
+  INF <- rbind(INF)
+  rownames(INF) <- "speed (meters/second)"
+  #attr(CI,"DOF") <- 0
+
   if(length(object$tau)<2 || object$tau[2]<=.Machine$double.eps)
-  { stop("Movement model is fractal. Speed cannot be estimated.") }
+  {
+    warning("Movement model is fractal.")
+    return(INF)
+  }
 
   if(prior && fast && any(eigen(object$COV,only.values=TRUE)$values<=.Machine$double.eps))
-  { stop("Indefinite covariance matrix in sampling distribution.") }
+  {
+    warning("Indefinite covariance matrix estimate. Consider fast=FALSE.")
+    return(INF)
+  }
 
   if(is.null(data) && prior && !fast)
   { stop("Parametric boostrap cannot be performed without data.") }
@@ -36,7 +49,8 @@ speed.ctmm <- function(object,data=NULL,level=0.95,robust=FALSE,units=TRUE,prior
         VAR <- c(GRAD %*% object$COV %*% GRAD)
 
         # propagate errors chi -> chi^2
-        CI <- chisq.ci(MEAN^2,(2*MEAN)^2*VAR,alpha=1-level)
+        DOF <- (2*MEAN)^2*VAR
+        CI <- chisq.ci(MEAN^2,DOF,alpha=1-level)
         # transform back
         CI <- sqrt(CI)
       }
@@ -44,6 +58,7 @@ speed.ctmm <- function(object,data=NULL,level=0.95,robust=FALSE,units=TRUE,prior
       {
         CI <- c(1,1,1)*MEAN
         names(CI) <- c("low","ML","high")
+        DOF <- 0
       }
     }
   }
@@ -52,7 +67,8 @@ speed.ctmm <- function(object,data=NULL,level=0.95,robust=FALSE,units=TRUE,prior
     cores <- resolveCores(cores,fast=FALSE)
 
     # random speed calculation
-    spd.fn <- function(i=0) { speed.rand(object,data=data,prior=prior,fast=fast,cor.min=cor.min,dt.max=dt.max,error=error,precompute=precompute,...) }
+    DT <- diff(data$t)
+    spd.fn <- function(i=0) { speed.rand(object,data=data,prior=prior,fast=fast,cor.min=cor.min,dt.max=dt.max,error=error,precompute=precompute,DT=DT,...) }
 
     # setup precompute stuff
     if(prior==FALSE)
@@ -84,7 +100,11 @@ speed.ctmm <- function(object,data=NULL,level=0.95,robust=FALSE,units=TRUE,prior
       N <- N + cores
       if(!robust) # rolling sums to keep complexity O(N)
       {
-        if(any(ADD==Inf)) { stop("Sampling distribution does not always resolve velocity, c") }
+        if(any(ADD==Inf))
+        {
+          warning("Sampling distribution does not always resolve velocity. Try robust=TRUE.")
+          return(INF)
+        }
         S1 <- S1 + sum(ADD)
         S2 <- S2 + sum(ADD^2)
       }
@@ -92,7 +112,7 @@ speed.ctmm <- function(object,data=NULL,level=0.95,robust=FALSE,units=TRUE,prior
       { SPEEDS <- sort(SPEEDS,method="radix") }
 
       # standard_error(mean) / mean
-      if(length(SPEEDS)>1)
+      if(N>1)
       {
         # calculate averages and their standard errors
         if(!robust)
@@ -104,10 +124,10 @@ speed.ctmm <- function(object,data=NULL,level=0.95,robust=FALSE,units=TRUE,prior
         else
         {
           # median
-          AVE <- SPEEDS[round(N/2)]
+          AVE <- vint(SPEEDS,(N+1)/2)
           # standard error on the median
-          Q1 <- SPEEDS[round((N-sqrt(N))/2)]
-          Q2 <- SPEEDS[round((1+N+sqrt(N))/2)]
+          Q1 <- vint(SPEEDS,(N+1-sqrt(N))/2)
+          Q2 <- vint(SPEEDS,(N+1+sqrt(N))/2)
           ERROR <- max(AVE-Q1,Q2-AVE) / AVE
           # correct for Inf AVE
           if(is.nan(ERROR))
@@ -119,8 +139,8 @@ speed.ctmm <- function(object,data=NULL,level=0.95,robust=FALSE,units=TRUE,prior
 
         # update progress bar
         utils::setTxtProgressBar(pb,clamp(min(length(SPEEDS)/20,(error/ERROR)^2)))
-      }
-    }
+      } # end N>1 ERROR calc
+    } # end while ERROR
 
     # return raw data (undocumented)
     if(is.na(level) || is.null(level)) { return(SPEEDS) }
@@ -128,14 +148,13 @@ speed.ctmm <- function(object,data=NULL,level=0.95,robust=FALSE,units=TRUE,prior
     # calculate averages and variances
     if(!robust)
     {
-      AVE <- mean(SPEEDS)
-      # calculate variance under log transform, where data are more normal and variance estimator is more MVU
-      VAR <- stats::var(log(SPEEDS))
-      # transform back
-      VAR <- AVE^2 * VAR
-      # chi^2 speed^2
-      CI <- chisq.ci(AVE^2,(2*AVE)^2*VAR,alpha=1-level)
+      # more correct chi^1 statistics
+      M1 <- mean(SPEEDS)
+      M2 <- mean(SPEEDS^2)
+      DOF <- chi.dof(M1,M2)
+      CI <- chisq.ci(M2,DOF=DOF,alpha=1-level) # correct mean and variance
       CI <- sqrt(CI)
+      CI[2] <- M1
     }
     else
     {
@@ -150,17 +169,18 @@ speed.ctmm <- function(object,data=NULL,level=0.95,robust=FALSE,units=TRUE,prior
   UNITS <- unit(CI,"speed",SI=!units)
   CI <- rbind(CI)/UNITS$scale
   rownames(CI) <- paste0("speed (",UNITS$name,")")
-
+  #attr(CI,"DOF") <- DOF
   return(CI)
 }
 
+
 # calculate speed of one random trajectory
-speed.rand <- function(CTMM,data=NULL,prior=TRUE,fast=TRUE,cor.min=0.5,dt.max=NULL,error=0.01,precompute=FALSE,...)
+speed.rand <- function(CTMM,data=NULL,prior=TRUE,fast=TRUE,cor.min=0.5,dt.max=NULL,error=0.01,precompute=FALSE,DT=diff(data$t),...)
 {
   # capture model uncertainty
   if(prior) { CTMM <- emulate(CTMM,data=data,fast=fast,...) }
   # fail state for fractal process
-  if(length(CTMM$tau)==1 || CTMM$tau[2]<=.Machine$double.eps) { return(Inf) }
+  if(length(CTMM$tau)<2 || CTMM$tau[2]<=.Machine$double.eps) { return(Inf) }
   if(CTMM$tau[2]==Inf) { return(0) }
 
   dt <- CTMM$tau[2]*(error/10)^(1/3) # this gives O(error/10) instantaneous error
@@ -168,37 +188,33 @@ speed.rand <- function(CTMM,data=NULL,prior=TRUE,fast=TRUE,cor.min=0.5,dt.max=NU
   if(is.null(data))
   {
     # analytic result possible here
-    if(data$mean=="stationary") { return(speed.deterministic(CTMM)) }
+    if(CTMM$mean=="stationary") { return(speed.deterministic(CTMM)) }
     # else do a sufficient length simulation
-    t <- seq(0,CTMM$tau[2]/error^2,dt) # is this right for error dependence?
+    t <- seq(0,CTMM$tau[2]/error^2,dt) # this should give O(error) estimation error
     data <- simulate(CTMM,t=t,precompute=precompute)
   }
   else
   {
     # check for rare cases in sampling disribution where motion is almost but not fractal relative to sampling schedule
-    if(prior && !fast)
+    # first check if non-stationary mean is irrelevant
+    drift <- get(CTMM$mean)
+    if(drift@speed(CTMM)$EST/(sum(diag(CTMM$sigma))/prod(CTMM$tau))<error^2)
     {
-      # first check if non-stationary mean is irrelevant
-      drift <- get(CTMM$mean)
-      if(drift@speed(CTMM)$EST/(sum(diag(CTMM$sigma))/prod(CTMM$tau))<error^2)
+      # now check if there are many steps per sampled interval
+      FRAC <- CTMM$tau[2]/DT
+      if(all(FRAC<error))
       {
-        # now check if there are many steps per sampled interval
-        DT <- diff(data$t)
-        FRAC <- CTMM$tau[2]/DT
-        if(all(FRAC<error))
-        {
-          # finally check if the simulated distance would be much greater than sampled net displacement
-          FAKE <- CTMM
-          FAKE$mean <- "stationary"
-          SPD <- speed(FAKE)[2]
-          FRAC <- sqrt(diff(data$x)^2+diff(data$y)^2)/DT / SPD
-          if(all(FRAC<error)) { return(SPD) }
-        }
+        # finally check if the simulated distance would be much greater than sampled net displacement
+        FAKE <- CTMM
+        FAKE$mean <- "stationary"
+        SPD <- speed(FAKE)[2]
+        FRAC <- sqrt(diff(data$x)^2+diff(data$y)^2)/DT / SPD
+        if(all(FRAC<error)) { return(SPD) }
       }
     }
 
     if(is.null(dt.max)) { dt.max <- -log(cor.min)*CTMM$tau[2] }
-    data <- simulate(CTMM,data=data,dt=dt,precompute=precompute,dt.max=dt.max)
+    data <- simulate(CTMM,data=data,dt=dt,precompute=precompute,dt.max=dt.max,DT=DT)
     t <- data$t
   }
   if(is.null(dt.max)) { dt.max <- Inf }
@@ -217,17 +233,22 @@ speed.rand <- function(CTMM,data=NULL,prior=TRUE,fast=TRUE,cor.min=0.5,dt.max=NU
   return(v)
 }
 
+
 # only for stationary processes
-speed.deterministic <- function(CTMM)
+speed.deterministic <- function(CTMM,sigma=CTMM$sigma)
 {
-  if(CTMM$isotropic)
-  { v <- sqrt(sum(diag(CTMM$sigma))/prod(CTMM$tau) * pi/2/2) }
+  sigma <- attr(sigma,"par")
+  sigma['area'] <- sigma['area'] / prod(CTMM$tau)
+
+  if(CTMM$isotropic || !sigma['eccentricity'])
+  {
+    v <- sqrt(sigma['area'] * pi/2)
+  }
   else
   {
-    sigma <- attr(CTMM$sigma,"par")
     # eigen values of velocity variance
-    sigma <- sigma['area'] / prod(CTMM$tau) * exp(c(1,-1)/2*sigma['eccentricity'])
-    v <- sqrt(2/pi) * sqrt(sigma[1]) * pracma::ellipke(-diff(sigma)/sigma[1])$e
+    sigma <- sigma['area'] * exp(c(1,-1)/2*sigma['eccentricity'])
+    v <- sqrt(2/pi) * sqrt(sigma[1]) * pracma::ellipke(1-sigma[2]/sigma[1])$e
   }
   return(v)
 }

@@ -4,10 +4,11 @@ author: "Guillaume Péron, Christen H. Fleming, and Justin M. Calabrese"
 date: "`r Sys.Date()`"
 output: rmarkdown::html_vignette
 vignette: >
-  %\VignetteIndexEntry{Periodic movement models}
   %\VignetteKeyword{periodic}
+  %\VignetteIndexEntry{Periodic movement models}
   %\VignetteEngine{knitr::rmarkdown}
   %\VignetteEncoding{UTF-8}
+  \usepackage[utf8]{inputenc}
 ---
 
 In this vignette, we walk through periodogram for movement data and periodic movement model fitting and selection.
@@ -37,6 +38,13 @@ plot(LSP,max=TRUE,diagnostic=TRUE,cex=0.5)
 
 The `max=TRUE` option keeps only local maxima and often yields periodograms that are easier to interpret, especially when the resolution of the periodogram has been increased from the default.
 
+Periodicities in the data cause peaks at their respective periods on the horizontal axis.
+To visually assess significance, these peaks should be compared to the normal variation around the smooth trend of the periodogram.
+Important natural periods like the stellar day, synodic month and tropical year are labeled on the horizontal axes and given dark vertical lines in the plot.
+Harmonics of these natural periods have unlabeled tick marks on the horizontal axis and are are given lighter vertical lines in the plot.
+E.g., the two tick marks under a day represent the second and third harmonic of the day, or (24/2) 12 hours and (24/3) 8 hours, respectively
+Peaks at the harmonics of a period indicate that fine details of the periodicity are resolved by the data.
+
 The `diagnostic=TRUE` option draws the periodogram of the sampling schedule with red symbols. If the periodogram of the sampling schedule exhibits peaks, this indicates that the corresponding peaks in the movement data could be simply caused by irregularities in the sampling schedule and not by periodicity in the movement.
 Here the periodogram exhibits a clear peak for the period of one day, but this is also present in the (red) diagnostic.
 
@@ -51,7 +59,7 @@ For periodic-mean processes, you need to specify one or more period values that 
 In our example, we are going to specify a period of a day, which is what the periodogram was saying. Other individuals in this population were also exhibiting a weekly periodicity, and in similar species, lunar cycles are well-known to affect ranging behaviors.
 
 ```{r}
-PROTO <- ctmm(mean="periodic",period=c(1 %#% "day",1 %#% "month"),circle=TRUE)
+PROTO <- ctmm(mean="periodic",period=c(24 %#% "hours",1 %#% "month"),circle=TRUE)
 ```
 
 The `mean="periodic"` option tells `ctmm` that you want a periodic-mean process. The default is `mean="stationary"`.
@@ -83,7 +91,7 @@ The non-default `control` list here specifies our prototype optimization code th
 With `verbose=TRUE`, we obtain a list fitted `ctmm` objects, one for each relevant combination of effects, where the first element of that list is the preferred model.
 
 ```{r}
-summary(FITS,units=FALSE)
+summary(FITS)
 ```
 
 From the first model, We see that the velocity autocorrelation (OUF), anisotropy, and `2` harmonics of daily periodicity were all selected.
@@ -95,16 +103,17 @@ For a given autocovariance model, the different non-stationary models are sorted
 For sorting between the autocovariance models (each with best non-stationary model), the information criteria is used. MSPE is not valid for general purpose selection.
 
 ```{r}
-# sorted by MSPE
+# these are sorted by MSPE
 summary(FITS[1:7])
-# sorted by IC
+# these are sorted by IC
 summary(FITS[c(5,8:10)])
 ```
 
 If only the information criteria was used, we would have selected `harmonic 3 0` over `harmonic 2 0`.
 
 ```{r}
-summary(FITS,MSPE=FALSE)
+# sorting by IC only
+summary(FITS,MSPE=NA)
 ```
 
 Next we do some sanity checking on our results. The sampling interval for Gamba is fairly steady at

@@ -3,6 +3,7 @@
 # error (modulo UERE) is now an argument of the output functions in addition to lag
 svf.func <- function(CTMM,moment=FALSE)
 {
+  CTMM <- get.taus(CTMM) # pre-calculate stuff
   # pull out relevant model parameters
   tau <- CTMM$tau
 
@@ -26,35 +27,47 @@ svf.func <- function(CTMM,moment=FALSE)
   K <- length(tau)
 
   # FIRST CONSTRUCT STANDARD ACF AND ITS PARAMTER GRADIENTS
+  NAMES <- CTMM$tau.names
   if(K==0 && range) # Bivariate Gaussian
   {
-    NAMES <- NULL
     acf <- function(t){ if(t==0) {1} else {0} }
     acf.grad <- function(t){ NULL }
   }
   else if(K==0) # Brownian motion
   {
-    NAMES <- NULL
     acf <- function(t){ 1-t }
     acf.grad <- function(t){ NULL }
   }
   else if(K==1 && range) # OU motion
   {
-    NAMES <- "tau position"
     acf <- function(t){ exp(-t/tau) }
     acf.grad <- function(t){ t/tau^2*acf(t) }
   }
   else if(K==1) # IOU motion
   {
-    NAMES <- "tau velocity"
     acf <- function(t) { 1-(t-tau*(1-exp(-t/tau))) }
     acf.grad <- function(t){ 1-(1+t/tau)*exp(-t/tau) }
   }
   else if(K==2) # OUF motion
   {
-    NAMES <- c("tau position","tau velocity")
-    acf <- function(t){ diff(tau*exp(-t/tau))/diff(tau) }
-    acf.grad <- function(t) { c(1,-1)*((1+t/tau)*exp(-t/tau)-acf(t))/diff(tau) }
+    if(tau[1]>tau[2]) # overdamped
+    {
+      acf <- function(t){ diff(tau*exp(-t/tau))/diff(tau) }
+      acf.grad <- function(t) { c(1,-1)*((1+t/tau)*exp(-t/tau)-acf(t))/diff(tau) }
+    }
+    else if(!CTMM$omega) # critically damped
+    {
+      tau <- tau[1]
+      acf <- function(t){ (1+t/tau)*exp(-t/tau) }
+      acf.grad <- function(t) { (t^2/tau^3)*exp(-t/tau) }
+    }
+    else if(CTMM$omega) # underdamped
+    {
+      f <- CTMM$f.nu[1]
+      nu <- CTMM$f.nu[2]
+      acf <- function(t) { (cos(nu*t) + (f/nu)*sin(nu*t))*exp(-f*t) }
+      acf.grad <- function(t) { c( exp(-f*t) * c( -t*cos(nu*t) + (1-f*t)/nu*sin(nu*t) , -(t+f/nu^2)*sin(nu*t) + (f/nu)*t*cos(nu*t) ) %*% CTMM$J.nu.tau ) }
+    }
   }
 
   # finish off svf function including circulation if present
@@ -182,7 +195,7 @@ plot.svf <- function(lag,CTMM,error=NULL,alpha=0.05,col="red",type="l",...)
 ###########################################################
 # PLOT VARIOGRAM
 ###########################################################
-plot.variogram <- function(x, CTMM=NULL, level=0.95, fraction=0.5, col="black", col.CTMM="red", xlim=NULL, ylim=NULL, ...)
+plot.variogram <- function(x, CTMM=NULL, level=0.95, units=TRUE, fraction=0.5, col="black", col.CTMM="red", xlim=NULL, ylim=NULL, ...)
 {
   alpha <- 1-level
 
@@ -220,17 +233,20 @@ plot.variogram <- function(x, CTMM=NULL, level=0.95, fraction=0.5, col="black", 
     xlim <- c(0,max.lag)
   }
 
+  # clamp ACF estimates before calculating extent
+  if(ACF) { x <- lapply(x,function(y) { y$SVF <- clamp(y$SVF,-1,1) ; y }) }
+
   # calculate ylimits from all variograms !!!
   if(is.null(ylim)) { ylim <- extent(x,level=max(level))$y }
 
   if(!ACF) # SVF plot
   {
     # choose SVF units
-    SVF.scale <- unit(ylim,"area")
+    SVF.scale <- unit(ylim,"area",SI=!units)
     SVF.name <- SVF.scale$name
     SVF.scale <- SVF.scale$scale
 
-    SVF.name <- c(SVF.name,unit(ylim,"area",concise=TRUE)$name)
+    SVF.name <- c(SVF.name,unit(ylim,"area",concise=TRUE,SI=!units)$name)
     SVF.name[3] <- SVF.name[2]
 
     ylab <- "Semi-variance"
@@ -248,11 +264,11 @@ plot.variogram <- function(x, CTMM=NULL, level=0.95, fraction=0.5, col="black", 
   }
 
   # choose lag units
-  lag.scale <- unit(xlim,"time",2)
+  lag.scale <- unit(xlim,"time",2,SI=!units)
   lag.name <- lag.scale$name
   lag.scale <- lag.scale$scale
 
-  lag.name <- c(lag.name,unit(xlim,"time",thresh=2,concise=TRUE)$name)
+  lag.name <- c(lag.name,unit(xlim,"time",thresh=2,concise=TRUE,SI=!units)$name)
   lag.name[3] <- lag.name[2]
 
   xlab <- "Time-lag"
@@ -335,7 +351,7 @@ plot.variogram <- function(x, CTMM=NULL, level=0.95, fraction=0.5, col="black", 
         DOF <- STUFF$DOF
         # Fisher transformation
         FISH <- atanh(SVF)
-        SD <- 1/sqrt(DOF-3)
+        SD <- 1/sqrt(max(DOF-3,0))
         SVF.lower <- tanh(stats::qnorm(alpha[j]/2,mean=FISH,sd=SD,lower.tail=TRUE))
         SVF.upper <- tanh(stats::qnorm(alpha[j]/2,mean=FISH,sd=SD,lower.tail=FALSE))
 

@@ -1,4 +1,51 @@
-ctmm 0.5.2 (2018-09-04)
+ctmm 0.5.3 (2019-01-29)
+================
+
+  * oscillatory (and critically damped) models now supported, starting with omega option of ctmm()
+
+  * summary() now works on lists of UERE objects for error model selection
+
+  * MSPE slots & arguments restructured and fully utilized in both summary and ctmm.select
+  
+  * new method speeds() for estimating instantaneous speeds
+  
+  * speed() more efficient on very coarse data, slightly improved CIs
+  
+  * new complete argument in simulate() and predict() to calculate timestamps and geographic coordinates
+
+  * now avoiding fastPOSIXct timezone and epoch issues in as.telemetry
+  
+  * outlie() now works on lists of telemetry objects
+  
+  * bugfixes in overlap() CIs
+
+  * overlap() now robust to bad model fits
+  
+  * new as.telemetry() argument mark.rm to delete marked outliers
+  
+  * bugfix in predict() & occurrence() where eccentricity was dropped from covariances
+  
+  * projection information in Move & MoveStack objects now preserved if possible
+  
+  * identities preserved with newer MoveStack objects
+  
+  * ctmm.boot() better handles parameter estimation near boundaries
+  
+  * e-obs data with missing error/speed/altitude now importing correctly in as.telemetry
+  
+  * correlogram plots now cap estimates to appropriate range
+  
+  * beta optimizer now more aggressive in searching along boundaries
+  
+  * bugfix in ctmm.fit with duplicate timestamps and IID processes without error
+  
+  * bugfix in ctmm.select with pREML & error
+  
+  * summary() on telemetry lists no longer fails on length-1 timeseries
+  
+  * years updated to tropical years and calendar days updated to stellar days
+  
+ctmm 0.5.2 (2018-09-10)
 ================
 
   * location classes (multiple UEREs) now supported by uere.fit() and uere()<-

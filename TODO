@@ -1,12 +1,15 @@
 PRIORITY
-* multi-class UERE in ctmm(), ctmm.guess(), ctmm.fit(), variogram.fit(), etc., etc.
-* uere() select for identical UEREs (location class , axes) ?
-* should standardization be moved to ctmm.select?
-* reference Guillaume's paper at the beginning of the periodogram vignette
-* use perturb.ctmm in ctmm.guess / variogram.fit ?
-* reduce uere() warning in as.telemetry to once... remove other crap... too much
+* combine two telemetry objects for same animal but different device (dyadic UEREs)
+* compass speed plot -- or cycle argument for speeds()
+* ctmm.fit -> id.parameters : force.error argument for when error is estimated to be 0
 * error vignette - check back on variogram
-* quiet uere() example
+* Telonics HDOP conversion factor (2.5)
+* reference Guillaume's paper at the beginning of the periodogram vignette
+* occurrence() on the same grid
+
+OVERLAP
+* overlap needs to return DOFs in an overlap object - and then define a summary function for the overlap object
+* overlaps' correlated errors
 
 ERROR PAPER
 * how does error change variogram DOF calculation?
@@ -17,8 +20,10 @@ ERROR PAPER
 * email ARGOS about McClintock formula
 * kGcluster with tpeqd projection suggestion
 * predict can return VAR.xy for isotropic with UERE<4
+* propagation of error uncertainty
 
 PROJECTION
+* check projection same for plot.telemetry
 * projection() <- on all plottable objects + plot option
 * project()<- ignores simulated/predicted velocities & covariances without headings & magnitudes
 * error as.telemetry if user attempts lon-lat projection
@@ -32,6 +37,11 @@ PARALLELIZATION
 * parallel derivatives with upper/lower/etc.
 
 MISC WORK
+* should standardization be moved to ctmm.select?
+* writeRaster, ... with lists of ctmm objects (when appropriate)
+* when ctmm.fit estimates error==0 exactly, the uncertainty isn't propagated because error==FALSE
+* simulate with emulate=TRUE
+* significant digits function (MLE+CI) for summary functions
 * akde/occurrence grid=UD/raster
 * p-value test for trend terms using variance of mu_alt-mu_null
 * significant digits argument to summary()
@@ -66,11 +76,9 @@ MISC WORK
 * export ellipse drawing function
 * effective DOF for diffusion rate?
 
-PERIODIC 0.4.X
+PERIODIC
+* calculate explicit time link for periodicity? or estimate frequency?
 * DOF[mean] should just be the stationary mean
-* AIC/MSPE hybrid model selection
-* mean derivative not included in simulate/predict/etc?
-* T-test on high frequency amplitudes
 * variogram on mean detrended data with CTMM argument
 * simulate.telemetry (not pure ctmm)
 * smoother (non-uniform u(t) and velocity vector)

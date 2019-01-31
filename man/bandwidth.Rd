@@ -1,5 +1,6 @@
 \name{bandwidth}
 \alias{bandwidth}
+\encoding{UTF-8}
 %- Also NEED an '\alias' for EACH other topic documented here.
 \title{Calculate the optimal bandwidth matrix of movement data}
 \description{This function calculates the optimal bandwidth matrix (kernel covariance) for a two-dimensional animal tracking dataset, given an autocorrelated movement model (Fleming et al, 2015). This optimal bandwidth can fully take into account all autocorrelation in the data, assuming it is captured by the movement model.}
@@ -46,7 +47,7 @@ D. Marcotte. Fast variogram computation with FFT. \emph{Computers and Geoscience
 
 C. H. Fleming, W. F. Fagan, T. Mueller, K. A. Olson, P. Leimgruber, J. M. Calabrese.
 Rigorous home-range estimation with movement data: A new autocorrelated kernel-density estimator.
-\href{http://www.esajournals.org/doi/abs/10.1890/14-2010.1}{Ecology, 96:5, 1182-1188 (2015)}.
+\href{https://esajournals.onlinelibrary.wiley.com/doi/abs/10.1890/14-2010.1}{Ecology, 96:5, 1182-1188 (2015)}.
 
 C. H. Fleming, D. Sheldon, W. F. Fagan, P. Leimgruber, T. Mueller, D. Nandintsetseg, M. J. Noonan, K. A. Olson, E. Setyawan, A. Sianipar, J. M. Calabrese.
 Correcting for missing and irregular data in home-range estimation.

@@ -1,7 +1,8 @@
 ###################################################
 # Calculate good CIs for other functions
-confint.ctmm <- function(model,alpha=0.05)
+confint.ctmm <- function(model,alpha=0.05,UNICODE=FALSE)
 {
+  model <- get.taus(model,zeroes=TRUE)
   tau <- model$tau
   tau <- tau[tau<Inf]
   K <- length(tau)
@@ -14,9 +15,28 @@ confint.ctmm <- function(model,alpha=0.05)
   # timescale uncertainty: can hit 0 and Inf
   if(K>0)
   {
-    NAME <- paste("tau",names(tau))
-    for(k in 1:K) { par <- rbind(par,ci.tau(tau[k],COV[NAME[k],NAME[k]],alpha=alpha)) }
+    NAME <- model$tau.names # canonical parameter names
+    if(K==2 && model$omega) # oscillatory model
+    {
+      TAU <- model$TAU # human-readible parameters
+      COV.TAU <- model$J.TAU.tau %*% COV[NAME,NAME] %*% t(model$J.TAU.tau)
+      for(k in 1:K) { par <- rbind(par,ci.tau(TAU[k],COV.TAU[k,k],alpha=alpha)) }
+
+      if(UNICODE) { NAME <- c("\u03C4[decay]","\u03C4[period]") }
+      else { NAME <- c("tau decay","tau period") }
+    }
+    else if(K>1 && tau[1]==tau[2]) # identical timescales
+    {
+      par <- rbind(par,ci.tau(tau[1],COV[NAME,NAME],alpha=alpha))
+      if(UNICODE) { NAME <- "\u03C4" }
+    }
+    else # OU, OUF, IOU
+    {
+      for(k in 1:K) { par <- rbind(par,ci.tau(tau[k],COV[NAME[k],NAME[k]],alpha=alpha)) }
+      if(UNICODE) { NAME <- paste0("\u03C4[",names(tau),"]") }
+    }
   }
+  # else IID, BM
 
   # circulation period
   circle <- model$circle
@@ -64,7 +84,7 @@ ci.tau <- function(tau,COV,alpha=0.05,min=0,max=Inf)
   CI <- c(CI, (1/tau + c(1,-1)*z*sqrt(COV/tau^4))^-1)
 
   # take most conservative estimates
-  CI <- range(CI,na.rm=TRUE)
+  CI <- sort(range(CI,na.rm=TRUE))
 
   # enforce boundary constraints
   CI <- c(max(CI[1],min),min(CI[2],max))
@@ -74,7 +94,7 @@ ci.tau <- function(tau,COV,alpha=0.05,min=0,max=Inf)
 }
 
 ###
-summary.ctmm <- function(object,level=0.95,level.UD=0.95,units=TRUE,IC="AICc",MSPE=TRUE,...)
+summary.ctmm <- function(object,level=0.95,level.UD=0.95,units=TRUE,IC="AICc",MSPE="position",...)
 {
   CLASS <- class(object)
   if(CLASS=="ctmm")
@@ -90,13 +110,13 @@ summary.ctmm.single <- function(object, level=0.95, level.UD=0.95, units=TRUE, .
   alpha <- 1-level
   alpha.UD <- 1-level.UD
 
+  object <- get.taus(object) # populate with parameter stuff
   drift <- get(object$mean)
 
   circle <- object$circle
   tau <- object$tau
   range <- object$range
   tau <- tau[tau<Inf]
-  K <- length(tau)
 
   AM.sigma <- mean(diag(object$sigma))
   GM.sigma <- object$sigma@par["area"]
@@ -119,17 +139,17 @@ summary.ctmm.single <- function(object, level=0.95, level.UD=0.95, units=TRUE, .
     object$DOF.mu <- diag(0,nrow=length(object$mu))
   }
 
+  par <- confint.ctmm(object,alpha=alpha,UNICODE=TRUE)
   # where to store unit information
-  name <- character(K+1)
-  scale <- numeric(K+1)
-
-  par <- confint.ctmm(object,alpha=alpha)
+  K <- nrow(par)
+  name <- character(K)
+  scale <- numeric(K)
 
   # standard area to home-range area
   par[1,] <- -2*log(alpha.UD)*pi*par[1,]
 
   # pretty area units   # do we convert units
-  unit.list <- unit(par[1,2],"area",SI=!units)
+  unit.list <- unit.par(par[1,],"area",SI=!units)
   name[1] <- unit.list$name
   scale[1] <- unit.list$scale
 
@@ -140,11 +160,7 @@ summary.ctmm.single <- function(object, level=0.95, level.UD=0.95, units=TRUE, .
     for(i in 2:P)
     {
       # set scale by upper CI if point estimate is zero
-      PAR <- par[i,2:3]
-      PAR <- PAR[PAR>0]
-      if(length(PAR)) { PAR <- min(PAR) } else { PAR <- 0 }
-
-      unit.list <- unit(PAR,"time",SI=!units)
+      unit.list <- unit.par(par[i,],"time",SI=!units)
       name[i] <- unit.list$name
       scale[i] <- unit.list$scale
     }
@@ -154,11 +170,11 @@ summary.ctmm.single <- function(object, level=0.95, level.UD=0.95, units=TRUE, .
   if(continuity(object)>1)
   {
     COV <- area2var(object,MEAN=TRUE)
-    COV <- rm.name(COV,"error")
 
     # RMS velocity
-    Omega2 <- 1/prod(tau)
-    grad <- -Omega2/tau
+    Omega2 <- object$Omega2
+    grad <- object$J.Omega2
+    NAMES <- object$tau.names
 
     # contribution from circulation
     omega2 <- 0
@@ -166,13 +182,15 @@ summary.ctmm.single <- function(object, level=0.95, level.UD=0.95, units=TRUE, .
     {
       omega2 <- circle^2
       grad <- c(grad,2*circle)
+      NAMES <- c(NAMES,'circle')
     }
 
     # contribution from sigma
     # GM.sigma <- cosh(ecc)*AM.sigma
     ms <- (2*AM.sigma)*(Omega2+omega2)
     grad <- 2*c(Omega2+omega2, AM.sigma*grad)
-    var.ms <- c((grad) %*% COV %*% (grad))
+    NAMES <- c("variance",NAMES)
+    var.ms <- c((grad) %*% COV[NAMES,NAMES] %*% (grad))
 
     # include mean
     MSPEED <- drift@speed(object)
@@ -184,13 +202,10 @@ summary.ctmm.single <- function(object, level=0.95, level.UD=0.95, units=TRUE, .
 
     # root mean square velocity
     # pretty units
-    rms <- sqrt(ms)
-    unit.list <- unit(rms,"speed",SI=!units)
+    rms <- sqrt(chisq.ci(ms,COV=var.ms,alpha=alpha))
+    unit.list <- unit.par(rms,"speed",SI=!units)
     name <- c(name,unit.list$name)
     scale <- c(scale,unit.list$scale)
-
-    rms <- sqrt(chisq.ci(ms,COV=var.ms,alpha=alpha))
-    # rms <- sqrt(norm.ci(ms,var.ms,alpha=alpha))
 
     par <- rbind(par,rms)
     rownames(par)[nrow(par)] <- "speed"
@@ -210,7 +225,7 @@ summary.ctmm.single <- function(object, level=0.95, level.UD=0.95, units=TRUE, .
     error <- chisq.ci(error,COV=VAR,alpha=alpha)
     # back to meters/distance
     error <- sqrt(error)
-    unit.list <- unit(error,"length",SI=!units)
+    unit.list <- unit.par(error,"length",SI=!units)
     name <- c(name,unit.list$name)
     scale <- c(scale,unit.list$scale)
 
@@ -231,15 +246,12 @@ summary.ctmm.single <- function(object, level=0.95, level.UD=0.95, units=TRUE, .
 
   colnames(par) <- c("low","ML","high")
 
-  SUM <- list()
+  SUM <- list(name=name.ctmm(object))
 
   # affix DOF info
   # only valid for processes with a stationary mean
-  if(object$range)
-  {
-    SUM$DOF <- c( DOF.mean(object) , DOF.area(object) , DOF.speed/2 )
-    names(SUM$DOF) <- c("mean","area","speed")
-  }
+  SUM$DOF <- c( DOF.mean(object) , DOF.area(object) , DOF.speed/2 )
+  names(SUM$DOF) <- c("mean","area","speed")
 
   SUM$CI <- par
 
@@ -248,11 +260,18 @@ summary.ctmm.single <- function(object, level=0.95, level.UD=0.95, units=TRUE, .
 #methods::setMethod("summary",signature(object="ctmm"), function(object,...) summary.ctmm(object,...))
 
 #DOF of area
-DOF.area <- function(CTMM) { CTMM$sigma@par["area"]^2/abs(CTMM$COV["area","area"]) }
+DOF.area <- function(CTMM)
+{
+  if(CTMM$range) { DOF <- CTMM$sigma@par["area"]^2/abs(CTMM$COV["area","area"]) }
+  else { DOF <- 0 }
+  return(DOF)
+}
 
 #########
 DOF.mean <- function(CTMM)
 {
+  if(!CTMM$range) { return(0) }
+
   DOF <- CTMM$DOF.mu
   DIM <- dim(DOF)
 

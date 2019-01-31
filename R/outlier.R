@@ -1,6 +1,11 @@
+# how far you can go before R's bessel function breaks down
+BESSEL_LIMIT <- 2^16
+
 # estimate and assign speeds to times
 outlie <- function(data,UERE=10,standardize=FALSE,plot=TRUE,...)
 {
+  if(class(data)=="list") { return( lapply(data, function(d){outlie(d,UERE=UERE,standardize=standardize,plot=plot)} ) ) }
+
   error <- get.error(data,ctmm(error=UERE,axes=c("x","y")),circle=TRUE)
 
   Vs <- assign_speeds(data,UERE=error)
@@ -51,7 +56,7 @@ outlie <- function(data,UERE=10,standardize=FALSE,plot=TRUE,...)
 # speeds assigned by blame
 # dt[1] is recording interval
 # dt[2] is minimum time between fixes, which can be smaller than dt[1]
-assign_speeds <- function(data,dt=NULL,UERE=0,method=c("max","min"))
+assign_speeds <- function(data,dt=NULL,UERE=0,method="max")
 {
   method <- match.arg(method,c("max","min"))
 
@@ -201,8 +206,6 @@ BesselSolver <- function(y)
 {
   # solution storage
   x <- numeric(length(y))
-  # how far you can go before R's bessel function breaks down
-  BESSEL_LIMIT <- 2^16
 
   # critical point, below which all point estimates are zero
   # SUB1 <- (y<=2)

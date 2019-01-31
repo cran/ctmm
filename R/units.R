@@ -52,6 +52,7 @@ unit <- function(data,dimension,thresh=1,concise=FALSE,SI=FALSE)
     }
   }
 
+  data <- data[!is.na(data)]
   max.data <- max(abs(data))
 
   if(concise) { name.list <- abrv.list }
@@ -69,6 +70,17 @@ unit <- function(data,dimension,thresh=1,concise=FALSE,SI=FALSE)
   scale <- scale.list[I]
 
   return(list(scale=scale,name=name))
+}
+
+### determine parsimonious units for parameter CIs
+# preference point estimate, but fall back on high-CI if point estimate is zero
+unit.par <- function(par,...)
+{
+  PAR <- par[2:3]
+  PAR <- PAR[PAR>0]
+  if(length(PAR)) { PAR <- min(PAR) } else { PAR <- 0 }
+
+  return( unit(PAR,...) )
 }
 
 
@@ -97,6 +109,7 @@ unit.telemetry <- function(data,length=1,time=1)
 unit.ctmm <- function(CTMM,length=1,time=1)
 {
   if(length(CTMM$tau)){ CTMM$tau <- CTMM$tau/time }
+  CTMM$omega <- CTMM$omega * time
   CTMM$circle <- CTMM$circle * time
 
   # all means scale with length the same way... but not time
@@ -108,17 +121,18 @@ unit.ctmm <- function(CTMM,length=1,time=1)
   }
 
   if(class(CTMM$error)=='numeric') { CTMM$error <- CTMM$error/length } # don't divide logicals
+
   if("sigma" %in% names(CTMM))
   {
     CTMM$sigma <- CTMM$sigma/length^2
     attr(CTMM$sigma,'par')["area"] <- attr(CTMM$sigma,'par')["area"]/length^2
-  }
 
-  # variance -> diffusion adjustment
-  if(!CTMM$range)
-  {
-    CTMM$sigma <- CTMM$sigma*time
-    CTMM$sigma@par["area"] <- CTMM$sigma@par["area"]*time
+    # variance -> diffusion adjustment
+    if(!CTMM$range)
+    {
+      CTMM$sigma <- CTMM$sigma*time
+      CTMM$sigma@par["area"] <- CTMM$sigma@par["area"]*time
+    }
   }
 
   if("COV.mu" %in% names(CTMM)) { CTMM$COV.mu <- CTMM$COV.mu/length^2 }
@@ -143,12 +157,17 @@ unit.ctmm <- function(CTMM,length=1,time=1)
     tau <- tau[tau<Inf]
     if(length(tau))
     {
-      tau <- paste("tau",names(tau))
-      tau <- tau[tau %in% NAMES]
+      tau <- NAMES[grepl("tau",NAMES)]
       if(length(tau))
       {
         CTMM$COV[tau,] <- CTMM$COV[tau,]/time
         CTMM$COV[,tau] <- CTMM$COV[,tau]/time
+      }
+
+      if("omega" %in% NAMES)
+      {
+        CTMM$COV["omega",] <- CTMM$COV["omega",] * time
+        CTMM$COV[,"omega"] <- CTMM$COV[,"omega"] * time
       }
     }
 
@@ -225,10 +244,10 @@ unit.variogram <- function(SVF,time=1,area=1)
   add(c("s","s.","sec","sec.","second","seconds"),1)
   add(c("min","min.","minute","minutes"),60)
   add(c("h","h.","hr","hr.","hour","hours"),60^2)
-  add(c("day","days"),24*60^2)
-  add(c("wk","wk.","week","weeks"),7*24*60^2)
-  add(c("mon","mon.","month","months"),((29*24+12)*60+44)*60+2.8)
-  add(c("yr","yr.","year","years"),365.24*7*24*60^2)
+  add(c("day","days"),(23*60+56)*60+4.0910) # stellar day
+  add(c("wk","wk.","week","weeks"),7*24*60^2) # calendar week
+  add(c("mon","mon.","month","months"),((29*24+12)*60+44)*60+2.8016) # synodic month
+  add(c("yr","yr.","year","years"),365.24219 * 24*60^2) # tropical year
 
   # Distance conversions
   add(c("\u03BCm","\u03BCm.","micron","microns","micrometer","micrometers"),1E-6)

@@ -64,13 +64,13 @@ ctmm.loglike <- function(data,CTMM=ctmm(),REML=FALSE,profile=TRUE,zero=0,verbose
 
   # check for bad time intervals
   ZERO <- which(dt==0)
-  if(length(ZERO))
+  if(length(ZERO) && K && CTMM$tau[1])
   {
-    if(CTMM$error==FALSE) { return(-Inf) }
-    # check for HDOP==1 just in case
+    if(CTMM$error==FALSE) { warning("Duplicate timestamps require an error model.") ; return(-Inf) }
+    # check for HDOP==0 just in case
     ZERO <- error[ZERO,,,drop=FALSE]
     ZERO <- apply(ZERO,1,det)
-    if(any(ZERO<=0)) { return(-Inf) } else { ZERO <- 0 }
+    if(any(ZERO<=0)) { warning("Duplicate timestamps require an error model.") ; return(-Inf) }
   }
 
   ### what kind of profiling is possible
@@ -431,6 +431,18 @@ ctmm.fit <- function(data,CTMM=ctmm(),method="ML",COV=TRUE,control=list(),trace=
   df <- MINS$df
   dz <- MINS$dz
 
+  # unstandardize (includes likelihood adjustment)
+  unscale.ctmm <- function(CTMM)
+  {
+    CTMM <- unit.ctmm(CTMM,length=1/SCALE)
+    # log-likelihood adjustment
+    CTMM$loglike <- CTMM$loglike - length(axes)*n*log(SCALE)
+    # translate back to origin from center
+    CTMM$mu <- drift@shift(CTMM$mu,SHIFT)
+
+    return(CTMM)
+  }
+
   method <- match.arg(method,c("ML","pREML","pHREML","HREML","REML"))
 
   default <- list(method="Nelder-Mead",precision=1/2,maxit=.Machine$integer.max)
@@ -514,7 +526,7 @@ ctmm.fit <- function(data,CTMM=ctmm(),method="ML",COV=TRUE,control=list(),trace=
   profile <- TRUE
   if(length(NAMES)==0) # EXACT
   {
-    if(method %in% c("pHREML","HREML")) { REML <- TRUE } # IID limit pHREML -> REML
+    if(method %in% c("pHREML","HREML")) { REML <- TRUE } # IID limit pHREML/HREML -> REML
 
     # Bi-variate Gaussian with zero error
     CTMM <- ctmm.loglike(data,CTMM=CTMM,REML=REML,verbose=TRUE)
@@ -528,8 +540,10 @@ ctmm.fit <- function(data,CTMM=ctmm(),method="ML",COV=TRUE,control=list(),trace=
       CTMM$COV.mu <- VAR.MULT * CTMM$COV.mu
     }
 
+    if(method=="pREML") { REML <- TRUE } # uses REML COV formula
+
     # fast calculation of sigma covariance
-    COVSTUFF <- COV.covm(CTMM$sigma,n=n,k=k.mean)
+    COVSTUFF <- COV.covm(CTMM$sigma,n=n,k=k.mean,REML=REML)
     CTMM$COV <- COVSTUFF$COV
   }
   else # all further cases require optimization
@@ -575,7 +589,7 @@ ctmm.fit <- function(data,CTMM=ctmm(),method="ML",COV=TRUE,control=list(),trace=
     if(method %in% c("pREML","pHREML","HREML"))
     {
       assign("EMPTY",FALSE,pos=MLE.env)
-      assign("MLE",CTMM,pos=MLE.env)
+      assign("MLE",unscale.ctmm(CTMM),pos=MLE.env) # convert units back and store
     }
     else
     { empty.env(MLE.env) }
@@ -659,7 +673,7 @@ ctmm.fit <- function(data,CTMM=ctmm(),method="ML",COV=TRUE,control=list(),trace=
     { CTMM$COV <- NULL }
 
     if(COV) { dimnames(CTMM$COV) <- list(NAMES,NAMES) }
-  }
+  } # end optimized estimates
 
   # model likelihood
   if(method!='ML') { CTMM$loglike <- ctmm.loglike(data,CTMM=CTMM,REML=FALSE,profile=FALSE) }
@@ -668,11 +682,8 @@ ctmm.fit <- function(data,CTMM=ctmm(),method="ML",COV=TRUE,control=list(),trace=
   # covariance parameters only
   setup.parameters(CTMM,profile=FALSE,linear=FALSE)
 
-  CTMM <- unit.ctmm(CTMM,length=1/SCALE) # unstandardize (includes likelihood adjustment)
-  # log-likelihood adjustment
-  CTMM$loglike <- CTMM$loglike - length(CTMM$axes)*length(data$t)*log(SCALE)
-  # translate back to origin from center
-  CTMM$mu <- drift@shift(CTMM$mu,SHIFT)
+  # unstandardize (includes likelihood adjustment)
+  CTMM <- unscale.ctmm(CTMM)
 
   nu <- length(NAMES)
   # all parameters
@@ -694,10 +705,12 @@ ctmm.fit <- function(data,CTMM=ctmm(),method="ML",COV=TRUE,control=list(),trace=
   # Mean square prediction error
   mspe <- function(K=1)
   {
+    if(!CTMM$range && K==1) { return(Inf) }
+
     # velocity MSPE
     if(K==2)
     {
-      if(length(CTMM$tau)==1) { return(Inf) }
+      if(length(CTMM$tau)<2 || any(CTMM$tau<=0)) { return(Inf) }
       UU <- VV
     }
 
@@ -714,18 +727,22 @@ ctmm.fit <- function(data,CTMM=ctmm(),method="ML",COV=TRUE,control=list(),trace=
     }
 
     VAR <- sum(diag(CTMM$sigma))
-    if(K==2) { VAR <- VAR * (1/prod(CTMM$tau) + CTMM$circle^2) }
+    if(K==2)
+    {
+      STUFF <- get.taus(CTMM)
+      VAR <- VAR * (STUFF$Omega2 + CTMM$circle^2)
+    }
 
     MSPE <- MSPE + VAR
+
     return(MSPE)
   }
   STUFF <- drift@energy(CTMM)
   UU <- STUFF$UU
   VV <- STUFF$VV
-  # Mean square prediction error in locations
-  CTMM$MSPE <- mspe(K=1)
-  # mean suare predicton error in velocities
-  CTMM$MSPEV <- mspe(K=2)
+  # Mean square prediction error in locations & velocities
+  CTMM$MSPE <- c( mspe(K=1) , mspe(K=2) )
+  names(CTMM$MSPE) <- c("position","velocity")
 
   return(CTMM)
 }
@@ -759,7 +776,7 @@ area2var <- function(CTMM,MEAN=TRUE)
     # backup for infinite covariances
     for(i in 1:nrow(COV))
     {
-      if(any(is.nan(COV[i,]) || any(is.nan(COV[,i]))))
+      if(any( is.nan(COV[i,]) | is.nan(COV[,i]) ))
       {
         COV[i,] <- COV[,i] <- 0
         COV[i,i] <- Inf

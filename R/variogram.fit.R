@@ -32,11 +32,14 @@ variogram.guess <- function(variogram,CTMM=ctmm())
   f <- -log(D/(sigma*Omega))/tauD
 
   tau <- c(sigma/D,D/v2)
+  names(tau) <- c("position","velocity")
+
+  if(length(CTMM$tau)==0)
+  { CTMM$tau <- tau }
+  else if(length(CTMM$tau)==1)
+  { CTMM$tau[2] <- min(CTMM$tau[1],tau[2]) }
 
   if(!CTMM$range) { sigma <- D ; tau[1] <- Inf }
-
-  if(length(CTMM$tau)==0) { CTMM$tau <- tau }
-  #else if(length(CTMM$tau)==1) { CTMM$tau[2] <- tau[2] }
 
   # preserve orientation and eccentricity if available/necessary
   if(is.null(CTMM$sigma))
@@ -66,9 +69,10 @@ variogram.fit <- function(variogram,CTMM=ctmm(),name="GUESS",fraction=0.5,intera
   sigma <- NULL
   tau1 <- NULL
   tau2 <- NULL
+  omega.period <- NULL
   circle.period <- NULL
   error <- NULL
-  rm(z,sigma,tau1,tau2,circle.period,error)
+  rm(z,sigma,tau1,tau2,omega.period,circle.period,error)
 
   if(interactive && !manipulate::isAvailable()) { interactive <- FALSE }
   envir <- .GlobalEnv
@@ -83,7 +87,7 @@ variogram.fit <- function(variogram,CTMM=ctmm(),name="GUESS",fraction=0.5,intera
   manlist <- lapply(1:nrow(DF),function(r){ manipulate::slider(min=DF$min[r],max=DF$max[r],initial=DF$initial[r],label=DF$label[r],step=DF$step[r]) })
   names(manlist) <- rownames(DF)
 
-  # !!! put eror checkbox option here?
+  # put eror checkbox option here
   CHECK <- DF$min==0 & DF$max==1 & DF$step==1
   if(any(CHECK))
   {
@@ -129,8 +133,9 @@ variogram.fit.backend <- function(variogram,CTMM=ctmm(),fraction=0.5,b=4)
   sigma <- NULL
   tau1 <- NULL
   tau2 <- NULL
+  omega.period <- NULL
   circle.period <- NULL
-  rm(z,sigma,tau1,tau2,circle.period)
+  rm(z,sigma,tau1,tau2,omega.period,circle.period)
 
   RES <- 1000
 
@@ -150,7 +155,8 @@ variogram.fit.backend <- function(variogram,CTMM=ctmm(),fraction=0.5,b=4)
   NAMES <- c("z")
 
   K <- length(CTMM$tau)
-  if(K==1) { CTMM$tau[2] <- 0 }
+  if(K==0) { CTMM$tau <- c(0,0) }
+  else if(K==1) { CTMM$tau[2] <- 0 }
 
   range <- CTMM$range
   sigma <- mean(diag(CTMM$sigma))
@@ -158,13 +164,13 @@ variogram.fit.backend <- function(variogram,CTMM=ctmm(),fraction=0.5,b=4)
   {
     sigma.unit <- unit(sigma,"area",concise=TRUE)
     sigma <- sigma / sigma.unit$scale
-    label <- paste("sigma variance (",sigma.unit$name,")",sep="")
+    label <- paste("\u03C3 variance (",sigma.unit$name,")",sep="")
   }
   else
   {
     sigma.unit <- unit(sigma,"diffusion",concise=TRUE)
     sigma <- sigma / sigma.unit$scale
-    label <- paste("sigma diffusion (",sigma.unit$name,")",sep="")
+    label <- paste("\u03C3 diffusion (",sigma.unit$name,")",sep="")
   }
   DF <- rbind(DF,data.frame(min=0,max=m*sigma,initial=sigma,label=label,step=sigma/RES,stringsAsFactors=FALSE))
   NAMES <- c(NAMES,"sigma")
@@ -175,13 +181,31 @@ variogram.fit.backend <- function(variogram,CTMM=ctmm(),fraction=0.5,b=4)
   tau[1] <- tau[1] / tau1.unit$scale
   tau[2] <- tau[2] / tau2.unit$scale
 
-  label <- paste("tau position (",tau1.unit$name,")",sep="")
-  DF <- rbind(DF,data.frame(min=0,max=m*tau[1],initial=tau[1],label=label,step=tau[1]/RES,stringsAsFactors=FALSE))
-  NAMES <- c(NAMES,"tau1")
+  omega <- CTMM$omega
 
-  label <- paste("tau velocity (",tau2.unit$name,")",sep="")
-  DF <- rbind(DF,data.frame(min=0,max=m*tau[2],initial=tau[2],label=label,step=tau[2]/RES,stringsAsFactors=FALSE))
-  NAMES <- c(NAMES,"tau2")
+  if(!omega) # position and velocity decay
+  {
+    label <- paste("\u03C4[position] (",tau1.unit$name,")",sep="")
+    DF <- rbind(DF,data.frame(min=0,max=m*tau[1],initial=tau[1],label=label,step=tau[1]/RES,stringsAsFactors=FALSE))
+    NAMES <- c(NAMES,"tau1")
+
+    label <- paste("\u03C4[velocity] (",tau2.unit$name,")",sep="")
+    DF <- rbind(DF,data.frame(min=0,max=m*tau[2],initial=tau[2],label=label,step=tau[2]/RES,stringsAsFactors=FALSE))
+    NAMES <- c(NAMES,"tau2")
+  }
+  else # decay and oscillation period
+  {
+    label <- paste("\u03C4[decay] (",tau1.unit$name,")",sep="")
+    DF <- rbind(DF,data.frame(min=0,max=m*tau[1],initial=tau[1],label=label,step=tau[1]/RES,stringsAsFactors=FALSE))
+    NAMES <- c(NAMES,"tau1")
+
+    omega.period <- 2*pi/omega
+    omega.unit <- unit(omega.period,"time",concise=TRUE)
+    omega.period <- omega.period / omega.unit$scale
+    label <- paste("\u03C4[period] (",omega.unit$name,")",sep="")
+    DF <- rbind(DF,data.frame(min=0,max=m*omega.period,initial=omega.period,label=label,step=omega.period/RES,stringsAsFactors=FALSE))
+    NAMES <- c(NAMES,"omega.period")
+  }
 
   # circulation
   circle <- CTMM$circle
@@ -218,7 +242,15 @@ variogram.fit.backend <- function(variogram,CTMM=ctmm(),fraction=0.5,b=4)
     tau1 <- Inf
   }
 
-  if(K==1)
+  if(K<1 && FALSE) # need to update
+  {
+    NAMES <- rownames(DF)
+    DELETE <- which(NAMES=="tau1")
+    DF <- DF[-DELETE,]
+    tau1 <- 0
+  }
+
+  if(K<2 && FALSE) # need to update
   {
     NAMES <- rownames(DF)
     DELETE <- which(NAMES=="tau2")
@@ -227,7 +259,7 @@ variogram.fit.backend <- function(variogram,CTMM=ctmm(),fraction=0.5,b=4)
   }
 
   # non-destructive parameter overwrite
-  storer <- function(sigma=sigma,tau1=tau[1],tau2=tau[2],circle.period=circle.period,error=error)
+  storer <- function(sigma=sigma,tau1=tau[1],tau2=tau[2],omega.period=omega.period,circle.period=circle.period,error=error)
   {
     # store trace, but preserve angle & eccentricity
     if(length(CTMM$axes)==2)
@@ -238,7 +270,14 @@ variogram.fit.backend <- function(variogram,CTMM=ctmm(),fraction=0.5,b=4)
     else
     { CTMM$sigma <- sigma }
 
-    CTMM$tau <- c(tau1*tau1.unit$scale, tau2*tau2.unit$scale)
+    if(!CTMM$omega)
+    { CTMM$tau <- c(tau1*tau1.unit$scale, tau2*tau2.unit$scale) }
+    else
+    {
+      CTMM$tau <- c(1,1)*tau1*tau1.unit$scale
+      CTMM$omega <- 2*pi/(omega.period * omega.unit$scale)
+    }
+
     if(circle) { CTMM$circle <- 2*pi/(circle.period * circle.unit$scale) }
     CTMM$error <- error
 

@@ -1,3 +1,35 @@
+# iterpolate vector by continuous index
+# vec is a vector, ind is a continuous index
+vint <- function(vec,ind,return.ind=FALSE)
+{
+  n <- length(vec)
+
+  lo <- floor(ind)
+  hi <- ceiling(ind)
+
+  # extrapolate
+  lo <- max(1,lo)
+  hi <- max(2,hi)
+  # extrapolate
+  lo <- min(n-1,lo)
+  hi <- min(n,hi)
+
+  if(return.ind) { return(c(lo,hi)) }
+
+  # linear interpolation
+  vec <- vec[lo] + (vec[hi]-vec[lo])*(ind-lo)
+
+  return(vec)
+}
+# same thing as above but with a block-vector
+mint <- function(mat,ind)
+{
+  IND <- vint(mat[1,],ind,return.ind=TRUE)
+  mat <- mat[,IND[1]] + (mat[,IND[2]]-mat[,IND[1]])*(ind-IND[1])
+  return(mat)
+}
+
+
 # statistical mode
 Mode <- function(x)
 {
@@ -14,9 +46,10 @@ CI.lower <- Vectorize(function(k,Alpha){stats::qchisq(Alpha/2,k,lower.tail=TRUE)
 
 
 # calculate chi^2 confidence intervals from MLE and COV estimates
-chisq.ci <- function(MLE,COV=NULL,level=0.95,alpha=1-level,DOF=2*MLE^2/COV,fast=TRUE)
+chisq.ci <- function(MLE,COV=NULL,level=0.95,alpha=1-level,DOF=2*MLE^2/COV,robust=FALSE,HDR=FALSE)
 {
   # try to do something reasonable on failure cases
+  if(is.nan(DOF)) { DOF <- 0 } # this comes from infinite variance divsion
   if(DOF==0)
   { CI <- c(0,MLE,Inf) }
   else if(MLE==0)
@@ -26,27 +59,29 @@ chisq.ci <- function(MLE,COV=NULL,level=0.95,alpha=1-level,DOF=2*MLE^2/COV,fast=
   else if(!is.null(COV) && COV<0) # try an exponential distribution?
   {
     warning("VAR[Area] = ",COV," < 0")
-    CI <- c(1,1,1)*MLE
-    CI[1] <- stats::qexp(alpha/2,rate=1/min(sqrt(-COV),MLE))
-    CI[3] <- stats::qexp(1-alpha/2,rate=1/max(sqrt(-COV),MLE))
+    if(!HDR)
+    {
+      CI <- c(1,1,1)*MLE
+      CI[1] <- stats::qexp(alpha/2,rate=1/min(sqrt(-COV),MLE))
+      CI[3] <- stats::qexp(1-alpha/2,rate=1/max(sqrt(-COV),MLE))
+    }
+    else
+    { CI <- c(0,0,MLE) * stats::qexp(1-alpha,rate=1/min(sqrt(-COV),MLE)) }
   }
   else     # regular estimate
   {
-    # traditional confidence intervals
-    if(fast)
+    if(HDR) # highest density region
+    { CI <- MLE * chisq.hdr(df=DOF,level=level,pow=HDR)/DOF }
+    else if(robust) # quantile CIs # not sure how well this works for k<<1
+    { CI <- MLE * c(CI.lower(DOF,alpha),stats::qchisq(0.5,DOF)/DOF,CI.upper(DOF,alpha)) }
+    else # traditional confidence intervals
     { CI <- MLE * c(CI.lower(DOF,alpha),1,CI.upper(DOF,alpha)) }
-    else # more probable confidence intervals
-    {
-      CI <- MLE * q2chisq(1-alpha,DOF)/DOF
-      CI[3] <- CI[2]
-      CI[2] <- MLE
-    }
 
+    # Normal backup for upper.tail
+    if(is.null(COV)) { COV <- 2*MLE^2/DOF }
+    UPPER <- norm.ci(CI[2],COV,alpha=alpha)[3]
     # qchisq upper.tail is too small when DOF<<1
     # probably an R bug that no regular use of chi-square/gamma would come across
-    if(is.null(COV)) { COV <- 2*MLE^2/DOF }
-    # Normal backup for upper.tail
-    UPPER <- norm.ci(MLE,COV,alpha=alpha)[3]
     if(CI[3]<UPPER) { CI[3] <- UPPER }
   }
 
@@ -55,36 +90,36 @@ chisq.ci <- function(MLE,COV=NULL,level=0.95,alpha=1-level,DOF=2*MLE^2/COV,fast=
 }
 
 
-# proper 2-sided quantile function for chi-squared distribution
-q2chisq <- function(p,df)
+# highest density region (HDR) for chi/chi^2 distribution
+# pow=1 gives chi HDR (in terms of chi^2 values)
+# pow=2 gives chi^2 HDR
+chisq.hdr <- function(df,level=0.95,alpha=1-level,pow=1)
 {
   # mode == 0
-  if(df <= 2) { CI <- c(0,0,stats::qchisq(p,df,lower.tail=TRUE)) }
-  else # mode == df
+  if(df <= pow)
+  { CI <- c(0,0,stats::qchisq(level,df,lower.tail=TRUE)) } # this goes badly when df<<1
+  else # mode == df - pow
   {
-    # conventional CIs
-    x1 <- stats::qchisq((1-p)/2,df,lower.tail=TRUE)
-    x2 <- stats::qchisq((1-p)/2,df,lower.taul=FALSE)
-    # mismatched density
-    p1 <- stats::dchisq(x1,df)
-    p2 <- stats::dchisq(x2,df)
-    # average density as first guess
-    p0 <- sqrt(p1*p2)
+    # chi and chi^2 modes
+    mode <- df-pow
 
-    # MORE TO COME !!!
-
-    # start loop
-
-    # quantiles for this density
-    x <- idchisq(p0,df)
-
-    # total probability for these quantiles
-
-    # newton iteration towards target probability
-
-    # end loop
-
-    CI <- c(x1,df-2,x2)
+    # given some chi^2 value under the mode, solve for the equiprobability-density chi^2 value over the mode
+    X2 <- function(X1) { if(X1==0){return(Inf)} ; X1 <- -X1/mode ; return( -mode*gsl::lambert_Wm1(X1*exp(X1)) ) }
+    # how far off are we from the desired coverage level
+    dP <- function(X1) {stats::pchisq(X2(X1),df,lower.tail=TRUE)-stats::pchisq(X1,df,lower.tail=TRUE)-level}
+    # solve for X1 to get the desired coverage level
+    X1 <- stats::uniroot(dP,c(0,mode),f.lower=alpha,f.upper=-level,extendInt="downX",tol=.Machine$double.eps,maxiter=.Machine$integer.max)$root
+    # uniroot is not reliable when root is very near boundary
+    if(X1==0)
+    {
+      # cost function with logit link
+      dP2 <- function(z) { dP(mode/(1+exp(z)))^2 }
+      X1 <- stats::nlm(dP2,1,ndigit=16,gradtol=.Machine$double.eps,stepmax=100,steptol=.Machine$double.eps,iterlim=.Machine$integer.max)$minimum
+      X1 <- mode/(1+exp(X1))
+      # nlm is not reliable in some other cases...
+    }
+    # HDR CI
+    CI <- c(X1,mode,X2(X1))
   }
   return(CI)
 }
@@ -163,5 +198,70 @@ rcov <- function(x,...)
   else
   { COV <- MAD^2 * diag(length(AVE)) }
 
+  # too many infinities for Gmedian to handle --- fall back to MAD
+  NANS <- is.nan(diag(COV)) | is.na(diag(COV))
+  if(any(NANS))
+  {
+    COV[NANS,] <- COV[,NANS] <- 0
+    COV[NANS,NANS] <- MAD[NANS]^2
+  }
+
   return(list(median=AVE,COV=COV))
+}
+
+
+# minimally trimmed mean
+# could make O(n) without full sort
+mtmean <- function(x,lower=-Inf,upper=Inf,func=mean)
+{
+  x <- sort(x)
+
+  # lower trim necessary
+  n <- sum(x<=lower)
+  # fallbacks
+  if(n==length(x)) { return(lower) }
+  if(2*n>=length(x)) { return(x[n+1]) }
+
+  # upper trim necessary
+  m <- sum(x>=upper)
+  # fallbacks
+  if(m==length(x)) { return(upper) }
+  if(2*m>=length(x)) { return(x[length(x)-m-1]) }
+
+  n <- max(n,m)
+  x <- x[(1+n):(length(x)-n)]
+
+  x <- func(x)
+  return(x)
+}
+
+
+# degrees-of-freedom of (proportionally) chi distribution with specified moments
+chi.dof <- function(M1,M2,error=1/2)
+{
+  # solve for chi^2 DOF consistent with M1 & M2
+  R <- M1^2/M2 # == 2*pi/DOF / Beta(DOF/2,1/2)^2 # 0 <= R <= 1
+  if(R>=1) { return(Inf) } # purely deterministic
+  if(R<=0) { return(0) }
+
+  DOF <- M1^2/(M2-M1^2)/2 # initial guess - asymptotic limit
+  error <- .Machine$double.eps^error
+  ERROR <- Inf
+  while(ERROR>=error)
+  {
+    # current value at guess
+    R0 <- 2*pi/DOF/beta(DOF/2,1/2)^2
+    # current value of gradient
+    G0 <- ( digamma((DOF+1)/2) - digamma(DOF/2) - 1/DOF )*R0
+    # correction
+    delta <- (R-R0)/G0
+    # make sure DOF remains positive
+    if(DOF+delta<=0)
+    { DOF <- DOF/2 }
+    else
+    { DOF <- DOF + delta }
+    ERROR <- abs(delta)/DOF
+  }
+
+  return(DOF)
 }

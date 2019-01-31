@@ -4,9 +4,11 @@
 \alias{projection<-,telemetry-method}
 \alias{projection,ctmm-method}
 \alias{projection,UD-method}
+\alias{projection,list-method}
 \alias{projection<-,list-method}
 \alias{median}
 \alias{median.telemetry}
+\encoding{UTF-8}
 %- Also NEED an '\alias' for EACH other topic documented here.
 \title{Projection}
 \description{Functions to manipulate the coordinate reference system (CRS) of ctmm objects}
@@ -17,6 +19,8 @@
 \S4method{projection}{ctmm}(x,asText=TRUE)
 
 \S4method{projection}{UD}(x,asText=TRUE)
+
+\S4method{projection}{list}(x,asText=TRUE)
 
 \S4method{projection}{telemetry}(x) <- value
 
