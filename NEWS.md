@@ -1,3 +1,14 @@
+ctmm 0.5.5 (2019-02-11)
+================
+
+  * bugfix in summary where timescale CIs were always (0,Inf)
+  
+  * ctmm.select default now level=1
+  
+  * summary on UERE lists now works with more than one axis
+  
+  * R dependency increased to >=3.5 for parallel functions
+  
 ctmm 0.5.4 (2019-02-07)
 ================
 
