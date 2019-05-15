@@ -8,13 +8,13 @@ svf.func <- function(CTMM,moment=FALSE)
   tau <- CTMM$tau
 
   # trace variance
-  sigma <- mean(diag(CTMM$sigma)) # now AM.sigma
+  sigma <- var.covm(CTMM$sigma,ave=TRUE)
 
   circle <- CTMM$circle
 
   # no error considered if missing
   COV <- CTMM$COV
-  if(!is.null(COV)) { COV <- area2var(CTMM,MEAN=TRUE) }
+  if(!is.null(COV)) { COV <- axes2var(CTMM,MEAN=TRUE) }
 
   range <- CTMM$range
   tau <- tau[tau<Inf]
@@ -186,7 +186,7 @@ plot.svf <- function(lag,CTMM,error=NULL,alpha=0.05,col="red",type="l",...)
       svf.lower <- Vectorize(function(df){ CI.lower(df,alpha[j]) })(dof)
       svf.upper <- Vectorize(function(df){ CI.upper(df,alpha[j]) })(dof)
 
-      graphics::polygon(c(lag,rev(lag)),c(SVF*svf.lower,rev(SVF*svf.upper)),col=scales::alpha(col,0.1/length(alpha)),border=NA,...)
+      graphics::polygon(c(lag,rev(lag)),c(SVF*svf.lower,rev(SVF*svf.upper)),col=malpha(col,0.1/length(alpha)),border=NA,...)
     }
   }
 
@@ -195,9 +195,15 @@ plot.svf <- function(lag,CTMM,error=NULL,alpha=0.05,col="red",type="l",...)
 ###########################################################
 # PLOT VARIOGRAM
 ###########################################################
-plot.variogram <- function(x, CTMM=NULL, level=0.95, units=TRUE, fraction=0.5, col="black", col.CTMM="red", xlim=NULL, ylim=NULL, ...)
+plot.variogram <- function(x, CTMM=NULL, level=0.95, units=TRUE, fraction=0.5, col="black", col.CTMM="red", xlim=NULL, ylim=NULL, ext=NULL, ...)
 {
   alpha <- 1-level
+
+  if(!is.null(ext))
+  {
+    xlim <- ext$x
+    ylim <- ext$y
+  }
 
   # empirical variograms
   x <- listify(x)
@@ -358,7 +364,7 @@ plot.variogram <- function(x, CTMM=NULL, level=0.95, units=TRUE, fraction=0.5, c
         graphics::abline(h=c(-1,0,1)/sqrt(DOF[1])*stats::qnorm(1-alpha[j]/2),col="red",lty=c(2,1,2))
       }
 
-      graphics::polygon(c(lag,rev(lag)),c(SVF.lower,rev(SVF.upper)),col=scales::alpha(col[[i]],alpha=0.1),border=NA)
+      graphics::polygon(c(lag,rev(lag)),c(SVF.lower,rev(SVF.upper)),col=malpha(col[[i]],alpha=0.1),border=NA)
     }
 
     # PLOT CORRESPONDING MODEL

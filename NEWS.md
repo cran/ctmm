@@ -1,3 +1,58 @@
+ctmm 0.5.6 (2019-05-14)
+================
+
+  * new functions lasso, marquee, and cleave
+
+  * new functions annotate and color
+  
+  * summary can now compare joint UERE objects to lists of individualized UERE objects
+  
+  * support for UTM locations in as.telemetry
+
+  * support for GPS-ARGOS hybrid data in as.telemetry & uere.fit
+  
+  * new plot option ext for extent objects
+  
+  * increased numerical precision in ctmm.loglike for 0 < dt << tau, including the limit OU/OUF -> BM/OU
+  
+  * BM/IOU model likelihoods are now exact limits of OU/OUF likelihoods modulo a constant
+  
+  * covariance matrices can now take arbitrary eccentricty and scale
+  
+  * ctmm.boot new argument iterate=FALSE and bugfixes for iterate=TRUE
+
+  * ctmm.boot now debiases the covariance matrix directly (linearly)
+  
+  * occurrence default dt.max & cor.min arguments now tighter
+  
+  * periodogram functionality restored for one-dimensional data
+  
+  * bugfix in IID ctmm.fit with elliptical errors
+  
+  * bugfix in occurrence when projection origin is far from the mean location
+  
+  * bugfix in akde.list where location errors were not smoothed
+  
+  * bugfix in ctmm.guess/variogram.fit for BM/IOU models
+  
+  * bugfix in speed for IOU models
+  
+  * e-obs calibration cross checked and fixed
+  
+  * ctmm.loglike now returns -Inf when movement and error variance are zero
+  
+  * stability improvements to base R optimizer usage
+  
+  * bugfix in mark.rm argument of as.telemetry
+  
+  * cores option added to ctmm.select
+  
+  * only physical cores now counted by cores arguments
+
+  * cores option now used in Windows when appropriate
+  
+  * improvements to speed, speeds, ctmm.select for short tracks of data
+
 ctmm 0.5.5 (2019-02-11)
 ================
 

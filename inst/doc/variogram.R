@@ -82,7 +82,7 @@ FITS <- list(IID=M.IID,OU=M.OU,OUF=M.OUF)
 summary(FITS)
 
 ## ------------------------------------------------------------------------
-FITZ <- ctmm.select(Cilla,m.ouf,verbose=TRUE,level=1)
+FITZ <- ctmm.select(Cilla,m.ouf,verbose=TRUE)
 summary(FITZ)
 
 ## ----  fig.show='hold'---------------------------------------------------

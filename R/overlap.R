@@ -45,7 +45,7 @@ overlap <- function(object,level=0.95,debias=TRUE,...)
 
 
 #####################
-overlap.ctmm <- function(object,level=0.95,debias=TRUE,...)
+overlap.ctmm <- function(object,level=0.95,debias=TRUE,COV=TRUE,...)
 {
   CTMM1 <- object[[1]]
   CTMM2 <- object[[2]]
@@ -64,8 +64,8 @@ overlap.ctmm <- function(object,level=0.95,debias=TRUE,...)
 
   # first covariance
   par <- c(par,CTMM1$sigma@par)
-  parscale <- c(parscale, c(CTMM1$sigma@par[1],log(2),pi/2) )
-  lower <- c(lower, c(0,-Inf,-Inf) )
+  parscale <- c(parscale, c(CTMM1$sigma@par[1:2],pi/2) )
+  lower <- c(lower, c(0,0,-Inf) )
   upper <- c(upper, c(Inf,Inf,Inf) )
 
   # second mean
@@ -76,8 +76,8 @@ overlap.ctmm <- function(object,level=0.95,debias=TRUE,...)
 
   # second covariance
   par <- c(par,CTMM2$sigma@par)
-  parscale <- c(parscale, c(CTMM2$sigma@par[1],log(2),pi/2) )
-  lower <- c(lower, c(0,-Inf,-Inf) )
+  parscale <- c(parscale, c(CTMM2$sigma@par[1:2],pi/2) )
+  lower <- c(lower, c(0,0,-Inf) )
   upper <- c(upper, c(Inf,Inf,Inf) )
 
   D <- function(p)
@@ -91,24 +91,27 @@ overlap.ctmm <- function(object,level=0.95,debias=TRUE,...)
     return(BhattacharyyaD(CTMM1,CTMM2))
   }
 
-  # propagate uncertainty - slightly wasteful if isotropic
-  # grad <- numDeriv::grad(D,par)
-  grad <- genD(par,D,lower=lower,upper=upper,parscale=parscale,mc.cores=1,order=1,...)$gradient
   VAR <- 0
+  # propagate uncertainty - slightly wasteful if isotropic
+  if(COV)
+  {
+    # grad <- numDeriv::grad(D,par)
+    grad <- genD(par,D,lower=lower,upper=upper,parscale=parscale,mc.cores=1,order=1,...)$gradient
 
-  VAR <- VAR + abs(grad[1:2] %*% CTMM1$COV.mu %*% grad[1:2])
-  if(CTMM1$isotropic)
-  { VAR <- VAR + abs(grad[3] * CTMM1$COV[1,1] * grad[3]) }
-  else
-  { VAR <- VAR + abs(grad[3:5] %*% CTMM1$COV[1:3,1:3] %*% grad[3:5]) }
+    VAR <- VAR + abs(grad[1:2] %*% CTMM1$COV.mu %*% grad[1:2])
+    if(CTMM1$isotropic)
+    { VAR <- VAR + abs(grad[3] * CTMM1$COV[1,1] * grad[3]) }
+    else
+    { VAR <- VAR + abs(grad[3:5] %*% CTMM1$COV[1:3,1:3] %*% grad[3:5]) }
 
-  VAR <- VAR + abs(grad[6:7] %*% CTMM2$COV.mu %*% grad[6:7])
-  if(CTMM2$isotropic)
-  { VAR <- VAR + abs(grad[8] * CTMM2$COV[1,1] * grad[8]) }
-  else
-  { VAR <- VAR + abs(grad[8:10] %*% CTMM2$COV[1:3,1:3] %*% grad[8:10]) }
+    VAR <- VAR + abs(grad[6:7] %*% CTMM2$COV.mu %*% grad[6:7])
+    if(CTMM2$isotropic)
+    { VAR <- VAR + abs(grad[8] * CTMM2$COV[1,1] * grad[8]) }
+    else
+    { VAR <- VAR + abs(grad[8:10] %*% CTMM2$COV[1:3,1:3] %*% grad[8:10]) }
 
-  VAR <- as.numeric(VAR)
+    VAR <- as.numeric(VAR)
+  }
 
   # this quantity is roughly chi-square
   MLE <- BhattacharyyaD(CTMM1,CTMM2)
@@ -248,8 +251,15 @@ akde.list <- function(data,CTMM,VMM=NULL,debias=TRUE,smooth=TRUE,error=0.001,res
   #step 1: compute the optimal bandwidths for each instance
   # if (!silent)
   #  cat("Computing optimal bandwidths\n")
-  for (i.instance in 1:n.instances)
+  for(i.instance in 1:n.instances)
   {
+    # smooth data
+    if(CTMM[[i.instance]]$error && smooth)
+    {
+      data[[i.instance]] <- predict(CTMM[[i.instance]],data=data[[i.instance]],t=data[[i.instance]]$t)
+      CTMM[[i.instance]]$error <- FALSE # smoothed error model (approximate)
+    }
+
     #alias for readability
     instance <- data[[i.instance]]
     n.samples <- length(instance$x)
@@ -319,6 +329,7 @@ akde.list <- function(data,CTMM,VMM=NULL,debias=TRUE,smooth=TRUE,error=0.001,res
   return(UD.list)
 }
 
+
 ###################
 # average aligned UDs
 mean.UD <- function(x,...)
@@ -351,151 +362,4 @@ mean.UD <- function(x,...)
   attr(x,"CTMM") <- ctmm()
 
   return(x)
-}
-
-##################
-Tsquared <- function(CTMM1,CTMM2,spatial=TRUE)
-{
-  DOF <- 0
-  chi.square <- 0
-  CTMM <- list(CTMM1,CTMM2)
-  rm(CTMM1,CTMM2)
-
-  # BM/IOU versus IID is infinitely different
-  TEST <- is.null(CTMM[[1]]$tau) && !is.null(CTMM[[2]]$tau[1]) && CTMM[[2]]$tau[1]==Inf
-  TEST <- TEST || (is.null(CTMM[[2]]$tau) && !is.null(CTMM[[1]]$tau[1]) && CTMM[[1]]$tau[1]==Inf)
-  if(TEST) { return(list(chi.square=Inf,DOF=0,p=0)) }
-
-  # periodic mean parameters not yet supported because of COV.mu structure being weird !!!
-
-  # switch from area to variance
-  if(!spatial)
-  {
-    for(i in 1:2)
-    {
-      if(!CTMM[[i]]$isotropic)
-      {
-        CTMM[[i]]$COV <- area2var(CTMM[[i]])
-        NAMES <- dimnames(CTMM[[i]]$COV)[[1]]
-        NAMES[NAMES=="variance"] <- "area"
-        dimnames(CTMM[[i]]$COV) <- list(NAMES,NAMES)
-
-        CTMM[[i]]$sigma <- covm(mean(diag(CTMM[[i]]$sigma)),isotropic=TRUE)
-
-        CTMM[[i]]$isotropic <- TRUE
-      }
-    }
-  }
-
-  # mean parameters
-  if(spatial && CTMM[[1]]$range && CTMM[[2]]$range)
-  {
-    # pooled precision matrix
-    precision <- PDsolve(CTMM[[1]]$COV.mu) + PDsolve(CTMM[[2]]$COV.mu)
-    # differece in paramters
-    theta.diff <- c(CTMM[[1]]$mu - CTMM[[2]]$mu)
-    # chi-square for 2D mean
-    chi.square <- chi.square + c(theta.diff %*% precision %*% theta.diff)
-    DOF <- DOF + length(theta.diff)
-  }
-
-  ## autocorrelation parameters
-  # null objects
-  NAMES.1 <- dimnames(CTMM[[1]]$COV)[[1]]
-  NAMES.2 <- dimnames(CTMM[[2]]$COV)[[1]]
-  NAMES.L <- list(NAMES.1,NAMES.2)
-  NAMES <- union( NAMES.1 , NAMES.2 )
-  precision <- matrix(0,length(NAMES),length(NAMES))
-  theta.diff <- rep(0,length(NAMES))
-
-  # combined precision information
-  names(theta.diff) <- NAMES
-  dimnames(precision) <- list(NAMES,NAMES)
-
-  # timescale correlation parameters
-  SUB <- startsWith(NAMES,"tau ")
-  if(any(SUB))
-  {
-    # consistent naming...
-    for(i in 1:2) { if(!is.null(CTMM[[i]]$tau)) { names(CTMM[[i]]$tau) <- paste("tau",names(CTMM[[i]]$tau)) } }
-
-    # maybe need to convert to comparable parameters
-    if((CTMM[[1]]$range!=CTMM[[2]]$range) && ("tau position" %in% NAMES))
-    {
-      for(i in 1:2)
-      {
-        # convert tau to 1/tau
-        CTMM[[i]]$tau[1] <- 1/CTMM[[i]]$tau[1]
-        # update parameter-covariance matrix
-        if("tau position" %in% NAMES.L[[i]])
-        {
-          CTMM[[i]]$COV["tau position",] <- -CTMM[[i]]$tau[1]^2 * CTMM[[i]]$COV["tau position",]
-          CTMM[[i]]$COV[,"tau position"] <- -CTMM[[i]]$tau[1]^2 * CTMM[[i]]$COV[,"tau position"]
-        }
-
-        if(CTMM[[i]]$range)
-        {
-          # update parameter-covariance matrix
-          J <- rbind( c(CTMM[[i]]$tau[1],CTMM[[i]]$sigma@par[1]) , c(0,1) )
-          CTMM[[i]]$COV[c("area","tau position"),] <- J %*% CTMM[[i]]$COV[c("area","tau position"),]
-          CTMM[[i]]$COV[,c("area","tau position")] <- CTMM[[i]]$COV[,c("area","tau position")] %*% t(J)
-
-          # convert location-covariances to diffusion matrices
-          CTMM[[i]]$sigma <- CTMM[[i]]$sigma * CTMM[[i]]$tau[1]
-          CTMM[[i]]$sigma@par[1] <- CTMM[[i]]$sigma@par[1] * CTMM[[i]]$tau[1]
-        }
-      }
-    }
-
-    SIGN <- c(1,-1)
-    for(i in 1:2)
-    {
-      if(!is.null(CTMM[[i]]$tau))
-      {
-        SUB <- names(CTMM[[i]]$tau) %in% NAMES
-        SUB <- names(CTMM[[i]]$tau)[SUB]
-        theta.diff[SUB] <- theta.diff[SUB] + SIGN[i]*CTMM[[i]]$tau[SUB]
-      }
-    }
-
-  } # end taus
-
-  # covariance parameters (this must come after potential diffusion transformation)
-  if(CTMM[[1]]$isotropic && CTMM[[2]]$isotropic)
-  { SUB <- "area" }
-  else if(CTMM[[1]]$isotropic || CTMM[[2]]$isotropic)
-  {
-    # angle is not really relevant here, I don't think???, but eccentricity definitely is
-    SUB <- which(NAMES=="angle")
-    NAMES <- NAMES[-SUB]
-    precision <- precision[-SUB,-SUB]
-    theta.diff <- theta.diff[-SUB]
-    SUB <- c("area","eccentricity")
-    DOF <- DOF - 1
-    # if eccentricity uncertainty is large, does this limit to the next case???
-  }
-  else
-  { SUB <- c("area","eccentricity","angle") }
-  # naive covariance differences
-  theta.diff[SUB] <- CTMM[[1]]$sigma@par[SUB] - CTMM[[2]]$sigma@par[SUB]
-  # clean up angle differences
-  if("angle" %in% SUB)
-  {
-    theta.diff["angle"] <- theta.diff["angle"] %% pi
-    if(theta.diff["angle"]>pi/2) { theta.diff["angle"] <- pi - theta.diff["angle"] }
-  }
-
-  # combine precision matrices after transformation
-  precision[NAMES.1,NAMES.1] <- PDsolve(CTMM[[1]]$COV[NAMES.1,NAMES.1])
-  precision[NAMES.2,NAMES.2] <- precision[NAMES.2,NAMES.2] + PDsolve(CTMM[[2]]$COV[NAMES.2,NAMES.2])
-
-  chi.square <- chi.square + c(theta.diff %*% precision %*% theta.diff)
-  DOF <- DOF + length(theta.diff)
-
-  # circulation needs to be flipped before I will include this. Too much trouble with period !!!
-
-  # calculate p-value
-  p <- 1 - stats::pchisq(chi.square,DOF)
-
-  return(list(chi.square=chi.square,DOF=DOF,p=p))
 }

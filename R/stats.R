@@ -16,6 +16,13 @@ vint <- function(vec,ind,return.ind=FALSE)
 
   if(return.ind) { return(c(lo,hi)) }
 
+  IND <- abs(vec[c(lo,hi)])
+  if(any(IND==Inf))
+  {
+    IND <- which.max(IND)
+    return(vec[c(lo,hi)[IND]])
+  }
+
   # linear interpolation
   vec <- vec[lo] + (vec[hi]-vec[lo])*(ind-lo)
 
@@ -30,16 +37,6 @@ mint <- function(mat,ind)
 }
 
 
-# statistical mode
-Mode <- function(x)
-{
-  ux <- unique(x)
-  tab <- tabulate(match(x, ux))
-  ux[tab == max(tab)]
-  mean(ux)
-}
-
-
 # confidence interval functions
 CI.upper <- Vectorize(function(k,Alpha){stats::qchisq(Alpha/2,k,lower.tail=FALSE)/k})
 CI.lower <- Vectorize(function(k,Alpha){stats::qchisq(Alpha/2,k,lower.tail=TRUE)/k})
@@ -50,7 +47,9 @@ chisq.ci <- function(MLE,COV=NULL,level=0.95,alpha=1-level,DOF=2*MLE^2/COV,robus
 {
   # try to do something reasonable on failure cases
   if(is.nan(DOF)) { DOF <- 0 } # this comes from infinite variance divsion
-  if(DOF==0)
+  if(DOF==Inf)
+  { CI <- c(1,1,1)*MLE }
+  else if(DOF==0)
   { CI <- c(0,MLE,Inf) }
   else if(MLE==0)
   { CI <- c(0,0,0) }

@@ -5,6 +5,7 @@
 ####
 speeds.telemetry <- function(object,CTMM,t=NULL,cycle=Inf,level=0.95,robust=FALSE,prior=FALSE,fast=TRUE,error=0.01,cores=1,...)
 {
+  cores <- resolveCores(cores,fast=FALSE)
   data <- object
   # check conflicting conditions
 
@@ -60,6 +61,13 @@ speeds.slow <- function(data,CTMM=NULL,t=NULL,level=0.95,robust=FALSE,prior=FALS
   INF <- array(c(0,Inf,Inf),c(3,n))
   INF <- t(INF)
   colnames(INF) <- c("low","ML","high")
+
+  DOF <- summary(CTMM)$DOF['speed']
+  if(!DOF)
+  {
+    warning("Movement model is fractal.")
+    return(INF)
+  }
 
   if(!robust)
   {
@@ -137,11 +145,14 @@ speeds.slow <- function(data,CTMM=NULL,t=NULL,level=0.95,robust=FALSE,prior=FALS
         Q1 <- mint(SPEEDS,(N+1-sqrt(N))/2)
         Q2 <- mint(SPEEDS,(N+1+sqrt(N))/2)
         ERROR <- max(1-Q1/AVE,Q2/AVE-1)
+
         # correct for Inf AVE
-        if(is.nan(ERROR))
+        if(is.nan(ERROR)) { ERROR <- Inf }
+
+        if(N>n/error^2)
         {
-          ERROR <- Inf
-          warning("Speeds accumulating on boundary and expectation value may not converge.")
+          warning("Expectation values did not converge after ",N," iterations.")
+          break
         }
       }
 
@@ -175,6 +186,11 @@ speeds.slow <- function(data,CTMM=NULL,t=NULL,level=0.95,robust=FALSE,prior=FALS
   CI <- t(CI)
 
   close(pb)
+
+  # all samples were Inf fix
+  INF <- CI[,"low"]==Inf
+  if(any(INF)) { CI[INF,"low"] <- 0 }
+
   return(CI)
 }
 
@@ -240,7 +256,7 @@ abs.bivar <- function(mu,Sigma)
   mu2 <- sum(mu^2)
   mu <- sqrt(mu2)
 
-  sigma <- eigen(Sigma)$values
+  sigma <- eigen(Sigma,only.values=TRUE)$values
 
   Barg <- mu2/(4*sigma0)
   if(Barg >= BESSEL_LIMIT) { return(mu) }

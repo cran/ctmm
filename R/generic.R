@@ -60,20 +60,20 @@ IFFT <- function(X,plan=NULL) { FFT(X,inverse=TRUE) }
 composite <- function(n) { 2^ceiling(log(n,2)) }
 
 # sinc functions
-sinc <- Vectorize( function(x)
+sinc <- Vectorize( function(x,SIN=sin(x))
 {
   if(x==0)
   { return(1) }
   else
-  { return(sin(x)/x) }
+  { return(SIN/x) }
 } )
 
-sinch <- Vectorize( function(x)
+sinch <- Vectorize( function(x,SINH=sinh(x))
 {
   if(x==0)
   { return(1) }
   else
-  { return(sinh(x)/x) }
+  { return(SINH/x) }
 } )
 
 
@@ -215,7 +215,7 @@ cov.loglike <- function(hess,grad=rep(0,nrow(hess)))
   { COV <- COV + Reduce("+",lapply((1:length(grad))[SUB],function(i){ values[i] * outer(vectors[,i]) })) }
   SUB <- !SUB
   if(any(SUB)) # toss out the off-diagonal NaNs
-  { COV <- COV + Reduce("+",lapply((1:length(grad))[SUB],function(i){ D <- diag(outer(vectors[,i])) ; D[D>0] <- Inf ; diag(D) })) }
+  { COV <- COV + Reduce("+",lapply((1:length(grad))[SUB],function(i){ D <- diag(outer(vectors[,i])) ; D[D>0] <- Inf ; diag(D,length(D)) })) }
 
   COV <- COV/W
 
@@ -241,7 +241,8 @@ prepend <- function(x,values,before=1)
 
 
 # CLAMP A NUMBER
-clamp <- Vectorize(function(num,min=0,max=1) { if(num<min) {min} else if(num<max) {num} else {max} })
+clamp <- function(num,min=0,max=1)
+{ ifelse(num<min,min,ifelse(num>max,max,num)) }
 
 
 # PAD VECTOR
@@ -287,7 +288,12 @@ rm.name <- function(object,name)
 listify <- function(x)
 {
   if(is.null(x)) { return(x) }
-  if(class(x) != "list") { x <- list(x) }
+
+  if(class(x) != "list")
+  {
+    x <- list(x)
+    names(x) <- attr(x[[1]],'info')$identity
+  }
   return(x)
 }
 

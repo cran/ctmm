@@ -43,7 +43,7 @@ get.dop.types <- function(data)
   data <- listify(data)
   # all kinds of data
   NAMES <- sapply(data,names)
-  NAMES <- unique(c(NAMES))
+  NAMES <- unique(unlist(NAMES))
 
   IN <- sapply(TYPES,function(type){all(DOP.LIST[[type]]$axes %in% NAMES) || all(DOP.LIST[[type]]$geo %in% NAMES)})
   TYPES <- TYPES[IN]
@@ -79,18 +79,25 @@ uere.fit <- function(data,precision=1/2)
   TYPES <- get.dop.types(data) # types of DOP data present
 
   # loop over axes/types
-  UERE <- lapply(TYPES,function(type){uere.type(data,precision=precision,trace=trace,type=type)})
+  LIST <- lapply(TYPES,function(type){uere.type(data,precision=precision,trace=trace,type=type)})
+
+  UERE <- lapply(LIST,function(L){ L$UERE })
   names(UERE) <- TYPES
 
-  # passed by slot
-  DOF <- lapply(UERE,function(U){attr(U,"DOF")})
+  DOF <- lapply(LIST,function(L){ L$DOF })
   names(DOF) <- TYPES
-  # passed by slot
-  AICc <- vapply(UERE,function(U){attr(U,"AICc")},numeric(1))
+
+  AICc <- sapply(LIST,function(L){ L$AICc })
   names(AICc) <- TYPES
-  # passed by slot
-  Z2 <- vapply(UERE,function(U){attr(U,"Zsq")},numeric(1))
-  names(Z2) <- TYPES
+
+  Zsq <- sapply(LIST,function(L){ L$Zsq })
+  names(Zsq) <- TYPES
+
+  VAR.Zsq <- sapply(LIST,function(L){ L$VAR.Zsq })
+  names(VAR.Zsq) <- TYPES
+
+  N <- sapply(LIST,function(L){ L$N })
+  names(N) <- TYPES
 
   CLASS <- names(UERE[[1]])
   if(!length(CLASS)) { CLASS <- "all" }
@@ -101,7 +108,7 @@ uere.fit <- function(data,precision=1/2)
   DOF <- matrix( simplify2array(DOF) , length(CLASS) , length(TYPES) )
   dimnames(DOF) <- list(CLASS,TYPES)
 
-  UERE <- new.UERE(UERE,DOF=DOF,AICc=AICc,Zsq=Z2)
+  UERE <- new.UERE(UERE,DOF=DOF,AICc=AICc,Zsq=Zsq,VAR.Zsq=VAR.Zsq,N=N)
 
   return(UERE)
 }
@@ -141,20 +148,26 @@ uere.type <- function(data,trace=FALSE,type='horizontal',precision=1/2,...)
   # null UERE structure given location classes
   UERE <- rep(NA_real_,length(CLASS))
   names(UERE) <- CLASS
+  # don't overwrite ARGOS when calibrating GPS
+  ARGOS <- grepl('argos',tolower(CLASS))
+  if(any(ARGOS) && type=='horizontal') { UERE[ARGOS] <- 1 }
 
   z <- lapply(1:length(data),function(i){get.telemetry(data[[i]],axes)})
 
   # make sure axes present in dataset (e.g., only 2D fixes)
-  IN <- as.logical(sapply(z,length))
+  if(type=='speed') { IN <- sapply(z,length)>0 } else { IN <- sapply(z,length)>length(axes) }
   data <- data[IN]
   z <- z[IN]
 
   # don't have enough data to estimate any UERE
-  if(!length(data) || length(data)>=sum(sapply(data,nrow)))
+  if(!length(data))
   {
-    attr(UERE,"DOF") <- numeric(length(UERE)) # sampling distribution
-    attr(UERE,"AICc") <- NA_real_
-    attr(UERE,"Zsq") <- NA_real_
+    UERE <- list(UERE=UERE)
+    UERE$DOF <- numeric(length(UERE)) # sampling distribution
+    UERE$AICc <- NA_real_
+    UERE$Zsq <- NA_real_
+    UERE$VAR.Zsq <- NA_real_
+    UERE$N <- NA_real_
 
     return(UERE)
   }
@@ -242,7 +255,9 @@ uere.type <- function(data,trace=FALSE,type='horizontal',precision=1/2,...)
     UERE2 <- sqrt(UERE2)
     UERE2 <- UERE2[EST]
 
-    ERROR <- abs(UERE2-UERE[EST])/UERE2
+    ERROR <- abs(UERE2-UERE[EST])/max(UERE[EST],UERE2)
+    NANS <- is.nan(ERROR)
+    if(any(NANS)) { ERROR[NANS] <- 0 }
     ERROR <- max(ERROR)
 
     UERE[EST] <- UERE2
@@ -250,11 +265,9 @@ uere.type <- function(data,trace=FALSE,type='horizontal',precision=1/2,...)
     if(ERROR<TOL) { BREAK <- TRUE }
   }
 
-  # missing UEREs should not impact calculation
-  if(any(BAD)) { UERE[BAD] <- 1 }
-
   ### AICc values ###
-  AICc <- vapply(1:length(data),function(i){ sum( log( (2*pi)*(UERE[Ci[[i]]]^2 / w[[i]]) ) ) },numeric(1)) # (animals)
+  if(any(BAD)) { UERE[BAD] <- NA } # missing UEREs should not impact calculation
+  AICc <- vapply(1:length(data),function(i){ sum( log( (2*pi)*(UERE[Ci[[i]]]^2 / w[[i]]) ), na.rm=TRUE) },numeric(1)) # (animals)
   AICc <- length(axes) * sum(AICc)
   if(type=="speed")
   { dof <- DOF.ML }
@@ -266,14 +279,15 @@ uere.type <- function(data,trace=FALSE,type='horizontal',precision=1/2,...)
     Kc[BAD] <- 0
     dof[BAD] <- 0
   }
-  AICc <- AICc + length(axes)^2*sum( (DOF.ML+Kc)*dof/(length(axes)*dof-2) )
-  if(any(length(axes)*dof<=2)) # does not have a mean value
+  AICc <- AICc + length(axes)^2*sum( ((DOF.ML+Kc)*dof/(length(axes)*dof-2))[EST] )
+  if(any(length(axes)*dof[EST]<=2)) # does not have a mean value
   {
     AICc <- Inf
     warning("Sample size too small for AICc to exist.")
   }
 
   ### Z_reduced^2 ###
+  if(any(BAD)) { UERE[BAD] <- Inf } # missing UEREs should not impact calculation
   Pi <- lapply(1:length(data),function(k){c( w[[k]] / UERE[Ci[[k]]]^2 )}) # (animal;time)
   u2 <- lapply(1:length(data),function(k){c( colMeans((t(z[[k]])-mu[k,])^2) * Pi[[k]] )}) # (animal;time)
   if(type=="speed") # known mean
@@ -299,10 +313,14 @@ uere.type <- function(data,trace=FALSE,type='horizontal',precision=1/2,...)
 
   # fix missing UEREs
   if(any(BAD)) { UERE[BAD] <- NA }
+  if(any(ARGOS) && type=='horizontal') { dof[ARGOS] <- Inf }
 
-  attr(UERE,"DOF") <- dof # sampling distribution
-  attr(UERE,"AICc") <- AICc
-  attr(UERE,"Zsq") <- mtmean(Z2) # minimally trimmed mean in case of weird speed=0 estimates
+  UERE <- list(UERE=UERE)
+  UERE$DOF <- dof # sampling distribution
+  UERE$AICc <- AICc
+  UERE$Zsq <- mtmean(Z2) # minimally trimmed mean in case of weird speed=0 estimates
+  UERE$VAR.Zsq <- mtmean(Z2^2) - UERE$Zsq^2
+  UERE$N <- sum(Z2<Inf)
 
   return(UERE)
 }
@@ -311,31 +329,88 @@ uere.type <- function(data,trace=FALSE,type='horizontal',precision=1/2,...)
 # summarize uere object
 summary.UERE <- function(object,level=0.95,...)
 {
-  if(class(object)=="list") { return(summary.UERE.list(object,...)) }
+  if(class(object)=="list") { return(summary.UERE.list(object,level=level,...)) }
 
   TYPE <- colnames(object)
   N <- sapply(TYPE,function(type){length(DOP.LIST[[type]]$axes)}) # (type)
   DOF <- attr(object,"DOF") # (class,type)
   DOF <- t(t(DOF)*N)
 
-  UERE <- sapply(1:length(object),function(i){chisq.ci(object[i]^2,DOF=DOF[i],level=level)}) #(3,class*type)
+  UERE <- sapply(1:length(object),function(i){chisq.ci(object[i]^2,DOF=DOF[i],level=level)}) #(3CI,class*type)
   UERE <- sqrt(UERE)
-  dim(UERE) <- c(3,dim(object)) # (3,class,type)
+  dim(UERE) <- c(3,dim(object)) # (3CI,class,type)
   dimnames(UERE)[[1]] <- c("low","ML","high")
   dimnames(UERE)[2:3] <- dimnames(object)
-  UERE <- aperm(UERE,c(2,1,3))
+  UERE <- aperm(UERE,c(2,1,3)) # (class,3CI,type)
   return(UERE)
 }
 
 
 # summarize list of uere objects
-summary.UERE.list <- function(object,drop=TRUE,...)
+summary.UERE.list <- function(object,level=0.95,drop=TRUE,CI=FALSE,...)
 {
   NAMES <- names(object)
   if(is.null(NAMES)) { NAMES <- 1:length(object) }
 
+  # determine all types of data
+  # better be consistent across joint models
+  # might not be consistent within joint models' individual models
+  TYPES <- NULL
+  for(i in 1:length(object))
+  {
+    if(class(object[[i]])=="UERE") # these should be all the same
+    {
+      TYPES <- c(TYPES,names(attr(object[[i]],"AICc")))
+      TYPES <- unique(TYPES)
+    }
+    else if(class(object[[i]])=="list") # these can differ within list
+    {
+      for(j in 1:length(object[[i]]))
+      {
+        TYPES <- c(TYPES,names(attr(object[[i]][[j]],"AICc")))
+        TYPES <- unique(TYPES)
+      }
+    }
+  }
+
+  # aggregate lists of individual models to compare with joint models
+  for(i in 1:length(object))
+  {
+    if(class(object[[i]])=="list")
+    {
+      AICc <- rep(0,length(TYPES))
+      names(AICc) <- TYPES
+      N <- AICc
+      Zsq <- AICc
+      VAR.Zsq <- AICc
+
+      for(j in 1:length(object[[i]]))
+      {
+        U <- object[[i]][[j]]
+        IN <- TYPES %in% names(attr(U,"AICc"))
+        if(length(IN))
+        {
+          AICc[IN] <- AICc[IN] + attr(U,"AICc")[IN]
+          N[IN] <- N[IN] + attr(U,"N")[IN]
+          Zsq[IN] <- Zsq[IN] + attr(U,"N")[IN] * attr(U,"Zsq")[IN]
+          VAR.Zsq[IN] <- VAR.Zsq[IN] + attr(U,"N")[IN] * (attr(U,"VAR.Zsq")[IN] + attr(U,"Zsq")[IN]^2)
+        }
+      }
+
+      Zsq <- Zsq/N
+      VAR.Zsq <- VAR.Zsq/N - Zsq^2
+
+      attr(object[[i]],"AICc") <- AICc
+      attr(object[[i]],"N") <- N
+      attr(object[[i]],"Zsq") <- Zsq
+      attr(object[[i]],"VAR.Zsq") <- VAR.Zsq
+    }
+  }
+
   AIC <- sapply(object,function(U) { attr(U,"AICc") } )
+  N <- sapply(object,function(U) { attr(U,"N") } )
   Zsq <- sapply(object,function(U) { attr(U,"Zsq") } )
+  VAR.Zsq <- sapply(object,function(U) { attr(U,"VAR.Zsq") } )
 
   DIM <- dim(AIC)
   if(!length(DIM))
@@ -343,6 +418,8 @@ summary.UERE.list <- function(object,drop=TRUE,...)
     DIM <- c(1,length(AIC))
     dim(AIC) <- DIM
     dim(Zsq) <- DIM
+    dim(VAR.Zsq) <- DIM
+    dim(N) <- DIM
   }
 
   TAB <- list()
@@ -350,10 +427,19 @@ summary.UERE.list <- function(object,drop=TRUE,...)
   {
     AIC[i,] <- AIC[i,] - min(AIC[i,])
 
-    TAB[[i]] <- cbind(AIC[i,],Zsq[i,])
-
-    colnames(TAB[[i]]) <- c("\u0394AICc","Z[red]\u00B2")
+    if(CI)
+    {
+      TAB[[i]] <- sapply(1:DIM[2],function(j){ chisq.ci(Zsq[i,j],COV=VAR.Zsq[i,j]/N[i,j],level=level) }) # (3CIS,models)
+      TAB[[i]] <- cbind(AIC[i,],t(TAB[[i]]))
+      colnames(TAB[[i]]) <- c("\u0394AICc","(       ","Z[red]\u00B2","       )")
+    }
+    else
+    {
+      TAB[[i]] <- cbind(AIC[i,],Zsq[i,])
+      colnames(TAB[[i]]) <- c("\u0394AICc","Z[red]\u00B2")
+    }
     # Encoding(colnames(TAB)) <- "UTF-8"
+
 
     rownames(TAB[[i]]) <- NAMES
 
@@ -412,7 +498,7 @@ residuals.calibration <- function(data,TYPES=get.dop.types(data),...)
 # 0 : no error
 # 1 : constant error parameter fit
 # 2 : proportional error parameter fit to DOP value
-# 3 : full error no fit (circle)
+# 3 : full error calibration, no fit (circle)
 # 4 : " " (ellipse)
 # circle : force variance   scalar output
 # DIM : force covariance matrix output with dim [DIM,DIM]
@@ -498,23 +584,33 @@ try.assign.uere <- function(data,UERE,TYPE="horizontal")
   NAS <- is.na(UERE)
   POS <- !NAS
 
+  # don't overwrite ARGOS when calibrating GPS
+  ARGOS <- grepl('argos',tolower(levels(data$class)))
+  if(TYPE=='horizontal' && any(ARGOS))
+  {
+    ARGOS <- levels(data$class)[ARGOS]
+    SAFE <- (data$class != ARGOS)
+  }
+  else
+  { SAFE <- rep(TRUE,length(data$t)) }
+
   if(all(NAS))
   {
     # delete the VAR/COV columns
     data[[VAR]] <- NULL
     if(any(COV %in% names(data))) { data[COV] <- NULL }
   }
-  else
+  else if(any(SAFE))
   {
     # UERE[time] > 0
     if(any(NAS)) { UERE[NAS] <- 0 }
     U.POS <- UERE[Ci]
 
     if(DOP %in% names(data))
-    { data[[VAR]] <- (U.POS*data[[DOP]])^2/length(axes) }
+    { data[[VAR]][SAFE] <- (U.POS*data[[DOP]])[SAFE]^2/length(axes) }
     else if(!(VAR %in% names(data)))
     {
-      data[[VAR]] <- (U.POS)^2/length(axes)
+      data[[VAR]][SAFE] <- (U.POS)[SAFE]^2/length(axes)
       message("DOP values missing. Assuming DOP=1.")
     }
 
@@ -523,15 +619,15 @@ try.assign.uere <- function(data,UERE,TYPE="horizontal")
     {
       # indication of NA time
       U.NAS <- NAS[Ci]
-      data[[VAR]][U.NAS] <- Inf
+      data[[VAR]][U.NAS & SAFE] <- Inf
     }
 
     # covariance matrix (dual tagged)
     if(all(COV %in% names(data)))
     {
-      data[[COV[1]]] <- data[[VAR]]
-      data[[COV[2]]] <- 0
-      data[[COV[3]]] <- data[[VAR]]
+      data[[COV[1]]][SAFE] <- data[[VAR]][SAFE]
+      data[[COV[2]]][SAFE] <- 0
+      data[[COV[3]]][SAFE] <- data[[VAR]][SAFE]
     }
   }
 
@@ -553,7 +649,7 @@ uere.null <- function(data)
   rownames(UERE) <- CLASS
   colnames(UERE) <- TYPES
 
-  UERE <- new.UERE(UERE,DOF=UERE,AICc=UERE[1,])
+  UERE <- new.UERE(UERE,DOF=UERE,AICc=UERE[1,],Zsq=UERE[1,],VAR.Zsq=UERE[1,],N=UERE[1,])
 
   return(UERE)
 }
@@ -571,7 +667,8 @@ uere.null <- function(data)
     UERE <- cbind(UERE)
     colnames(UERE) <- "horizontal"
     if(is.null(names(value))) { rownames(UERE) <- "all" }
-    UERE <- new.UERE(UERE,DOF=NA*UERE,AICc=NA*UERE[1,])
+    AIC <- NA*UERE[1,]
+    UERE <- new.UERE(UERE,DOF=NA*UERE,AICc=AIC,Zsq=AIC,VAR.Zsq=AIC,N=AIC)
   }
 
   DOF <- attr(UERE,"DOF")
@@ -615,6 +712,9 @@ uere.null <- function(data)
     DOF.NULL <- UERE.NULL
     AICc.NULL <- UERE.NULL[1,]
     names(AICc.NULL) <- TYPES # R drops dimnames...
+    Zsq.NULL <- AICc.NULL
+    VAR.Zsq.NULL <- AICc.NULL
+    N.NULL <- AICc.NULL
 
     # copy over @UERE slot
     if(length(attr(data[[i]],"UERE")) && length(UERE))
@@ -624,6 +724,9 @@ uere.null <- function(data)
       UERE.NULL[CLASS,TYPES] <- attr(data[[i]],"UERE")
       DOF.NULL[CLASS,TYPES] <- attr(attr(data[[i]],"UERE"),"DOF")
       AICc.NULL[TYPES] <- attr(attr(data[[i]],"UERE"),"AICc")
+      Zsq.NULL[TYPES] <- attr(attr(data[[i]],"UERE"),"Zsq")
+      VAR.Zsq.NULL[TYPES] <- attr(attr(data[[i]],"UERE"),"VAR.Zsq")
+      N.NULL[TYPES] <- attr(attr(data[[i]],"UERE"),"N")
     }
 
     # copy over UERE-value (overwriting conflicts)
@@ -634,6 +737,9 @@ uere.null <- function(data)
       UERE.NULL[CLASS,TYPES] <- methods::getDataPart(UERE)
       DOF.NULL[CLASS,TYPES] <- attr(UERE,"DOF")
       AICc.NULL[TYPES] <- attr(UERE,"AICc")
+      Zsq.NULL[TYPES] <- attr(UERE,"Zsq")
+      VAR.Zsq.NULL[TYPES] <- attr(UERE,"VAR.Zsq")
+      N.NULL[TYPES] <- attr(UERE,"N")
     }
 
     # calibrate data
@@ -647,7 +753,7 @@ uere.null <- function(data)
     }
 
     # store UERE that was applied
-    UERE.NULL <- new.UERE(UERE.NULL,DOF=DOF.NULL,AICc=AICc.NULL)
+    UERE.NULL <- new.UERE(UERE.NULL,DOF=DOF.NULL,AICc=AICc.NULL,Zsq=Zsq.NULL,VAR.Zsq=VAR.Zsq.NULL,N=N.NULL)
     attr(data[[i]],"UERE") <- UERE.NULL
   }
 
@@ -691,6 +797,7 @@ get.class.mat <- function(data,LEVELS=levels(data$class))
   if("class" %in% names(data))
   {
     C <- sapply(LEVELS,function(lc){data$class==lc}) # (time,class)
+    dim(C) <- c(nrow(data),length(LEVELS))
     colnames(C) <- LEVELS
   }
   else

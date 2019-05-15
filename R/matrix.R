@@ -57,17 +57,17 @@ rotates.mat <- function(M,R) # could add tR=t(R) argument for small cost savings
 }
 
 # eccentricity squeeze transformation
-squeeze <- function(z,ecc)
+squeeze <- function(z,smgm)
 {
-  z[,1] <- z[,1] * exp(-ecc/4)
-  z[,2] <- z[,2] * exp(+ecc/4)
+  z[,1] <- z[,1] / smgm
+  z[,2] <- z[,2] * smgm
   return(z)
 }
 
 # eccentricity transform matrices
-squeeze.mat <- function(M,ecc) # (n,2,2)
+squeeze.mat <- function(M,smgm) # (n,2,2)
 {
-  R <- exp(c(-1,1)*ecc/4)
+  R <- c(1/smgm,smgm)
   M <- aperm(M,c(2,3,1)) # (2,2,n)
   M <- R * M # (2',2,n)
   M <- aperm(M,c(2,3,1)) # (2,n,2')
@@ -179,7 +179,7 @@ PDfunc <-function(M,func=function(m){1/m},force=FALSE,pseudo=FALSE,tol=.Machine$
   {
     # add up from smallest contribution to largest contribution
     INDEX <- sort(abs(M),method="quick",index.return=TRUE)$ix
-    M <- lapply(INDEX,function(i){M[i]*V[,,i]})
+    M <- lapply(INDEX,function(i){nant(M[i]*V[,,i],0)}) # 0/0 -> 0
     M <- Reduce('+',M)
   }
 
@@ -196,13 +196,28 @@ PDsolve <- function(M,force=FALSE,pseudo=FALSE,tol=.Machine$double.eps)
     M <- as.matrix(M)
     DIM <- dim(M)
   }
+  if(DIM[1]==0) { return(M) }
 
-  # check for Inf & invert those to 0
+  # check for Inf & invert those to 0 (and vice versa)
   INF <- diag(M)==Inf
-  if(any(INF))
+  ZERO <- sapply(1:nrow(M),function(i){all(M[i,]==0)})
+  if(any(INF) || any(ZERO))
   {
-    M[INF,INF] <- 0 # inverting the Inf dimensions
-    if(any(!INF)) { M[!INF,!INF] <- PDsolve(M[!INF,!INF]) } # regular inverse of remaining dimensions
+    # 1/Inf == 0
+    if(any(INF))
+    {
+      M[INF,] <- 0
+      M[,INF] <- 0
+      M[INF,INF] <- 0
+    }
+
+    # 1/0 == Inf
+    if(any(ZERO)) { M[ZERO,ZERO] <- Inf }
+
+    # regular inverse of remaining dimensions
+    REM <- !(INF|ZERO)
+    if(any(REM)) { M[REM,REM] <- PDsolve(M[REM,REM]) }
+
     return(M)
   }
 
@@ -346,6 +361,7 @@ PDclamp <- function(M)
   return(M)
 }
 
+
 # relatively smallest eigen value of matrix
 mat.min <- function(M)
 {
@@ -356,3 +372,38 @@ mat.min <- function(M)
   M <- last(M)
   return(M)
 }
+
+
+# smallest maximum of matrices (for inner products on normalized vectors)
+# if MAX=FALSE, largest minimum of matrices
+ext.mat <- function(...,MAX=TRUE)
+{
+  MATS <- list(...)
+  DIM <- dim(MATS[[1]])[1]
+  MATS <- lapply(MATS,eigen)
+
+  VAL <- NULL
+  VEC <- NULL
+  for(i in 1:length(MATS))
+  {
+    VAL <- c(VAL,MATS[[i]]$values)
+    VEC <- cbind(VEC,MATS[[i]]$vectors)
+  }
+  rm(MATS)
+
+  ORDER <- order(VAL,decreasing=MAX)
+  VAL <- VAL[ORDER]
+  VEC <- VEC[,ORDER]
+
+  MATS <- list()
+  for(i in 1:DIM)
+  {
+    MATS[[i]] <- VAL[i] * (VEC[,i] %o% VEC[,i])
+    # Grahm-Schmidt orthogonalization
+    if(i<DIM) { for(j in (i+1):DIM) { VEC[,j] <- VEC[,j] - c(VEC[,i] %*% VEC[,j]) * VEC[,i] } }
+  }
+
+  MATS <- Reduce("+",MATS)
+  return(MATS)
+}
+

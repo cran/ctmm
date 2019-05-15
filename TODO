@@ -1,20 +1,40 @@
 PRIORITY
+* precompute environments not carried over in Windows socket parallelization
+* area/error CI when MLE=0 (min of normal upper from VAR)
+* Telonics QFP class with no HDOP
+* mode methods for ctmm and UD object (start with generic) (Erin?)
+* akde on data.frame objects
+* 1D ctmm summary doesn't make sense
+* plotting GPS/ARGOS hybrid data without calibration makes GPS data invisible (VAR==0)
+* ctmm.select run OUf.isotropic before OUf.anisotropic with OU/OUF.anisotropic + OUf.isotropic parameters
+* ctmm.select optimize f of OUf in isolation first?
+* ctmm.select optimize Omega of OUO in isolation first?
+* prediction COV should be called VAR if length(axes)==1 or call everything COV
+* optimize: was rank-1 update correlation preserving? was it local?
+* 2D/3D fix argument for as.telemetry from number of satellites?
+* variogram() error on lists
+* error vignette should specify that tracking and calibration data have same location classes
+* distribute cores from ctmm.select -> ctmm.fit optimizer
+* mean, mode, median for ctmm and UD objects
+* mean ctmm object
+* overlap on mean()s of UDs (Ellie)
+* fast plot of GPS-ARGOS hybrid data
+* as.telemetry tibble->data.frame
 * update buffalo data
-* UTM import (Pati's collars: x,y,zone)
 * expose cex, lty, ... in plot.variogram
-* combine two telemetry objects for same animal but different device (dyadic UEREs)
+* combine two telemetry objects for same animal but different device (dyadic UEREs, match columns)
 * compass speed plot -- or cycle argument for speeds()
 * ctmm.fit -> id.parameters : force.error argument for when error is estimated to be 0
-* error vignette - check back on variogram
-* Telonics HDOP conversion factor (2.5)
+* error vignette - check back on variogram, correlogram
 * reference Guillaume's paper at the beginning of the periodogram vignette
-* occurrence() on the same grid
+* occurrence() on the same grid for mean() (Ellie)
 
 OVERLAP
 * overlap needs to return DOFs in an overlap object - and then define a summary function for the overlap object
 * overlaps' correlated errors
 
 ERROR PAPER
+* include error uncertainty in ctmm.fit output
 * how does error change variogram DOF calculation?
 * errors on x,y,z variograms
 * errors on periodograms?
@@ -80,6 +100,7 @@ MISC WORK
 * effective DOF for diffusion rate?
 
 PERIODIC
+* estimate periodicities in optimizer
 * calculate explicit time link for periodicity? or estimate frequency?
 * DOF[mean] should just be the stationary mean
 * variogram on mean detrended data with CTMM argument

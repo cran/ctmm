@@ -13,13 +13,19 @@ methods::setMethod("zoom",signature(x="UD"), function(x,fraction=1,...) zoom.tel
 
 
 ##############
-new.plot <- function(data=NULL,CTMM=NULL,UD=NULL,level.UD=0.95,level=0.95,units=TRUE,fraction=1,add=FALSE,xlim=NULL,ylim=NULL,...)
+new.plot <- function(data=NULL,CTMM=NULL,UD=NULL,level.UD=0.95,level=0.95,units=TRUE,fraction=1,add=FALSE,xlim=NULL,ylim=NULL,ext=NULL,...)
 {
   RESIDUALS <- !is.null(data) && !is.null(attr(data[[1]],"info")$residual)
 
   dist <- list()
   dist$name <- "meters"
   dist$scale <- 1
+
+  if(!is.null(ext))
+  {
+    xlim <- ext$x
+    ylim <- ext$y
+  }
 
   if(!add)
   {
@@ -89,11 +95,16 @@ new.plot <- function(data=NULL,CTMM=NULL,UD=NULL,level.UD=0.95,level=0.95,units=
 
     # empty base layer plot
     plot(ext, xlab=xlab, ylab=ylab, col=grDevices::rgb(1,1,1,0), asp=1, ...)
+    # plot information for further layering
+    projection <- unique(c(projection(data),projection(CTMM),projection(UD))) # some objects could be NULL
+    if(length(projection)>1) { stop("Multiple projections not yet supported.") }
+    assign("projection",projection,pos=plot.env)
+    # dimensional type
     assign("x.dim","length",pos=plot.env)
     assign("y.dim","length",pos=plot.env)
+    # unit conversion
     assign("x.scale",dist$scale,pos=plot.env)
     assign("y.scale",dist$scale,pos=plot.env)
-    assign("projection",c(data,CTMM,UD),pos=plot.env)
   } # end !add
 
   return(dist)
@@ -104,7 +115,7 @@ plot.env <- new.env()
 #######################################
 # PLOT TELEMETRY DATA
 #######################################
-plot.telemetry <- function(x,CTMM=NULL,UD=NULL,level.UD=0.95,level=0.95,DF="CDF",error=TRUE,velocity=FALSE,units=TRUE,col="red",col.level="black",col.DF="blue",col.grid="white",transparency.error=0.25,pch=1,type='p',labels=NULL,fraction=1,add=FALSE,xlim=NULL,ylim=NULL,cex=NULL,lwd=1,lwd.level=1,...)
+plot.telemetry <- function(x,CTMM=NULL,UD=NULL,level.UD=0.95,level=0.95,DF="CDF",error=TRUE,velocity=FALSE,units=TRUE,col="red",col.level="black",col.DF="blue",col.grid="white",transparency.error=0.25,pch=1,type='p',labels=NULL,fraction=1,add=FALSE,xlim=NULL,ylim=NULL,ext=NULL,cex=NULL,lwd=1,lwd.level=1,...)
 {
   alpha <- 1-level
   alpha.UD <- 1-level.UD
@@ -123,7 +134,7 @@ plot.telemetry <- function(x,CTMM=NULL,UD=NULL,level.UD=0.95,level=0.95,DF="CDF"
   # standard normal model
   if(RESIDUALS) { CTMM <- list(ctmm(sigma=1,mu=c(0,0))) }
 
-  dist <- new.plot(data=x,CTMM=CTMM,UD=UD,level.UD=level.UD,level=level,units=units,fraction=fraction,add=add,xlim=xlim,ylim=ylim,...)
+  dist <- new.plot(data=x,CTMM=CTMM,UD=UD,level.UD=level.UD,level=level,units=units,fraction=fraction,add=add,xlim=xlim,ylim=ylim,ext=ext,...)
 
   # plot cm per unit of distance plotted (m or km)
   cmpkm <- 2.54*mean(graphics::par("fin")*diff(graphics::par("plt"))[-2]/diff(graphics::par("usr"))[-2])
@@ -161,7 +172,7 @@ plot.telemetry <- function(x,CTMM=NULL,UD=NULL,level.UD=0.95,level=0.95,DF="CDF"
         for(j in 1:2)
         {
           CTMM[[i]]$sigma <- const[j]*sigma
-          plot.ctmm(CTMM[[i]],alpha.UD,col=scales::alpha(col.level[[i]],0.5),lwd=lwd.level/2,...)
+          plot.ctmm(CTMM[[i]],alpha.UD,col=malpha(col.level[[i]],0.5),lwd=lwd.level/2,...)
         }
       }
     }
@@ -172,7 +183,7 @@ plot.telemetry <- function(x,CTMM=NULL,UD=NULL,level.UD=0.95,level=0.95,DF="CDF"
   if(!is.null(UD))
   {
     UD <- lapply(UD,function(ud){ unit.UD(ud,length=dist$scale) })
-    plot.UD(UD,level.UD=level.UD,level=level,DF=DF,col.level=col.level,col.DF=col.DF,col.grid=col.grid,labels=labels,fraction=fraction,add=TRUE,xlim=xlim,ylim=ylim,cex=cex,lwd=lwd.level,...)
+    plot.UD(UD,level.UD=level.UD,level=level,DF=DF,col.level=col.level,col.DF=col.DF,col.grid=col.grid,labels=labels,fraction=fraction,add=TRUE,xlim=xlim,ylim=ylim,ext=ext,cex=cex,lwd=lwd.level,...)
   }
 
   #########################
@@ -196,6 +207,7 @@ plot.telemetry <- function(x,CTMM=NULL,UD=NULL,level.UD=0.95,level=0.95,DF="CDF"
 
   col <- prepare.p(col)
   pch <- prepare.p(pch)
+  lwd <- prepare.p(lwd)
   type <- prepare.p(type,all=TRUE)
   error <- rep(error,length(x))
 
@@ -213,6 +225,8 @@ plot.telemetry <- function(x,CTMM=NULL,UD=NULL,level.UD=0.95,level=0.95,DF="CDF"
   # now plot individually
   for(i in 1:length(x))
   {
+    if(!nrow(x[[i]])) { next } # skip empty data
+
     x[[i]] <- unit.telemetry(x[[i]],length=dist$scale)
 
     r <- x[[i]][,c('x','y')]
@@ -221,12 +235,12 @@ plot.telemetry <- function(x,CTMM=NULL,UD=NULL,level.UD=0.95,level=0.95,DF="CDF"
     ERROR <- get.error(x[[i]],list(error=TRUE,axes=c('x','y')))
     # don't want to throw z in here yet, in case of kernels
     FLAG <- attr(ERROR,"flag") # nothing, circle or ellipse?
-    if(FLAG && FLAG<=2) { ERROR <- ERROR * (10/dist$scale)^2 } # 10 meter default error
+    if(FLAG && FLAG<=2) { ERROR <- ERROR * (10/get('x.scale',pos=plot.env))^2 } # 10 meter default error
 
     # we aren't plotting if UERE is missing
     # error=FALSE or no UERE
     if(!error[i] || FLAG<=1) # DEFAULT POINTS
-    { graphics::points(r, cex=cex[[i]], col=col[[i]], pch=pch[[i]], type=type[[i]], lwd=lwd, ...) }
+    { graphics::points(r, cex=cex[[i]], col=col[[i]], pch=pch[[i]], type=type[[i]], lwd=lwd[[i]], ...) }
     else if(error[i]<3) # CIRCLE/ELLIPSE
     {
       # scale radii
@@ -252,8 +266,8 @@ plot.telemetry <- function(x,CTMM=NULL,UD=NULL,level.UD=0.95,level=0.95,DF="CDF"
           else
           {
             B2 <- vapply(1:(dim(ERROR)[1]),function(i){ eigen(ERROR[i,,],only.values=TRUE)$values },numeric(2)) # (big/small,n)
-            A2 <- B2[1,]
-            B2 <- B2[2,]
+            A2 <- clamp(B2[1,],0,Inf)
+            B2 <- clamp(B2[2,],0,A2)
           }
 
           B2 <- ifelse(B2<A2,B2/A2,1) # prevent 0/0
@@ -267,7 +281,7 @@ plot.telemetry <- function(x,CTMM=NULL,UD=NULL,level.UD=0.95,level=0.95,DF="CDF"
         alpha <- clamp((4/pxpkm) / alpha)^transparency.error
 
         bg <- NA
-        fg <- scales::alpha(col[[i]],alpha)
+        fg <- malpha(col[[i]],alpha)
       }
       else if(error[i]==2) # DISC
       {
@@ -284,8 +298,8 @@ plot.telemetry <- function(x,CTMM=NULL,UD=NULL,level.UD=0.95,level=0.95,DF="CDF"
         # area of a pixel in physical units, spread over disc
         alpha <- clamp((1/pxpkm^2) / alpha)^transparency.error
 
-        bg <- scales::alpha(col[[i]],alpha)
-        fg <- scales::alpha(col[[i]],alpha/2)
+        bg <- malpha(col[[i]],alpha)
+        fg <- malpha(col[[i]],alpha/2)
       }
 
       # plot circle
@@ -293,10 +307,13 @@ plot.telemetry <- function(x,CTMM=NULL,UD=NULL,level.UD=0.95,level=0.95,DF="CDF"
       {
         # convert to radii
         ERROR <- z * sqrt(ERROR)
-        graphics::symbols(x=r$x,y=r$y,circles=ERROR,fg=fg,bg=bg,inches=FALSE,add=TRUE,lwd=lwd,...)
+        graphics::symbols(x=r$x,y=r$y,circles=ERROR,fg=fg,bg=bg,inches=FALSE,add=TRUE,lwd=lwd[[i]],...)
       }
       else if(FLAG==4)
-      { for(j in 1:nrow(r)) { ellipsograph(mu=as.numeric(r[j,]),sigma=ERROR[j,,],level=level.UD,fg=fg[j],bg=bg[j],lwd=lwd,...) } }
+      {
+        if(length(lwd[[i]])<nrow(r)) { lwd[[i]] <- rep(lwd[[i]],nrow(r)) }
+        for(j in 1:nrow(r)) { ellipsograph(mu=as.numeric(r[j,]),sigma=ERROR[j,,],level=level.UD,fg=fg[j],bg=bg[j],lwd=lwd[[i]][j],...) }
+      }
     } # end circle/ellipse plot
     else if(error[i]==3) # kernels
     {
@@ -325,10 +342,10 @@ plot.telemetry <- function(x,CTMM=NULL,UD=NULL,level.UD=0.95,level=0.95,DF="CDF"
         ERROR <- get.error(x[[i]],ctmm(axes=c("vx","vy"),error=TRUE),circle=TRUE)
         alpha <- sqrt(rowSums(get.telemetry(x[[i]],axes=c("vx","vy"))^2)/ERROR)
         alpha <- clamp(alpha)
-        col[[i]] <- scales::alpha(col[[i]],alpha)
+        col[[i]] <- malpha(col[[i]],alpha)
       }
 
-      shape::Arrows(x0=r$x, y0=r$y, x1=(r$x+dr$vx), y1=(r$y+dr$vy), col=col[[i]], code=2, segment=T, arr.adj=1, arr.length=arr.length, arr.type="curved", lwd=lwd)
+      shape::Arrows(x0=r$x, y0=r$y, x1=(r$x+dr$vx), y1=(r$y+dr$vy), col=col[[i]], code=2, segment=T, arr.adj=1, arr.length=arr.length, arr.type="curved", lwd=lwd[[i]])
     }
   } # end telemetry loop
 }
@@ -341,11 +358,11 @@ plot.telemetry <- function(x,CTMM=NULL,UD=NULL,level.UD=0.95,level=0.95,DF="CDF"
 
 
 ##############
-plot.UD <- function(x,level.UD=0.95,level=0.95,DF="CDF",units=TRUE,col.level="black",col.DF="blue",col.grid="white",labels=NULL,fraction=1,add=FALSE,xlim=NULL,ylim=NULL,cex=NULL,lwd=1,...)
+plot.UD <- function(x,level.UD=0.95,level=0.95,DF="CDF",units=TRUE,col.level="black",col.DF="blue",col.grid="white",labels=NULL,fraction=1,add=FALSE,xlim=NULL,ylim=NULL,ext=NULL,cex=NULL,lwd=1,...)
 {
   x <- listify(x)
 
-  dist <- new.plot(UD=x,units=units,fraction=fraction,add=add,xlim=xlim,ylim=ylim,level.UD=level.UD,level=level,...)
+  dist <- new.plot(UD=x,units=units,fraction=fraction,add=add,xlim=xlim,ylim=ylim,ext=ext,level.UD=level.UD,level=level,...)
 
   # contours colour
   if(length(col.level)==length(level.UD) && length(col.level) != length(x))
@@ -384,8 +401,7 @@ plot.UD <- function(x,level.UD=0.95,level=0.95,DF="CDF",units=TRUE,col.level="bl
     {
       H <- covm(x[[i]]$H)
       theta <- H@par["angle"]
-      ecc <- H@par["eccentricity"]
-      sigma <- H@par["area"]
+      sigma <- H@par[c("major","minor")]
 
       X <- x[[i]]$r$x
       Y <- x[[i]]$r$y
@@ -394,8 +410,8 @@ plot.UD <- function(x,level.UD=0.95,level=0.95,DF="CDF",units=TRUE,col.level="bl
       SIN <- sin(theta)
 
       # grid spacing
-      du <- sqrt(sigma*exp(+ecc/2))
-      dv <- sqrt(sigma*exp(-ecc/2))
+      du <- sqrt(sigma[1])
+      dv <- sqrt(sigma[2])
 
       # bandwidth axes
       u <- outer(+X*COS,+Y*SIN,"+")
@@ -441,12 +457,12 @@ plot.UD <- function(x,level.UD=0.95,level=0.95,DF="CDF",units=TRUE,col.level="bl
     if(!any(is.na(col.level[i,,])) && !any(is.na(level.UD)))
     {
       # make sure that correct style is used for low,ML,high even in absence of lows and highs
-      plot.kde(x[[i]],level=level.UD,labels=labels[i,,2],col=scales::alpha(col.level[i,,2],1),lwd=lwd,...)
+      plot.kde(x[[i]],level=level.UD,labels=labels[i,,2],col=malpha(col.level[i,,2],1),lwd=lwd,...)
 
       if(!is.na(level) && !is.null(x[[i]]$DOF.area))
       {
         P <- sapply(level.UD, function(l) { CI.UD(x[[i]],l,level,P=TRUE)[-2] } )
-        plot.kde(x[[i]],level=P,labels=c(t(labels[i,,c(1,3)])),col=scales::alpha(c(t(col.level[i,,c(1,3)])),0.5),lwd=lwd/2,...)
+        plot.kde(x[[i]],level=P,labels=c(t(labels[i,,c(1,3)])),col=malpha(c(t(col.level[i,,c(1,3)])),0.5),lwd=lwd/2,...)
       }
     }
   }
@@ -457,7 +473,7 @@ plot.UD <- function(x,level.UD=0.95,level=0.95,DF="CDF",units=TRUE,col.level="bl
 # plot PDF stored as KDE object
 plot.df <- function(kde,DF="CDF",col="blue",...)
 {
-  col <- scales::alpha(col,(0:255)/255)
+  col <- malpha(col,(0:255)/255)
 
   if(DF=="PDF")
   {
@@ -507,7 +523,10 @@ plot.ctmm <- function(model,alpha=0.05,col="blue",bg=NA,...)
 ellipsograph <- function(mu,sigma,level=0.95,fg=graphics::par("col"),bg=NA,...)
 {
   Eigen <- eigen(sigma)
-  std <- sqrt(Eigen$values)
+  std <- Eigen$values
+  std[1] <- clamp(std[1],0,Inf)
+  std[2] <- clamp(std[2],0,std[1])
+  std <- sqrt(std)
   vec <- Eigen$vectors
 
   # confidence level = 1-alpha

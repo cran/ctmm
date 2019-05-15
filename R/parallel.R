@@ -10,7 +10,7 @@
 detectCores <- function(...,fast=TRUE)
 {
   if(fast && .Platform$OS.type=="windows") { return(1) } # Windows cannot fork
-  else { return(parallel::detectCores(...)) }
+  else { return(parallel::detectCores(logical=FALSE,...)) }
 }
 
 
@@ -32,7 +32,9 @@ resolveCores <- function(cores=1,fast=TRUE)
 plapply <- function(X,FUN,...,cores=1,fast=TRUE)
 {
   WINDOWS <- (.Platform$OS.type=="windows")
-  cores <- resolveCores(cores) # I don't need this line
+  cores <- resolveCores(cores,fast=fast)
+  cores <- min(cores,length(X)) # cap cores
+  cores <- max(1,cores)
 
   if(cores==1 || (fast && WINDOWS)) { return(lapply(X,FUN,...)) }
   else if(!WINDOWS) { return(parallel::mclapply(X,FUN,...,mc.cores=cores)) }

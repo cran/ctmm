@@ -75,6 +75,15 @@ get.telemetry <- function(data,axes=c("x","y"))
   return(data)
 }
 
+########
+set.telemetry <- function(data,value,axes=colnames(value))
+{
+  if(length(axes)==1) { data[[axes]] <- value }
+  else if(length(axes)>1) { data[,axes] <- value }
+
+  return(data)
+}
+
 #######################
 # Generic import function
 as.telemetry <- function(object,timeformat="",timezone="UTC",projection=NULL,timeout=Inf,na.rm="row",mark.rm=FALSE,drop=TRUE,...) UseMethod("as.telemetry")
@@ -171,6 +180,9 @@ pull.column <- function(object,NAMES,FUNC=as.numeric)
 # do we need a new location class for this
 missing.class <- function(DATA,TYPE)
 {
+  LEVELS <- paste0("[",TYPE,"]")
+  LEVELS[2] <- paste0("NA",LEVELS)
+
   # column to check for NAs
   if(TYPE=="speed") { COL <- "speed" }
   else if(TYPE=="vertical") { COL <- "z" }
@@ -190,7 +202,7 @@ missing.class <- function(DATA,TYPE)
       if(length(OVER))
       {
         OVER <- as.factor(NAS)
-        levels(OVER) <- c(TYPE,"missing")
+        levels(OVER) <- LEVELS
         DATA$class <- paste(as.character(DATA$class),as.character(OVER))
         DATA$class <- as.factor(DATA$class)
         rm(OVER)
@@ -200,7 +212,7 @@ missing.class <- function(DATA,TYPE)
     else # we need a location class for missing TYPE
     {
       DATA$class <- as.factor(NAS)
-      levels(DATA$class) <- c(TYPE,"missing")
+      levels(DATA$class) <- LEVELS
     }
 
     # zero missing TYPE
@@ -278,13 +290,22 @@ as.telemetry.data.frame <- function(object,timeformat="",timezone="UTC",projecti
   # make column names canonicalish
   names(object) <- tolower(names(object))
 
+  # manually marked outliers
+  COL <- c("manually.marked.outlier","marked.outlier","outlier")
+  COL <- pull.column(object,COL,as.logical)
+  if(mark.rm && length(COL))
+  {
+    COL <- is.na(COL) | !COL
+    object <- object[COL,]
+  }
+
   # timestamp column
-  COL <- c('timestamp','Acquisition.Start.Time','Acquisition.Time','time','Date.GMT','Date.Local','GMT.Time')
+  COL <- c('timestamp','Acquisition.Start.Time','Acquisition.Time','Date.Time','Date.Time.GMT','time','Date.GMT','Date.Local','GMT.Time')
   COL <- pull.column(object,COL,FUNC=as.character)
   COL <- asPOSIXct(COL,timeformat=timeformat,timezone=timezone)
   DATA <- data.frame(timestamp=COL)
 
-  COL <- c("animal.ID","individual.local.identifier","local.identifier","individual.ID","Name","ID","tag.local.identifier","tag.ID","deployment.ID","track.ID")
+  COL <- c("animal.ID","individual.local.identifier","local.identifier","individual.ID","Name","ID","tag.local.identifier","tag.ID","deployment.ID","track.ID","band.number","band.num","device.info.serial")
   COL <- pull.column(object,COL,as.factor)
   if(length(COL)==0)
   {
@@ -297,14 +318,47 @@ as.telemetry.data.frame <- function(object,timeformat="",timezone="UTC",projecti
   COL <- pull.column(object,COL)
   DATA$longitude <- COL
 
-  COL <- c("location.lat","Latitude","lat","GPS.Latitude")
+  COL <- c("location.lat","Latitude","latt","lat","GPS.Latitude")
   COL <- pull.column(object,COL)
   DATA$latitude <- COL
 
-  # manually marked outliers
-  COL <- c("manually.marked.outlier","marked.outlier","outlier")
-  COL <- pull.column(object,COL,as.logical)
-  if(mark.rm && length(COL)) { object <- object[!COL,] }
+  # UTM locations if long-lat not present
+  if(all(c('longitude','latitude') %nin% names(DATA)))
+  {
+    message("Geocentric coordinates not found. Looking for UTM coordinates.")
+
+    COL <- c("GPS.UTM.zone","UTM.zone","zone")
+    COL <- pull.column(object,COL,FUNC=as.character)
+    zone <- COL
+
+    COL <- c("GPS.UTM.Easting","GPS.UTM.East","GPS.UTM.x","UTM.Easting","UTM.East","UTM.x","Easting","East","x")
+    COL <- pull.column(object,COL)
+    XY <- COL
+
+    COL <- c("GPS.UTM.Northing","GPS.UTM.North","GPS.UTM.y","UTM.Northing","UTM.North","UTM.y","Northing","North","y")
+    COL <- pull.column(object,COL)
+    XY <- cbind(XY,COL)
+
+    if(!is.null(XY) && ncol(XY)==2 && !is.null(zone))
+    {
+      # construct UTM projections
+      if(any(grepl("^[0-9]*$",zone))) { message('UTM zone missing lattitude bands; assuming UTM hemisphere="north". Alternatively, format zone column "# +south".') }
+      zone <- paste0("+proj=utm +zone=",zone)
+
+      # convert to long-lat
+      colnames(XY) <- c("x","y")
+      XY <- sapply(1:nrow(XY),function(i){rgdal::project(XY[i,,drop=FALSE],zone[i],inv=TRUE)})
+      XY <- t(XY)
+
+      # work with long-lat as if imported directly
+      DATA$longitude <- XY[,1]
+      DATA$latitude <- XY[,2]
+    }
+    else
+    { stop("Could not identify location columns.") }
+
+    rm(zone,XY)
+  }
 
   ###############################################
   # TIME & PROJECTION
@@ -330,11 +384,15 @@ as.telemetry.data.frame <- function(object,timeformat="",timezone="UTC",projecti
   {
     DATA$COV.angle <- COL
     DATA$HDOP <- pull.column(object,"Argos.GDOP")
+
     # according to ARGOS, the following can be missing on <4 message data... but it seems present regardless
-    DATA[[DOP.LIST$horizontal$VAR]] <- pull.column(object,"Argos.error.radius")^2/2
     DATA$COV.major <- pull.column(object,"Argos.semi.major")^2/2
     DATA$COV.minor <- pull.column(object,"Argos.semi.minor")^2/2
-    # 1/2 from McClintock et al (2014) & in line with HDOP conventions
+
+    if(DOP.LIST$horizontal$VAR %in% names(object))
+    { DATA[[DOP.LIST$horizontal$VAR]] <- pull.column(object,"Argos.error.radius")^2/2 }
+    else
+    { DATA[[DOP.LIST$horizontal$VAR]] <- (DATA$COV.minor + DATA$COV.major)/2 }
   }
 
   # ARGOS error categories (older ARGOS data <2011)
@@ -360,6 +418,9 @@ as.telemetry.data.frame <- function(object,timeformat="",timezone="UTC",projecti
     DATA$COV.major <- ARGOS.major[COL]
     DATA[[DOP.LIST$horizontal$VAR]] <- ARGOS.radii[COL]
     DATA$HDOP <- sqrt(2*ARGOS.radii)[COL]
+
+    # remove Z class for now
+    DATA <- DATA[COL!="Z",]
   }
 
   ############
@@ -368,9 +429,9 @@ as.telemetry.data.frame <- function(object,timeformat="",timezone="UTC",projecti
   COL <- pull.column(object,COL)
   if(length(COL))
   {
-    # estimated from Scott's calibration data
     DATA$HDOP <- COL
-    DATA[[DOP.LIST$horizontal$VAR]] <- 1.2304709680947150^2/2*COL^2
+    # estimated from calibration data of Scott LaPoint; Thomas Pfeiffer & Bernd-Ulrich Meyburg
+    DATA[[DOP.LIST$horizontal$VAR]] <- (1.673414^2/2) * COL^2
 
     NAS <- is.na(DATA$HDOP)
     if(any(NAS))
@@ -416,27 +477,78 @@ as.telemetry.data.frame <- function(object,timeformat="",timezone="UTC",projecti
   # HDOP
   if(!("HDOP" %in% names(DATA)))
   {
-    COL <- c("GPS.HDOP","HDOP","Horizontal.Dilution","GPS.Horizontal.Dilution","GPS.DOP","DOP","GPS.PDOP","PDOP","GPS.GDOP","GDOP")
+    COL <- c("GPS.HDOP","HDOP","Horizontal.DOP","GPS.Horizontal.Dilution","Horizontal.Dilution")
+    COL <- pull.column(object,COL)
+    if(length(COL)) { DATA$HDOP <- COL }
+  }
+
+  # DOP
+  if(!("HDOP" %in% names(DATA)))
+  {
+    COL <- c("GPS.DOP","DOP","GPS.Dilution","Dilution")
     COL <- pull.column(object,COL)
     if(length(COL))
     {
+      message("HDOP values not found. Using ambiguous DOP values.")
       DATA$HDOP <- COL
-      # message("HDOP values found; UERE will have to be fit. See help(\"uere\").")
+    }
+  }
+
+  # PDOP
+  if(!("HDOP" %in% names(DATA)))
+  {
+    COL <- c("GPS.PDOP","PDOP","Position.DOP","GPS.Position.Dilution","Position.Dilution")
+    COL <- pull.column(object,COL)
+    if(length(COL))
+    {
+      message("HDOP values not found. Using PDOP values.")
+      DATA$HDOP <- COL
+    }
+  }
+
+  # GDOP
+  if(!("HDOP" %in% names(DATA)))
+  {
+    COL <- c("GPS.GDOP","GDOP","Geometric.DOP","GPS.Geometric.Dilution","Geometric.Dilution")
+    COL <- pull.column(object,COL)
+    if(length(COL))
+    {
+      message("HDOP values not found. Using GDOP values.")
+      DATA$HDOP <- COL
     }
   }
 
   # approximate DOP from # satellites if necessary
   if(!("HDOP" %in% names(DATA)))
   {
-    COL <- c("GPS.satellite.count","satellite.count","NumSats","satellites.used","Satellites","Sats") # Counts? Messages?
+    COL <- c("GPS.satellite.count","satellite.count","NumSats","satellites.used","Satellites","Sats","Satt") # Counts? Messages?
     COL <- pull.column(object,COL)
     if(length(COL))
     {
       message("HDOP values not found. Approximating via # satellites.")
       COL <- 10/(COL-2)
       DATA$HDOP <- COL
-      # message("HDOP values approximated; UERE will have to be fit. See help(\"uere\").")
     }
+  }
+
+  # GPS-ARGOS hybrid data
+  COL <- "sensor.type"
+  COL <- pull.column(object,COL,FUNC=as.factor)
+  if(length(COL))
+  {
+    levels(COL) <- tolower(levels(COL))
+    LEVELS <- levels(COL)
+    if(('gps' %in% LEVELS) && any(grepl('argos',LEVELS)))
+    {
+      GPS <- (COL=='gps')
+      DATA$COV.angle[GPS] <- 0
+      DATA$COV.major[GPS] <- 0
+      DATA$COV.minor[GPS] <- 0
+      DATA$HDOP[GPS & is.na(DATA$HDOP)] <- 1
+      DATA$VAR.xy[GPS & is.na(DATA$VAR.xy)] <- 0
+      rm(GPS)
+    }
+    rm(LEVELS)
   }
 
   # account for missing DOP values
@@ -445,7 +557,7 @@ as.telemetry.data.frame <- function(object,timeformat="",timezone="UTC",projecti
   ###########################
   # generic location classes
   # includes Telonics Gen4 location classes (use with HDOP information)
-  COL <- c("GPS.fix.type","fix.type","Fix.Attempt","GPS.Fix.Attempt","Telonics.Fix.Attempt","Fix.Status")
+  COL <- c("GPS.fix.type","fix.type","Fix.Attempt","GPS.Fix.Attempt","Telonics.Fix.Attempt","Fix.Status","sensor.type","Fix")
   COL <- pull.column(object,COL,FUNC=as.factor)
   if(length(COL)) { DATA$class <- COL }
 
@@ -464,7 +576,7 @@ as.telemetry.data.frame <- function(object,timeformat="",timezone="UTC",projecti
   # timed-out fixes
   if(timeout<Inf)
   {
-    COL <- c("GPS.time.to.fix","time.to.fix","fix.time","time.to.get.fix","Duration")
+    COL <- c("GPS.time.to.fix","time.to.fix","GPS.TTF","TTF","GPS.fix.time","fix.time","time.to.get.fix","Duration","GPS.navigation.time","navigation.time")
     COL <- pull.column(object,COL)
     if(length(COL))
     {
@@ -530,7 +642,7 @@ as.telemetry.data.frame <- function(object,timeformat="",timezone="UTC",projecti
       # SPEED ERE
       COL <- "eobs.speed.accuracy.estimate"
       COL <- pull.column(object,COL)
-      if(length(COL) && FALSE) # e-obs column is terrible for error estimation, location error estimates are better
+      if(length(COL) && FALSE) # e-obs column is terrible for error estimation, location error estimates are better # but they do not cross validate
       {
         # UERE from Scott's calibration data
         DATA[[DOP.LIST$speed$DOP]] <- COL
@@ -603,9 +715,9 @@ as.telemetry.data.frame <- function(object,timeformat="",timezone="UTC",projecti
 
     # combine data.frame with ancillary info
     info <- list(identity=id[i], timezone=timezone, projection=projection)
-    AICc <- NA*UERE[1,]
-    names(AICc) <- colnames(UERE) # R drops dimnames...
-    UERE <- new.UERE(UERE,DOF=NA*UERE,AICc=AICc)
+    AIC <- NA*UERE[1,]
+    names(AIC) <- colnames(UERE) # R drops dimnames...
+    UERE <- new.UERE(UERE,DOF=NA*UERE,AICc=AIC,Zsq=AIC,VAR.Zsq=AIC,N=AIC)
     telist[[i]] <- new.telemetry( telist[[i]] , info=info, UERE=UERE )
   }
   rm(DATA)

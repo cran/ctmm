@@ -30,8 +30,8 @@ as.telemetry(object,timeformat="",timezone="UTC",projection=NULL,timeout=Inf,na.
   \item{timeformat}{Format argument for \code{\link{strptime}}.}
   \item{timezone}{Timezone argument for \code{\link{strptime}}.}
   \item{projection}{Optional PROJ.4 projection argument to be fed to \code{\link[rgdal]{project}}.}
-  %\item{UERE}{"User equivalent range errors" needed to translate DOP values into location uncertainty.}
-  \item{timeout}{GPS location fix timeout value (seconds). Potentially useful for categorizing accuracy. \code{timeout=max} will use the maximum value.}
+  \item{timeout}{GPS location fix timeout value (seconds) for assigning a \code{"timed-out"} location class.}
+  %\item{class.2D}{Assign location classes \code{"2D"} and \code{"3D"} to fixes with \code{3} and \code{>3} satellites.}
   \item{na.rm}{If some values are \code{NA} in the data frame, are the rows (times) deleted or are the columns (data types) deleted.}
   \item{mark.rm}{Delete Movebank manually marked outliers. Also see \code{\link{outlie}}.}
   \item{drop}{Only return a \code{telemetry} object for one individual if \code{TRUE}. Always return a \code{list} of telemetry objects if \code{FALSE}.}
@@ -44,6 +44,8 @@ Global migrations that are not along one geodesic (locally straight line) will p
 
 \code{as.telemetry} assumes \href{https://www.movebank.org/node/2381}{Movebank naming conventions}.
 Sufficient MoveBank columns include \code{individual.local.identifier} (or \code{tag.local.identifier}), \code{timestamp}, \code{location.long} and \code{location.lat}, while the optional Movebank columns include (E-OBS) \code{eobs.horizontal.accuracy.estimate}, (Telonics) \code{GPS.Horizontal.Error}, \code{GPS.HDOP}, (ARGOS) \code{Argos.orientation}, \code{Argos.semi.minor} and \code{Argos.semi.major} or \code{Argos.location.class}, etc..
+To have all columns detected and not overwrite eachother's information, \bold{it is best to have only one tracking device model per file imported}.
+Multiple deployments on a single individual can be merged afterwards.
 
 The \code{GPS.HDOP} value requires the device's UERE value to be translated into telemetry errors. The UERE represents the RMS error given ideal (\eqn{HDOP=1}) satellite conditions. Therefore, if your device is purported to have an accuracy of 10 meters, then the UERE is likely around 10 meters. Consult your device manual and manufacturer for a specific value or see \code{\link{uere}} for UERE calibration.
 }

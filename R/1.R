@@ -1,8 +1,8 @@
 # this is stuff that needs to be run first (and in the right order) for S4 crap to work
 
 methods::setOldClass("UERE")
-new.UERE <- methods::setClass("UERE",contains="matrix",representation=methods::representation(DOF="matrix",AICc="numeric",Zsq="numeric"),
-                              prototype=methods::prototype(matrix(),DOF=matrix(),AICc=numeric(),Zsq=numeric()))
+new.UERE <- methods::setClass("UERE",contains="matrix",representation=methods::representation(DOF="matrix",AICc="numeric",Zsq="numeric",VAR.Zsq="numeric",N="numeric"),
+                              prototype=methods::prototype(matrix(),DOF=matrix(),AICc=numeric(),Zsq=numeric(),VAR.Zsq=numeric(),N=numeric()))
 
 methods::setOldClass("telemetry")
 new.telemetry <- methods::setClass("telemetry",contains="data.frame",representation=methods::representation(info="list",UERE="UERE"),
@@ -46,3 +46,7 @@ emulate <- function(object,...) UseMethod("emulate")
 AICc <- function(object,...) UseMethod("AICc")
 speed <- function(object,...) UseMethod("speed")
 speeds <- function(object,...) UseMethod("speeds")
+modes <- function(object,...) UseMethod("modes")
+
+# internal S3 generic function
+pars <- function(...) { UseMethod("pars") }

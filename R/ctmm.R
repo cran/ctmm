@@ -1,5 +1,3 @@
-new.covm <- methods::setClass("covm", representation("matrix",par="numeric",isotropic="logical"))
-
 #######################################
 # convenience wrapper for new.ctmm
 ctmm <- function(tau=NULL,omega=FALSE,isotropic=FALSE,range=TRUE,circle=FALSE,error=FALSE,axes=c("x","y"),...)
@@ -102,6 +100,10 @@ get.taus <- function(CTMM,zeroes=FALSE)
     CTMM$tau.names <- "tau velocity"
     CTMM$Omega2 <- 1/CTMM$tau[2] # mean square speed modulo diffusion coefficient (not really Omega^2)
     CTMM$J.Omega2 <- -1/CTMM$tau[2]^2
+
+    CTMM$f <- 1/CTMM$tau
+    CTMM$f.nu <- c( mean(CTMM$f) , +diff(CTMM$f)/2 ) # (f,nu)
+    CTMM$TfOmega2 <- 2*CTMM$f.nu[1]/CTMM$Omega2 # 2f/Omega^2 term
   }
   else if(K>1 && CTMM$tau[1]>CTMM$tau[2]) # overdamped
   {
@@ -164,159 +166,6 @@ get.taus <- function(CTMM,zeroes=FALSE)
 }
 
 
-
-# 2D covariance matrix universal format
-covm <- function(pars,isotropic=FALSE,axes=c("x","y"))
-{
-  if(is.null(pars)) { return(NULL) }
-
-  if(length(axes)==1)
-  {
-    sigma <- array(pars,c(1,1))
-    pars <- sigma[1,1]
-
-    names(pars) <- c("area")
-  }
-  else if(length(axes)==2)
-  {
-    if(length(pars)==1)
-    {
-      pars <- c(pars,0,0)
-      sigma <- diag(pars[1],2)
-    }
-    else if(length(pars)==3)
-    { sigma <- sigma.construct(pars) }
-    else if(length(pars)==4)
-    {
-      sigma <- pars
-      if(class(pars)=="covm") { pars <- attr(pars,'par') }
-      else { pars <- sigma.destruct(sigma,isotropic=isotropic) }
-    }
-
-    # isotropic error check
-    if(isotropic)
-    {
-      pars <- c(mean(diag(sigma)),0,0)
-      sigma <- diag(pars[1],2)
-    }
-
-    names(pars) <- c("area","eccentricity","angle")
-  }
-
-  dimnames(sigma) <- list(axes,axes)
-
-  new.covm(sigma,par=pars,isotropic=isotropic)
-}
-
-# construct covariance matrix from 1-3 parameters
-sigma.construct <- function(pars)
-{
-  GM <- pars[1]
-  if(length(pars)==1)
-  {
-    e <- 0
-    theta <- 0
-  }
-  else
-  {
-    e <- pars[2]
-    theta <- pars[3]
-  }
-
-  u <- c(cos(theta),sin(theta))
-  v <- c(-sin(theta),cos(theta))
-  e <- exp(e/2)
-
-  sigma <- GM * ( (u%o%u)*e + (v%o%v)/e )
-
-  return(sigma)
-}
-
-# reduce covariance matrix to 1-3 parameters
-sigma.destruct <- function(sigma,isotropic=FALSE) # last arg not implemented
-{
-  stuff <- eigen(sigma)
-
-  e <- stuff$values
-  GM <- sqrt(prod(e))
-  e <- log(e[1]/e[2])
-
-  if(e==0)
-  { theta <- 0 }
-  else
-  {
-    theta <- stuff$vectors[,1]
-    theta <- atan(theta[2]/theta[1])
-  }
-
-  return(c(GM,e,theta))
-}
-
-# return the COV matrix for covm par representation
-COV.covm <- function(sigma,n,k=1,REML=TRUE)
-{
-  isotropic <- sigma@isotropic
-  par <- sigma@par
-  sigma <- methods::getDataPart(sigma)
-  DIM <- sqrt(length(sigma))
-
-  A <- par["area"]
-  ecc <- par["eccentricity"]
-  theta <- par["angle"]
-
-  DOF.mu <- n
-  COV.mu <- sigma/n
-
-  if(REML) { n <- n-k }
-
-  if(isotropic || DIM==1)
-  {
-    COV <- cbind( 2*A^2/(n*DIM) )
-    dimnames(COV) <- list("area","area")
-  }
-  else # 2D
-  {
-    # orient eccentricity
-    # ecc <- sign(sigma[1,1]-sigma[2,2]) * ecc
-
-    # covariance matrix for c( sigma_xx , sigma_yy , sigma_xy )
-    COV <- diag(0,3)
-    COV[1:2,1:2] <- 2/n * sigma^2
-    COV[3,] <- c( 2*sigma[1,1]*sigma[1,2] , 2*sigma[2,2]*sigma[1,2] , sigma[1,1]*sigma[2,2]+sigma[1,2]^2 )/n
-    COV[,3] <- COV[3,]
-
-    # gradient matrix d sigma / d par
-    # d matrix / d area
-    grad <- c( sigma[1,1] , sigma[2,2] , sigma[1,2] )/A
-    # d matrix / d eccentricity
-    grad <- cbind( grad, A/2*c( sinh(ecc/2)+cosh(ecc/2)*cos(2*theta) , sinh(ecc/2)-cosh(ecc/2)*cos(2*theta) , cosh(ecc/2)*sin(2*theta) ) )
-    # d matrix / d angle
-    grad <- cbind( grad, c( -2*sigma[1,2] , 2*sigma[1,2] , A*sinh(ecc/2)*2*cos(2*theta) ) )
-
-    # gradient matrix d par / d sigma via inverse function theorem
-    grad <- solve(grad)
-
-    COV <- (grad) %*% COV %*% t(grad)
-    COV <- He(COV) # asymmetric errors
-    dimnames(COV) <- list(names(par),names(par))
-  }
-
-  return(list(COV=COV,COV.mu=COV.mu,DOF.mu=DOF.mu))
-}
-
-
-# blank generic function
-pars <- function(...) { UseMethod("pars") }
-
-# return the canonical parameters of a covariance matrix
-pars.covm <- function(COVM)
-{
-  if(COVM@isotropic)
-  { return(COVM@par[1]) }
-  else
-  { return(COVM@par) }
-}
-
 # returns the canonical parameters of a tau vector
 pars.tauv <- function(tau,tauc=tau)
 {
@@ -330,45 +179,25 @@ pars.tauv <- function(tau,tauc=tau)
   { return(tau[-1]) }
 }
 
-############################
-# coarce infinite parameters into finite parameters appropriate for numerics
+
 ###########################
-ctmm.prepare <- function(data,CTMM,precompute=TRUE,tau=TRUE)
+ctmm.prepare <- function(data,CTMM,precompute=TRUE,tau=TRUE,DIM=length(CTMM$axes))
 {
   # prepare timescale related info
   if(tau)
   {
     K <- length(CTMM$tau)  # dimension of hidden state per spatial dimension
     axes <- CTMM$axes
-    range <- TRUE
+    # range <- TRUE
 
     if(K>0)
     {
-      # numerical limit for rangeless processes
-      if(CTMM$tau[1]==Inf)
-      {
-        range <- FALSE
-        # aim for OU/OUF decay that is half way to machine epsilon
-        CTMM$tau[1] <- log(2^((.Machine$double.digits-1)/2))*(last(data$t)-data$t[1])
-        # CTMM$tau[1] <- (last(data$t)-data$t[1]) / (.Machine$double.eps)^(1/4)
-
-        # diffusion -> variance
-        if(!is.null(CTMM$sigma))
-        {
-          TAU <- CTMM$tau[1]
-          CTMM$sigma <- CTMM$sigma*TAU
-          CTMM$sigma@par[1] <- CTMM$sigma@par[1]*TAU
-        }
-      }
-
       # continuity reduction
-      CTMM$tau = CTMM$tau[CTMM$tau!=0]
+      CTMM$tau = CTMM$tau[CTMM$tau>0]
       K <- length(CTMM$tau)
     }
-    # I am this lazy
-    # if(K==0) { K <- 1 ; CTMM$tau <- 0 }
 
-    CTMM$range <- range
+    CTMM$K <- K
   }
 
   # evaluate mean function for this data set if no vector is provided
@@ -384,8 +213,6 @@ ctmm.prepare <- function(data,CTMM,precompute=TRUE,tau=TRUE)
     CTMM$UU <- UU
     CTMM$REML.loglike <- length(CTMM$axes)/2*log(det(UU)) # extra term for REML likelihood
 
-    # necessary spatial dimension of Kalman filter
-    if(CTMM$error && CTMM$circle && !CTMM$isotropic) { DIM <- 2 } else { DIM <- 1 }
     # construct error matrix, if UERE is unknown construct error matrix @ UERE=1
     ERROR <- CTMM
     ERROR$error <- as.logical(ERROR$error)
@@ -403,21 +230,11 @@ ctmm.repair <- function(CTMM,K=length(CTMM$tau))
   if(K && length(CTMM$tau)) { CTMM$tau <- replace(numeric(K),1:length(CTMM$tau),CTMM$tau) }
   else if(K) { CTMM$tau <- numeric(K) }
 
-  if(!CTMM$range)
+  if(FALSE && !CTMM$range) # no longer needed
   {
-    K <- length(CTMM$tau)
-
-    # variance -> diffusion
-    TAU <- CTMM$tau[1]
-    CTMM$sigma <- CTMM$sigma/TAU
-    CTMM$sigma@par[1] <- CTMM$sigma@par[1]/TAU
-    CTMM$tau[1] <- Inf
-
-    ## delete garbate estimates
-    # CTMM$mu <- NULL
-    # CTMM$COV.mu <- NULL
-    # CTMM$DOF.mu <- NULL
+    K <- length(CTMM$tau) # why do I need this now?
   }
+  CTMM$K <- NULL
 
   # erase evaluated mean vector from ctmm.prepare
   CTMM$class.mat <- NULL

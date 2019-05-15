@@ -7,47 +7,62 @@ Optimizer <- function(par,fn,...,method="Nelder-Mead",lower=-Inf,upper=Inf,perio
   precision <- maxit <- NULL
   default <- list(precision=1/2,maxit=.Machine$integer.max,parscale=pmin(abs(par),abs(par-lower),abs(upper-par)))
   control <- replace(default,names(control),control)
-  # check does not like attach
+  # R check does not like attach
   NAMES <- names(control) ; for(i in 1:length(control)) { assign(NAMES[i],control[[i]]) }
 
   if(any(parscale==0)) { parscale[parscale==0] <- 1 }
 
   if(method=="pNewton") # use mc.optim
   { RESULT <- mc.optim(par=par,fn=fn,lower=lower,upper=upper,period=period,control=control) }
-  else if(length(par)==1)
+  else
   {
-    # try optimize (can fail with high skew & kurtosis)
-    tol <- 3*sqrt(2*.Machine$double.eps^precision) # digit precision
-    ATTEMPT <- stats::optimize(f=fn,...,lower=max(lower,-10*abs(par)),upper=min(upper,10*abs(par)),tol=tol)
-    RESULT <- rbind(c(ATTEMPT$minimum,ATTEMPT$objective))
-
-    # log scale backup that can't capture zero boundary
-    ndigit <- -log((.Machine$double.eps)^precision,10)
-    steptol <- sqrt(2*.Machine$double.eps^precision)
-    ATTEMPT <- stats::nlm(function(p){f=fn(par*exp(p))},p=0,...,ndigit=ndigit,gradtol=0,steptol=steptol,stepmax=log(10),iterlim=maxit)
-    RESULT <- rbind(RESULT,c(par*exp(ATTEMPT$estimate),ATTEMPT$minimum))
-
-    # choose the better estimate
-    MIN <- which.min(RESULT[,2])
-    RESULT <- list(par=RESULT[MIN,1],value=RESULT[MIN,2])
-  }
-  else     # use optim
-  {
-    control$zero <- NULL
-    control$precision <- NULL
-    if(!is.null(control$covariance)) { control$parscale <- sqrt(abs(diag(control$covariance))) }
-    control$covariance <- NULL
-    if(method=="Nelder-Mead")
+    # wrap objective function in try()
+    func <- function(par,...)
     {
-      lower <- -Inf
-      upper <- Inf
-      control$reltol <- .Machine$double.eps^precision
+      FN <- try(fn(par,...))
+      if(class(FN)!="numeric" || is.nan(FN))
+      {
+        warning("Objective function failure at c(",paste(names(par),collapse=','),') = c(',paste(par,collapse=','),')')
+        FN <- Inf
+      }
+      return(FN)
     }
-    else
+
+    if(length(par)==1)
     {
-      control$factr <- .Machine$double.eps^precision
+      # try optimize (can fail with high skew & kurtosis)
+      tol <- 3*sqrt(2*.Machine$double.eps^precision) # digit precision
+      ATTEMPT <- stats::optimize(f=func,...,lower=max(lower,-10*abs(par)),upper=min(upper,10*abs(par)),tol=tol)
+      RESULT <- rbind(c(ATTEMPT$minimum,ATTEMPT$objective))
+
+      # log scale backup that can't capture zero boundary
+      ndigit <- -log((.Machine$double.eps)^precision,10)
+      steptol <- sqrt(2*.Machine$double.eps^precision)
+      ATTEMPT <- stats::nlm(function(p){f=func(par*exp(p))},p=0,...,ndigit=ndigit,gradtol=0,steptol=steptol,stepmax=log(10),iterlim=maxit)
+      RESULT <- rbind(RESULT,c(par*exp(ATTEMPT$estimate),ATTEMPT$minimum))
+
+      # choose the better estimate
+      MIN <- which.min(RESULT[,2])
+      RESULT <- list(par=RESULT[MIN,1],value=RESULT[MIN,2])
     }
-    RESULT <- stats::optim(par=par,fn=fn,method=method,lower=lower,upper=upper,control=control,...)
+    else     # use optim
+    {
+      control$zero <- NULL
+      control$precision <- NULL
+      if(!is.null(control$covariance)) { control$parscale <- sqrt(abs(diag(control$covariance))) }
+      control$covariance <- NULL
+      if(method=="Nelder-Mead")
+      {
+        lower <- -Inf
+        upper <- Inf
+        control$reltol <- .Machine$double.eps^precision
+      }
+      else
+      {
+        control$factr <- .Machine$double.eps^precision
+      }
+      RESULT <- stats::optim(par=par,fn=func,method=method,lower=lower,upper=upper,control=control,...)
+    }
   }
 
   return(RESULT)
@@ -191,6 +206,8 @@ QuadTest <- function(x,y,MIN=which.min(y),thresh=0.5)
   return(all(abs(r)<thresh))
 }
 
+
+########################
 # does the line search satisfy the some Wolfe-like conditions
 WolfeTest <- function(x,y,grad.i,i=1,MIN=which.min(y),const=c(1,1),thresh=0.1)
 {
@@ -206,6 +223,7 @@ WolfeTest <- function(x,y,grad.i,i=1,MIN=which.min(y),const=c(1,1),thresh=0.1)
   if(is.nan(DIFF$gradient)) { return(TRUE) } # numerical error - too tight
   else { return(TEST<=thresh) }
 }
+
 
 ######################
 # minimally rotate orthonormal basis DIR to include vec
@@ -263,6 +281,8 @@ rank1update <- function(H.LINE,LINE,hessian,covariance)
   return(list(hessian=hessian,covariance=covariance,condition=FACT))
 }
 
+
+##################
 # best number of calculations to make with min count and cores
 mc.min <- function(min,cores=detectCores())
 {
@@ -287,7 +307,7 @@ mc.optim <- function(par,fn,...,lower=-Inf,upper=Inf,period=F,control=list())
   # check complains about visible bindings
   fnscale <- parscale <- maxit <- precision <- trace <- cores <- hessian <- covariance <- NULL
   # fix default control arguments
-  default <- list(fnscale=1,parscale=pmin(abs(par),abs(par-lower),abs(upper-par)),maxit=100,trace=FALSE,precision=NULL,cores=NULL,hessian=NULL,covariance=NULL,stages=NULL)
+  default <- list(fnscale=1,parscale=pmin(abs(par),abs(par-lower),abs(upper-par)),maxit=100,trace=FALSE,precision=NULL,cores=1,hessian=NULL,covariance=NULL,stages=NULL)
   control <- replace(default,names(control),control)
   # check does not like attach
   NAMES <- names(control)

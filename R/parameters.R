@@ -1,30 +1,33 @@
+POSITIVE.PARAMETERS <- c("major","minor","tau position","tau velocity","tau","omega","error")
+
 # clean up parameter arrays
 clean.parameters <- function(par)
 {
   NAMES <- names(par)
 
-  # enforce positivity
-  if("area" %in% NAMES) { par["area"] <- abs(par["area"]) }
+  for(P in POSITIVE.PARAMETERS) { if(P %in% NAMES) { par[P] <- clamp(par[P],0,Inf) } }
 
-  if("eccentricity" %in% NAMES)
+  if("minor" %in% NAMES) # covariance parameters
   {
     # swap major and minor axis
-    if(par["eccentricity"]<0)
+    if(par["minor"]>1)
     {
-      par["eccentricity"] <- abs(par["eccentricity"])
       par["angle"] <- par["angle"] - pi/2
+
+      # not profiled
+      if('major' %in% NAMES) { par['major'] <- par['major'] * par['minor'] }
+      # else 'major' will be profiled
+
+      par['minor'] <- 1/par['minor']
+
     }
 
     # wrap angle back
     par["angle"] <- (((par["angle"]/pi+1/2) %% 1) - 1/2)*pi
   }
 
-  # enforce positivity
-  TAUS <- startsWith(NAMES,"tau")
-  if(length(TAUS)) { par[TAUS] <- abs(par[TAUS]) }
-
-  # enforce positivity
-  if("error" %in% NAMES) { par["error"] <- abs(par["error"]) }
+  P <- c("tau position","tau velocity")
+  if(all(P %in% NAMES)) { par[P] <- sort(par[P],decreasing=TRUE) }
 
   return(par)
 }
@@ -33,33 +36,37 @@ clean.parameters <- function(par)
 # identify autocovariance parameters in ctmm object
 # if profile==TRUE, some parameters can be solved exactly and so aren't identified
 # if linear==TRUE, only return linear non-problematic parameters
-id.parameters <- function(CTMM,profile=TRUE,linear=FALSE,UERE=FALSE,dt=0,df=0,dz=10,force.error=FALSE)
+# STRUCT determines the model structure incase some estimated parameters in CTMM are zero
+id.parameters <- function(CTMM,profile=TRUE,linear=FALSE,UERE=FALSE,dt=0,df=0,dz=0,STRUCT=CTMM)
 {
   # identify and name autocovariance parameters
   NAMES <- NULL
 
-  sigma <- attr(CTMM$sigma,"par")
-  if(!profile || (CTMM$error && UERE>=3)) # must fit all 1-3 covariance parameters
-  { if(CTMM$isotropic) { NAMES <- c(NAMES,"area") } else { NAMES <- c(NAMES,names(sigma)) } }
-  else if(CTMM$error || CTMM$circle) # must fit shape, but scale/area/var can be profiled for free
-  { if(!CTMM$isotropic) { NAMES <- c(NAMES,names(sigma[2:3])) } }
+  if(STRUCT$sigma@par['major'] || length(STRUCT$tau))
+  {
+    sigma <- attr(CTMM$sigma,"par")
+    if(!profile || (STRUCT$error && UERE>=3)) # must fit all 1-3 covariance parameters
+    { if(STRUCT$isotropic) { NAMES <- c(NAMES,"major") } else { NAMES <- c(NAMES,names(sigma)) } }
+    else if(STRUCT$error || STRUCT$circle) # must fit shape, but scale/area/var can be profiled for free
+    { if(!STRUCT$isotropic) { NAMES <- c(NAMES,names(sigma[2:3])) } } # the latter are ratios to the former
+  }
 
   if(!linear) # nonlinear autocorrelation parameters
   {
     TAU <- CTMM$tau
-    if(!CTMM$range) { TAU <- TAU[-1] }
+    if(!STRUCT$range) { TAU <- TAU[-1] }
     if(length(TAU))
     {
       if(length(TAU)==2 && TAU[1]==TAU[2]) { TAU <- TAU[1] ; NAMES <- c(NAMES,"tau") } # identical timescales
       else { NAMES <- c(NAMES,paste("tau",names(TAU))) } # distinct timescales
     }
 
-    if(CTMM$omega) { NAMES <- c(NAMES,"omega") }
+    if(STRUCT$omega) { NAMES <- c(NAMES,"omega") }
 
-    if(CTMM$circle) { NAMES <- c(NAMES,"circle") }
+    if(STRUCT$circle) { NAMES <- c(NAMES,"circle") }
   }
 
-  if((CTMM$error || force.error) && UERE<3) { NAMES <- c(NAMES,"error") }
+  if((STRUCT$error) && UERE<3) { NAMES <- c(NAMES,"error") }
 
   # setup parameter information
   parscale <- NULL
@@ -67,20 +74,20 @@ id.parameters <- function(CTMM,profile=TRUE,linear=FALSE,UERE=FALSE,dt=0,df=0,dz
   upper <- NULL
   period <- NULL
 
-  if("area" %in% NAMES)
+  if("major" %in% NAMES)
   {
-    parscale <- c(parscale,sigma[1])
+    parscale <- c(parscale,max(dz,sigma['major']))
     lower <- c(lower,0)
     upper <- c(upper,Inf)
     period <- c(period,FALSE)
   }
 
-  # eccentricity and angle
-  if("eccentricity" %in% NAMES)
+  # minor and angle
+  if("minor" %in% NAMES)
   {
-    parscale <- c(parscale,log(2),pi/2)
-    lower <- c(lower,-Inf,-Inf)
-    upper <- c(upper,Inf,Inf)
+    parscale <- c(parscale,1,pi/2)
+    lower <- c(lower,0,-Inf)
+    upper <- c(upper,Inf,Inf) # could make 1 for minor/major
     period <- c(period,FALSE,pi)
   }
 
@@ -94,7 +101,7 @@ id.parameters <- function(CTMM,profile=TRUE,linear=FALSE,UERE=FALSE,dt=0,df=0,dz
       period <- c(period,rep(FALSE,length(TAU)))
     }
 
-    if(CTMM$omega)
+    if(STRUCT$omega)
     {
       parscale <- c(parscale,max(CTMM$omega,df))
       lower <- c(lower,0)
@@ -102,7 +109,7 @@ id.parameters <- function(CTMM,profile=TRUE,linear=FALSE,UERE=FALSE,dt=0,df=0,dz
       period <- c(period,FALSE)
     }
 
-    if(CTMM$circle)
+    if(STRUCT$circle)
     {
       parscale <- c(parscale,max(abs(CTMM$circle),df))
       lower <- c(lower,-Inf)
@@ -111,7 +118,7 @@ id.parameters <- function(CTMM,profile=TRUE,linear=FALSE,UERE=FALSE,dt=0,df=0,dz
     }
   }
 
-  if((CTMM$error || force.error) && UERE<3)
+  if(STRUCT$error && UERE<3)
   {
     parscale <- c(parscale,max(dz,CTMM$error)) # minimum of dz error parscale
     lower <- c(lower,0)
@@ -141,8 +148,8 @@ get.parameters <- function(CTMM,NAMES)
   getter <- function(NAME,VALUE=CTMM[[NAME]]) { if(NAME %in% NAMES) { par[NAME] <<- VALUE } }
 
   sigma <- attr(CTMM$sigma,"par")
-  getter("area",sigma[1])
-  getter("eccentricity",sigma[2])
+  getter("major",sigma[1])
+  getter("minor",sigma[2])
   getter("angle",sigma[3])
 
   tau <- CTMM$tau
@@ -164,8 +171,8 @@ set.parameters <- function(CTMM,par)
   NAMES <- names(par)
 
   sigma <- CTMM$sigma@par
-  NAME <- "area"; if(NAME %in% NAMES) { sigma[NAME] <- par[NAME] }
-  NAME <- "eccentricity"; if(NAME %in% NAMES) { sigma[NAME] <- par[NAME] }
+  NAME <- "major"; if(NAME %in% NAMES) { sigma[NAME] <- par[NAME] }
+  NAME <- "minor"; if(NAME %in% NAMES) { sigma[NAME] <- par[NAME] }
   NAME <- "angle"; if(NAME %in% NAMES) { sigma[NAME] <- par[NAME] }
   CTMM$sigma <- covm(sigma)
 

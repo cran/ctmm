@@ -151,7 +151,9 @@ variogram.fit.backend <- function(variogram,CTMM=ctmm(),fraction=0.5,b=4)
 
   # manipulation controls
   z=1+log(fraction,b)
-  DF <- data.frame(min=1+log(min.step,b),max=1,initial=z,label="zoom",step=log(min.step,b)/RES,stringsAsFactors=FALSE)
+  MIN <- 1+log(min.step,b)
+  MIN <- min(z,MIN)
+  DF <- data.frame(min=MIN,max=1,initial=z,label="zoom",step=log(min.step,b)/RES,stringsAsFactors=FALSE)
   NAMES <- c("z")
 
   K <- length(CTMM$tau)
@@ -263,10 +265,7 @@ variogram.fit.backend <- function(variogram,CTMM=ctmm(),fraction=0.5,b=4)
   {
     # store trace, but preserve angle & eccentricity
     if(length(CTMM$axes)==2)
-    {
-      CTMM$sigma <- CTMM$sigma@par
-      CTMM$sigma[1] <- sigma * sigma.unit$scale / cosh(CTMM$sigma[2]/2)
-    }
+    { CTMM$sigma <- scale.covm(CTMM$sigma,(sigma*sigma.unit$scale)/mean(diag(CTMM$sigma))) }
     else
     { CTMM$sigma <- sigma }
 

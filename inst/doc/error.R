@@ -1,12 +1,7 @@
 ## ------------------------------------------------------------------------
 library(ctmm)
-data('coati')
-names(coati[[1]]) # imported column names
-plot(coati[[1]],col=rainbow(2),error=2,trans=0.4) # coati plot with 95% error discs
-
-## ------------------------------------------------------------------------
 data(turtle)
-names(turtle[[1]]) # data are not yet calibrated
+names(turtle[[1]]) # data are not yet calibrated, but HDOP and location class is present
 names(turtle) # two calibration datasets and two turtle datasets
 plot(turtle[1:2],col=rainbow(2)) # calibration data only
 
@@ -16,17 +11,30 @@ summary(UERE)
 
 ## ------------------------------------------------------------------------
 uere(turtle) <- UERE
-names(turtle[[3]]) # now the data are calibrated
+names(turtle[[3]]) # now the data are calibrated, as VAR is present
 plot(turtle[[3]],error=2) # turtle plot with 95% error discs
 
 ## ------------------------------------------------------------------------
-squirtle <- lapply(turtle,function(t){ t$HDOP <- NULL ; t })
+data(coati)
+names(coati[[1]]) # VAR already present
+plot(coati[[1]],error=2) # coati plot with 95% error discs
 
 ## ------------------------------------------------------------------------
-UERE2 <- uere.fit(squirtle[1:2])
+t.noHDOP  <- lapply(turtle,function(t){ t$HDOP  <- NULL; t })
+t.noclass <- lapply(turtle,function(t){ t$class <- NULL; t })
+t.nothing <- lapply(turtle,function(t){ t$HDOP  <- NULL; t$class <- NULL; t })
 
 ## ------------------------------------------------------------------------
-summary(list(HDOP=UERE,homo=UERE2))
+UERE.noHDOP  <- uere.fit(t.noHDOP[1:2])
+UERE.noclass <- uere.fit(t.noclass[1:2])
+UERE.nothing <- uere.fit(t.nothing[1:2])
+
+## ------------------------------------------------------------------------
+summary(list(HDOP.class=UERE,class=UERE.noHDOP,HDOP=UERE.noclass,homoskedastic=UERE.nothing))
+
+## ------------------------------------------------------------------------
+UERES <- lapply(turtle[1:2],uere.fit)
+summary(list(joint=UERE,individual=UERES))
 
 ## ------------------------------------------------------------------------
 outlie(turtle[[3]]) -> OUT
@@ -54,20 +62,21 @@ title("Detector Array")
 # automated guestimates with circular covariance and calibrated errors
 GUESS <- ctmm.guess(turtle[[3]],CTMM=ctmm(error=TRUE),interactive=FALSE)
 # the beta optimizer is more reliable than the default optimizer
-# control <- list(method='pNewton',cores=-1) # will use all but one cores
-control <- list(method='pNewton',cores=2) # CRAN policy limits us to 2 cores
-# stepwise fitting
-FIT <- ctmm.select(turtle[[3]],GUESS,control=control,trace=TRUE)
+control <- list(method='pNewton')
+# stepwise fitting # CRAN policy limits us to 2 cores
+FIT <- ctmm.select(turtle[[3]],GUESS,control=control,trace=TRUE,cores=2)
 summary(FIT)
 
 ## ------------------------------------------------------------------------
 # delete UERE information
-uere(turtle[[3]]) <- NULL
+uere(turtle) <- NULL
+# toss out 2D locations for now
+turtle <- lapply(turtle,function(t){ t[t$class=="3D",] })
 
 ## ------------------------------------------------------------------------
 # cheat and use previous fit as initial guess
 GUESS$error <- 10 # 10 meter error guess
 # fit parameter estimates
-FIT <- ctmm.select(turtle[[3]],GUESS,control=control)
+FIT <- ctmm.select(turtle[[3]],GUESS,control=control,trace=TRUE,cores=2)
 summary(FIT)
 
