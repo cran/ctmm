@@ -1,6 +1,3 @@
-# S3 generic
-akde <- function(data,CTMM,VMM=NULL,debias=TRUE,smooth=TRUE,error=0.001,res=10,grid=NULL,...) { UseMethod("akde") }
-
 # fast lag counter
 lag.DOF <- function(data,dt=NULL,weights=NULL,lag=NULL,FLOOR=NULL,p=NULL)
 {
@@ -258,18 +255,32 @@ bandwidth <- function(data,CTMM,VMM=NULL,weights=FALSE,fast=TRUE,dt=NULL,precisi
     # { hlim[2] <- bandwidth(data,CTMM,VMM=VMM,weights=FALSE,fast=fast,dt=dt,precision=precision,verbose=TRUE)$h[1] }
     # Not sure how helpful this is?
 
-    MISE <- stats::optimize(f=MISE,interval=hlim,tol=error)
-    h <- MISE$minimum
-    MISE <- MISE$objective / sqrt(det(2*pi*sigma)) # constant
+    MISE <- optimizer(sqrt(prod(hlim)),MISE,lower=hlim[1],upper=hlim[2],control=list(precision=precision))
+    h <- MISE$par
+    MISE <- MISE$value
+
+    #MISE <- stats::optimize(f=MISE,interval=hlim,tol=error)
+    #h <- MISE$minimum
+    #MISE <- MISE$objective
+
+    MISE <- MISE / sqrt(det(2*pi*sigma)) # constant
 
     if(!is.null(VMM)) { h <- c(h,h) }
   }
   else # 3D
   {
+    #!! could do an IID evaluation here for minimum h !!#
+    #!! could do an n=1 evaluation here for maximum h !!#
+
     h <- 4/5/n^(1/7) # User Silverman's rule of thumb as initial guess
-    MISE <- stats::optim(par=c(h,h),fn=MISE,control=list(maxit=.Machine$integer.max,reltol=error))
+    MISE <- optimizer(c(h,h),MISE,lower=c(0,0),control=list(precision=precision))
     h <- MISE$par
     MISE <- MISE$value
+
+    #MISE <- stats::optim(par=c(h,h),fn=MISE,control=list(maxit=.Machine$integer.max,reltol=error))
+    #h <- MISE$par
+    #MISE <- MISE$value
+
     MISE <- MISE / sqrt(det(2*pi*sigma)) / sqrt(2*pi*sigmaz) # constant
   }
 
@@ -383,57 +394,98 @@ homerange <- function(data,CTMM,method="AKDE",...)
 { akde(data,CTMM,...) }
 
 
-#######################################
-# wrap the kde function for our telemetry data format and CIs.
-akde.telemetry <- function(data,CTMM,VMM=NULL,debias=TRUE,smooth=TRUE,error=0.001,res=10,grid=NULL,...)
+# AKDE single or list
+# (C) C.H. Fleming (2016-2019)
+# (C) Kevin Winner & C.H. Fleming (2016)
+akde <- function(data,CTMM,VMM=NULL,debias=TRUE,weights=FALSE,smooth=TRUE,error=0.001,res=10,grid=NULL,...)
 {
-  CTMM0 <- CTMM # original model fit
-  if(class(CTMM)=="ctmm") # calculate bandwidth etc.
+  if(length(projection(data))>1) { stop("Data not in single coordinate system.") }
+  validate.grid(data,grid)
+
+  DROP <- class(data)!="list"
+  data <- listify(data)
+  CTMM <- listify(CTMM)
+  VMM <- listify(VMM)
+
+  n <- length(data)
+  weights <- array(weights,n)
+
+  # loop over individuals for bandwidth optimization
+  CTMM0 <- list()
+  KDE <- list()
+  DEBIAS <- list()
+  for(i in 1:n)
   {
-    axes <- CTMM$axes
+    CTMM0[[i]] <- CTMM[[i]] # original model fit
+    if(class(CTMM[[i]])=="ctmm") # calculate bandwidth etc.
+    {
+      axes <- CTMM[[i]]$axes
 
-    # smooth out errors (which also removes duplicate times)
-    z <- NULL
-    if(!is.null(VMM))
-    {
-      axis <- VMM$axes
-      if(VMM$error && smooth) { z <- predict(VMM,data=data,t=data$t)[,axis] }
-      axes <- c(axes,axis)
-    }
-    if(CTMM$error && smooth)
-    {
-      data <- predict(CTMM,data=data,t=data$t)
-      CTMM$error <- FALSE # smoothed error model (approximate)
-    }
-    # copy back !!! times and locations
-    if(!is.null(VMM))
-    {
-      data[,axis] <- z
-      VMM$error <- FALSE # smoothed error model (approximate)
-    }
+      # smooth out errors (which also removes duplicate times)
+      z <- NULL
+      if(!is.null(VMM[[i]]))
+      {
+        axis <- VMM[[i]]$axes
+        if(VMM[[i]]$error && smooth) { z <- predict(VMM[[i]],data=data[[i]],t=data[[i]]$t)[,axis] }
+        axes <- c(axes,axis)
+      }
+      if(CTMM[[i]]$error && smooth)
+      {
+        data[[i]] <- predict(CTMM[[i]],data=data[[i]],t=data[[i]]$t)
+        CTMM[[i]]$error <- FALSE # smoothed error model (approximate)
+      }
+      # copy back !!! times and locations
+      if(!is.null(VMM[[i]]))
+      {
+        data[[i]][,axis] <- z
+        VMM[[i]]$error <- FALSE # smoothed error model (approximate)
+      }
 
-    # calculate optimal bandwidth and some other information
-    KDE <- bandwidth(data=data,CTMM=CTMM,VMM=VMM,verbose=TRUE,...)
-  }
-  else if(class(CTMM)=="bandwidth") # bandwidth information was precalculated
+      # calculate optimal bandwidth and some other information
+      KDE[[i]] <- bandwidth(data=data[[i]],CTMM=CTMM[[i]],VMM=VMM[[i]],weights[i],verbose=TRUE,...)
+    }
+    else if(class(CTMM)=="bandwidth") # bandwidth information was precalculated
+    {
+      KDE[[i]] <- CTMM[[i]]
+      axes <- names(KDE[[i]]$h)
+    }
+    else
+    { stop(paste("CTMM argument is of class",class(CTMM))) }
+
+    DEBIAS[[i]] <- ifelse(debias,KDE[[i]]$bias,FALSE)
+  } # end loop over individuals
+
+  COL <- length(axes)
+
+  # determine desired (absolute) resolution
+  dr <- sapply(1:n,function(i){sqrt(diag(KDE[[i]]$H))/res}) # (axes,n)
+  dim(dr) <- c(COL,n)
+  dr <- apply(dr,1,min)
+
+  # combine everything for grid calculation
+  H.all <- lapply(1:n,function(i){N=length(data[[i]]$t);K=prepare.H(KDE[[i]]$H,n=N,axes=axes);dim(K)=c(N,COL^2);return(K)})
+  H.all <- do.call("rbind", H.all)
+  dim(H.all) <- c(length(H.all)/COL^2,COL,COL)
+
+  # take only the necessary columns
+  data.all <- lapply(data,function(d) { d[,c("t",axes)] })
+  data.all <- do.call("rbind", data.all)
+
+  # complete grid specification
+  grid <- kde.grid(data.all,H=H.all,axes=axes,alpha=error,res=res,dr=dr,grid=grid)
+
+  # loop over individuals
+  for(i in 1:n)
   {
-    KDE <- CTMM
-    axes <- names(KDE$h)
+    KDE[[i]] <- c(KDE[[i]],kde(data[[i]],KDE[[i]]$H,axes=axes,bias=DEBIAS[[i]],W=KDE[[i]]$weights,alpha=error,dr=dr,grid=grid))
+
+    KDE[[i]] <- new.UD(KDE[[i]],info=attr(data[[i]],"info"),type='range',CTMM=ctmm())
+    # in case bandwidth is pre-calculated...
+    if(class(CTMM0[[i]])=="ctmm") { attr(KDE[[i]],"CTMM") <- CTMM0[[i]] }
   }
-  else
-  { stop(paste("CTMM argument is of class",class(CTMM))) }
 
-  if(debias) { debias <- KDE$bias }
-
-  # absolute resolution
-  dr <- sqrt(diag(KDE$H))/res
-
-  KDE <- c(KDE,kde(data,KDE$H,axes=axes,bias=debias,W=KDE$weights,alpha=error,dr=dr,grid=grid))
-
-  KDE <- new.UD(KDE,info=attr(data,"info"),type='range',CTMM=ctmm())
-  # in case bandwidth is pre-calculated...
-  if(class(CTMM0)=="ctmm") { attr(KDE,"CTMM") <- CTMM0 }
-
+  names(KDE) <- names(data)
+  if(DROP) { KDE <- KDE[[1]] }
   return(KDE)
 }
 
@@ -466,37 +518,166 @@ prepare.H <- function(H,n,axes=c('x','y'))
 
 ############################################
 # construct a grid for the density function
-kde.grid <- function(data,H,axes=c("x","y"),alpha=0.001,res=1,dr=NULL,EXT=NULL)
+# non-destructuve WRT argument 'grid'
+# non-grid arguments are merely suggestions
+kde.grid <- function(data,H,axes=c("x","y"),alpha=0.001,res=NULL,dr=NULL,EXT=NULL,grid=NULL)
 {
-  R <- get.telemetry(data,axes) # (times,dim)
-  n <- nrow(R) # (times)
-
-  H <- prepare.H(H,n,axes=axes) # (times,dim,dim)
+  H <- prepare.H(H,n=length(data$t),axes=axes) # (times,dim,dim)
 
   # how far to extend range from data as to ensure alpha significance in total probability
   z <- sqrt(-2*log(alpha))
   dH <- z * apply(H,1,function(h){sqrt(diag(h))}) # (dim,times)
   dH <- t(dH) # (times,dim)
 
-  # now to find the necessary extent of our grid
-  if(is.null(EXT)) { EXT <- rbind( apply(R-dH,2,min) , apply(R+dH,2,max) ) } # (ext,dim) }
-  dEXT <- EXT[2,]-EXT[1,]
+  # format lazy grid arguments
+  if(!is.null(grid) && class(grid)=="list" && all(axes %in% names(grid))) # assuming coordinate list
+  { grid <- list(r=grid) }
+  else if(!is.null(grid) && class(grid) %nin% c("list","UD","RasterLayer"))
+  {
+    if(class(grid)=="Extent")
+    { grid <- list(extent=grid) }
+    else # assuming extent or dr
+    {
+      if(length(dim(grid))==2) # assuming extent
+      { grid <- list(extent=grid) }
+      else if(length(grid)==1 || length(grid)==length(axes)) # assuming dr
+      { grid <- list(dr=grid) }
+      else
+      { stop("Malformed grid argument.") }
+    }
+  }
 
-  # grid center
-  mu <- apply(EXT,2,mean)
+  # recycle resolution if necessary
+  if("dr" %in% names(grid)) { grid$dr <- array(grid$dr,length(axes)); names(grid$dr) <- axes }
 
-  if(is.null(dr)) { dr <- dEXT/res }
+  # format extents canonically
+  get.extent <- function(EXT)
+  {
+    if(class(EXT)=="Extent")
+    { EXT <- cbind( c(EXT@xmin,EXT@xmax) , c(EXT@ymin,EXT@ymax) ) }
+    else # in case of data.frame
+    { EXT <- as.matrix(EXT) }
 
-  res <- dEXT/dr
+    return(EXT)
+  }
 
-  # half resolution
-  res <- ceiling(res/2+1)
+  # centered sequence (mu) with n steps by by
+  cseq <- function(mu,n,by)
+  {
+    n <- 1:n
+    n <- n - mean(n)
+    return(mu + n*by)
+  }
 
-  # grid locations
-  R <- lapply(1:length(res),function(i){ (-res[i]:res[i])*dr[i] + mu[i] } ) # (grid,dim)
+  ### SPECIFY GRID ###
+  if(class(grid)=="RasterLayer") ### grid defined by raster ###
+  {
+    EXT <- raster::extent(grid)
+    EXT <- cbind( c(EXT@xmin,EXT@xmax) , c(EXT@ymin,EXT@ymax) )
+    dEXT <- EXT[2,]-EXT[1,]
+
+    res <- dim(grid)[2:1]
+    dr <- raster::res(grid)
+
+    # grid locations
+    R <- list(x=raster::xFromCol(grid),y=rev(raster::yFromRow(grid)))
+  } # end raster
+  else if(!is.null(grid$r)) ### grid fully pre-specified ###
+  {
+    R <- grid$r
+    # UD object will also have dr
+    if(!is.null(grid$dr))
+    { dr <- grid$dr }
+    else
+    { dr <- sapply(R,function(r){mean(diff(r))}) }
+
+    #EXT <- sapply(1:length(axes),function(i){c(first(R[[i]]),last(R[[i]])) + c(-1,1)*dr[i]/2}) # (ext,axes)
+    #dEXT <- EXT[2,]-EXT[1,]
+  }
+  else if(!is.null(grid$dr) && !is.null(grid$extent)) ### grid fully pre-specified... with possible conflict ###
+  { # resolution takes presidence over extent
+    dr <- grid$dr
+    EXT <- get.extent(grid$extent)
+    if(isTRUE(grid$align.to.origin)) { EXT <- t((round(t(EXT)/dr+1/2)-1/2)*dr) } # assume mostly correct
+
+    dEXT <- EXT[2,]-EXT[1,]
+    res <- round(dEXT/dr) # extent could be slightly off --- assuming mostly correct
+
+    # grid center
+    mu <- apply(EXT,2,mean)
+    # preserve dr
+    R <- lapply(1:length(axes),function(i){cseq(mu[i],n=res[i],by=dr[i])})
+    # correct extent
+    #EXT <- sapply(1:length(axes),function(i){c(first(R[[i]]),last(R[[i]])) + c(-1,1)*dr[i]/2})
+    #dEXT <- EXT[2,]-EXT[1,]
+  }
+  else if(!is.null(grid$extent)) ### grid extent specified, but not resolution ###
+  {
+    # align.to.origin doesn't make sense without dr specified
+    EXT <- get.extent(grid$extent)
+    dEXT <- EXT[2,]-EXT[1,]
+
+    if(is.null(dr)) { dr <- dEXT/res }
+    res <- ceiling(dEXT/dr)
+    dr <- dEXT/res # correct dr if necessary
+
+    R <- lapply(1:length(axes),function(i){seq(EXT[1,i]+dr[i]/2,EXT[2,i]-dr[i]/2,length.out=res[i])})
+  } ### end grid extent specified ###
+  else if(!is.null(grid$dr)) ### grid resolution specified, but not extent ###
+  {
+    dr <- grid$dr
+
+    R <- get.telemetry(data,axes) # (times,dim)
+    # minimum extent
+    if(is.null(EXT)) { EXT <- rbind( apply(R-dH,2,min) , apply(R+dH,2,max) ) } # (ext,dim) }
+    # align to origin if requested
+    if(isTRUE(grid$align.to.origin))
+    {
+      EXT[1,] <- (floor(EXT[1,]/dr+1/2)-1/2)*dr
+      EXT[2,] <- (ceiling(EXT[2,]/dr-1/2)+1/2)*dr
+    }
+
+    dEXT <- EXT[2,]-EXT[1,]
+    res <- ceiling(dEXT/dr)
+
+    # grid center
+    mu <- apply(EXT,2,mean)
+    # preserve dr
+    # add one cell buffer on all sides for occurrence with zero-error IID models
+    R <- lapply(1:length(axes),function(i){cseq(mu[i],n=res[i]+2,by=dr[i])})
+    # correct extent
+    #EXT <- sapply(1:length(axes),function(i){c(first(R[[i]]),last(R[[i]])) + c(-1,1)*dr[i]/2})
+    #dEXT <- EXT[2,]-EXT[1,]
+  } ### end grid resolution specified ###
+  else ### grid not specified at all ###
+  {
+    # align.to.origin doesn't make sense without dr
+    R <- get.telemetry(data,axes) # (times,dim)
+
+    if(is.null(EXT)) { EXT <- rbind( apply(R-dH,2,min) , apply(R+dH,2,max) ) } # (ext,dim) }
+    dEXT <- EXT[2,]-EXT[1,]
+
+    # grid center
+    mu <- apply(EXT,2,mean)
+
+    # complete suggestions
+    if(is.null(dr)) { dr <- dEXT/res }
+    res <- ceiling(dEXT/dr)
+    dr <- dEXT/res
+
+    # grid locations
+    # add one cell buffer on all sides for occurrence with zero-error IID models
+    R <- lapply(1:length(axes),function(i){ seq(EXT[1,i]-dr[i]/2,EXT[2,i]+dr[i]/2,length.out=res[i]+2) } ) # (grid,dim)
+  } ### end not grid specification at all ###
+  ### END SPECIFY GRID ###
+
   names(R) <- axes
-
-  grid <- list(R=R,dH=dH,dr=dr,EXT=EXT,dEXT=dEXT)
+  names(dr) <- axes
+  #colnames(EXT) <- axes
+  #rownames(EXT) <- c('min','max')
+  #names(dEXT) <- axes
+  #grid <- list(r=R,dH=dH,dr=dr,extent=EXT,dEXT=dEXT,axes=axes)
+  grid <- list(r=R,dH=dH,dr=dr,axes=axes)
   return(grid)
 }
 
@@ -517,9 +698,10 @@ kde <- function(data,H,axes=c("x","y"),bias=FALSE,W=NULL,alpha=0.001,res=NULL,dr
   # format bandwidth matrix
   H <- prepare.H(H,n,axes=axes)
 
-  if(is.null(grid)) { grid <- kde.grid(data,H=H,axes=axes,alpha=alpha,res=res,dr=dr) }
+  # fill in grid information
+  grid <- kde.grid(data,H=H,axes=axes,alpha=alpha,res=res,dr=dr,grid=grid)
 
-  R <- grid$R
+  R <- grid$r
   # generalize this for future grid option use
   dH <- grid$dH
   dr <- grid$dr
@@ -544,11 +726,11 @@ kde <- function(data,H,axes=c("x","y"),bias=FALSE,W=NULL,alpha=0.001,res=NULL,dr
     SUB <- lapply(1:length(i1),function(d){ i1[d]:i2[d] })
 
     # I can't figure out how to do this in one line
-    if(length(SUB)==1)
+    if(length(SUB)==1) # 1D
     { PMF[SUB[[1]]] <- PMF[SUB[[1]]] + W[i]*pnorm1(R[[1]][SUB[[1]]]-r[i,1],H[i,,],dr,alpha) }
-    else if(length(SUB)==2)
+    else if(length(SUB)==2) # 2D
     { PMF[SUB[[1]],SUB[[2]]] <- PMF[SUB[[1]],SUB[[2]]] + W[i]*pnorm2(R[[1]][SUB[[1]]]-r[i,1],R[[2]][SUB[[2]]]-r[i,2],H[i,,],dr,alpha) }
-    else if(length(SUB)==3)
+    else if(length(SUB)==3) # 3D
     { PMF[SUB[[1]],SUB[[2]],SUB[[3]]] <- PMF[SUB[[1]],SUB[[2]],SUB[[3]]] + W[i]*pnorm3(R[[1]][SUB[[1]]]-r[i,1],R[[2]][SUB[[2]]]-r[i,2],R[[3]][SUB[[3]]]-r[i,3],H[i,,],dr,alpha) }
   }
 
@@ -814,23 +996,28 @@ pnorm2 <- function(X,Y,sigma,dr,alpha=0.001)
 
     for(i in 1:(length(z.cross)-1))
     {
-      # what cell is this line segment in?
+      # what cell(s) is the line segment in?
       z.mid <- mean(z.cross[i:(i+1)])
 
       x <- sqrt(s)*v[1]*z.mid
       y <- sqrt(s)*v[2]*z.mid
 
-      r <- abs(x-X) <= dx/2
-      c <- abs(y-Y) <= dy/2
+      r <- abs(x-X)
+      c <- abs(y-Y)
+      # the closest point(s)
+      r <- r==min(r)
+      c <- c==min(c)
 
       cdf[r,c] <- (stats::pnorm(z.cross[i+1])-stats::pnorm(z.cross[i]))/(sum(r)*sum(c))
     }
   }
   else if(ZERO==2) # point degeneracy
   {
+    r <- abs(X)
+    c <- abs(Y)
     # the closest point(s)
-    r <- abs(X) <= dx/2
-    c <- abs(Y) <= dy/2
+    r <- r==min(r)
+    c <- c==min(c)
 
     # increment the closest point(s)
     cdf[r,c] <- cdf[r,c] + 1/(sum(r)*sum(c))
@@ -915,7 +1102,7 @@ CI.UD <- function(object,level.UD=0.95,level=0.95,P=FALSE)
 {
   if(is.null(object$DOF.area) && P)
   {
-    names(level.UD) <- "ML"
+    names(level.UD) <- NAMES.CI[2] # point estimate
     return(level.UD)
   }
 
@@ -923,13 +1110,13 @@ CI.UD <- function(object,level.UD=0.95,level=0.95,P=FALSE)
 
   # point estimate
   area <- sum(object$CDF <= level.UD) * dV
-  names(area) <- "ML"
+  names(area) <- NAMES.CI[2] # point estimate
 
   # chi square approximation of uncertainty
   if(!is.null(object$DOF.area))
   {
     area <- chisq.ci(area,DOF=2*object$DOF.area[1],alpha=1-level)
-    names(area) <- c("low","ML","high")
+    names(area) <- NAMES.CI
   }
 
   if(!P) { return(area) }
@@ -948,7 +1135,7 @@ CI.UD <- function(object,level.UD=0.95,level=0.95,P=FALSE)
   # recorrect point estimate level
   P[2] <- level.UD
 
-  names(P) <- c("low","ML","high")
+  names(P) <- NAMES.CI
   return(P)
 }
 
@@ -971,7 +1158,7 @@ summary.UD <- function(object,level=0.95,level.UD=0.95,units=TRUE,...)
   area <- array(area/scale,c(1,3))
   rownames(area) <- paste("area (",name,")",sep="")
 
-  colnames(area) <- c("low","ML","high")
+  colnames(area) <- NAMES.CI
 
   SUM <- list()
 

@@ -97,7 +97,7 @@ new.plot <- function(data=NULL,CTMM=NULL,UD=NULL,level.UD=0.95,level=0.95,units=
     plot(ext, xlab=xlab, ylab=ylab, col=grDevices::rgb(1,1,1,0), asp=1, ...)
     # plot information for further layering
     projection <- unique(c(projection(data),projection(CTMM),projection(UD))) # some objects could be NULL
-    if(length(projection)>1) { stop("Multiple projections not yet supported.") }
+    if(length(projection)>1 && !RESIDUALS) { stop("Multiple projections not yet supported.") }
     assign("projection",projection,pos=plot.env)
     # dimensional type
     assign("x.dim","length",pos=plot.env)
@@ -401,7 +401,7 @@ plot.UD <- function(x,level.UD=0.95,level=0.95,DF="CDF",units=TRUE,col.level="bl
     {
       H <- covm(x[[i]]$H)
       theta <- H@par["angle"]
-      sigma <- H@par[c("major","minor")]
+      sigma <- eigenvalues.covm(H)
 
       X <- x[[i]]$r$x
       Y <- x[[i]]$r$y
@@ -520,7 +520,7 @@ plot.ctmm <- function(model,alpha=0.05,col="blue",bg=NA,...)
 ###################
 # mu - mean vector
 # sigma - covariance matrix
-ellipsograph <- function(mu,sigma,level=0.95,fg=graphics::par("col"),bg=NA,...)
+ellipsograph <- function(mu,sigma,level=0.95,fg=graphics::par("col"),bg=NA,PLOT=TRUE,...)
 {
   Eigen <- eigen(sigma)
   std <- Eigen$values
@@ -541,5 +541,6 @@ ellipsograph <- function(mu,sigma,level=0.95,fg=graphics::par("col"),bg=NA,...)
   x <- mu[1] + z*(Cos*std[1]*vec[1,1] + Sin*std[2]*vec[1,2])
   y <- mu[2] + z*(Cos*std[1]*vec[2,1] + Sin*std[2]*vec[2,2])
 
-  graphics::xspline(x, y=y, shape=-1, open=FALSE, border=fg, col=bg, ...)
+  if(PLOT) { graphics::xspline(x, y=y, shape=-1, open=FALSE, border=fg, col=bg, ...) }
+  else { return( cbind(x=x,y=y) ) }
 }

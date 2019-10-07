@@ -205,14 +205,14 @@ PDsolve <- function(M,force=FALSE,pseudo=FALSE,tol=.Machine$double.eps)
   {
     # 1/Inf == 0
     if(any(INF))
-    {
-      M[INF,] <- 0
-      M[,INF] <- 0
-      M[INF,INF] <- 0
-    }
+    { M[INF,INF] <- 0 }
 
     # 1/0 == Inf
-    if(any(ZERO)) { M[ZERO,ZERO] <- Inf }
+    if(any(ZERO))
+    {
+      M[ZERO,ZERO] <- 0
+      diag(M)[ZERO] <- Inf
+    }
 
     # regular inverse of remaining dimensions
     REM <- !(INF|ZERO)
@@ -227,6 +227,7 @@ PDsolve <- function(M,force=FALSE,pseudo=FALSE,tol=.Machine$double.eps)
     if(DIM[1]==2)
     {
       DET <- M[1,1]*M[2,2]-M[1,2]*M[2,1]
+      if(DET<=0) { return(diag(Inf,2)) } # force positive definite / diagonal
       SWP <- M[1,1] ; M[1,1] <- M[2,2] ; M[2,2] <- SWP
       M[1,2] <- -M[1,2]
       M[2,1] <- -M[2,1]

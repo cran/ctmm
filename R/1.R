@@ -1,3 +1,6 @@
+# universal names for confidence intervals & point estmate
+NAMES.CI <- c("low","est","high")
+
 # this is stuff that needs to be run first (and in the right order) for S4 crap to work
 
 methods::setOldClass("UERE")
@@ -19,6 +22,9 @@ new.UD <- methods::setClass("UD",contains="list",representation=methods::represe
 methods::setOldClass("variogram")
 new.variogram <- methods::setClass("variogram",representation=methods::representation("data.frame",info="list"),
                                    prototype=methods::prototype(data.frame(),info=list()))
+
+methods::setOldClass("outlie")
+new.outlie <- methods::setClass("outlie",representation=methods::representation("data.frame"),prototype=methods::prototype(data.frame()))
 
 # existing functions -> S4 generics
 # this doesn't work
@@ -46,6 +52,7 @@ emulate <- function(object,...) UseMethod("emulate")
 AICc <- function(object,...) UseMethod("AICc")
 speed <- function(object,...) UseMethod("speed")
 speeds <- function(object,...) UseMethod("speeds")
+mag <- function(x,...) UseMethod("mag")
 modes <- function(object,...) UseMethod("modes")
 
 # internal S3 generic function

@@ -4,6 +4,7 @@ alpha.ctmm <- function(CTMM,alpha)
   z <- stats::qnorm(alpha)
   z <- sqrt(z^2 + (CTMM$AICc-CTMM$AIC))
   alpha <- 1-stats::pnorm(z)
+  if(!length(alpha)) { alpha <- 0 }
   return(alpha)
 }
 
@@ -47,9 +48,10 @@ simplify.ctmm <- function(M,par)
   if("circle" %in% par)
   { M$circle <- FALSE }
 
-  if("range" %in% par)
+  if("range" %in% par && length(M$tau))
   {
-    M$sigma <- scale.covm(M$sigma,1/M$tau) # convert to diffusion matrix
+    # convert to diffusion matrix
+    if(M$tau[1]>0) { M$sigma <- scale.covm(M$sigma,1/M$tau[1]) }
     M$tau[1] <- Inf
     M$range <- FALSE
 
@@ -72,17 +74,55 @@ simplify.ctmm <- function(M,par)
 }
 
 
+#############
+# function to make autocorrelation models more complex
+complexify.ctmm <- function(M,par,TARGET)
+{
+  # consider non-zero eccentricity
+  if(("minor" %in% par) && M$isotropic)
+  {
+    M$isotropic <- FALSE
+    # copy over target angle, but leave eccentricity zero to start (featureless)
+    sigma <- attr(M$sigma,"par")
+    sigma["angle"] <- attr(TARGET$sigma,"par")['angle']
+    sigma <- covm(sigma,isotropic=FALSE,axes=TARGET$axes)
+    M$sigma <- sigma
+  }
+
+  # consider circulation
+  if(("circle" %in% par) && !M$circle)
+  {
+    M$circle <- 2 * .Machine$double.eps * sign(TARGET$circle)
+  }
+
+  # consider finite range
+  if(("range" %in% par) && !M$range)
+  {
+    # convert from diffusion matrix
+    M$tau[1] <- TARGET$tau[1]
+    M$sigma <- scale.covm(M$sigma,TARGET$tau[1])
+    M$range <- TRUE
+  }
+
+  return(M)
+}
+
+
 ###############
 # keep removing uncertain parameters until AIC stops improving
 ctmm.select <- function(data,CTMM,verbose=FALSE,level=1,IC="AICc",MSPE="position",trace=FALSE,cores=1,...)
 {
-  IC <- match.arg(IC,c("AICc","AIC","BIC",NA))
+  CV <- c("LOOCV")
+  IC <- match.arg(IC,c("AICc","AIC","BIC",CV,NA))
   MSPE <- match.arg(MSPE,c("position","velocity",NA))
+
+  # CV: cross validation
+  # requires expensive post-fit calculation of IC
+  # can select between IID/OU/OUF and BM/IOU
+  CV <- IC %in% CV
 
   alpha <- 1-level
   trace2 <- if(trace) { trace-1 } else { 0 }
-  IC <- match.arg(IC,c("AICc","AIC","BIC",NA))
-  MSPE <- match.arg(MSPE,c("position","velocity",NA))
 
   UERE <- get.error(data,CTMM,flag=TRUE) # error flag only
 
@@ -125,6 +165,16 @@ ctmm.select <- function(data,CTMM,verbose=FALSE,level=1,IC="AICc",MSPE="position
     if(trace && length(GUESS)) { message("* Fitting models ",paste(names(GUESS),collapse=", "),".") }
     #? should I run select here instead of fit ?
     GUESS <- plapply(GUESS,function(g){ctmm.fit(data,g,trace=trace2,...)},cores=cores)
+    names(GUESS) <- sapply(GUESS,name.ctmm)
+    # cross-validate
+    if(CV && length(GUESS))
+    {
+      for(i in 1:length(GUESS))
+      {
+        if(trace) { message("** Cross validating model ",names(GUESS)[i]) }
+        GUESS[[i]][[IC]] <- do.call(IC,list(data=data,CTMM=GUESS[[i]],cores=cores,...))
+      }
+    }
 
     MODELS <<- c(MODELS,GUESS)
 
@@ -154,40 +204,26 @@ ctmm.select <- function(data,CTMM,verbose=FALSE,level=1,IC="AICc",MSPE="position
   FEATURES <- FEATURES[!(FEATURES=="error")]
   FEATURES <- FEATURES[!grepl("tau",FEATURES)]
   FEATURES <- FEATURES[!(FEATURES=="omega")]
+  # if((CV || is.na(IC)) && CTMM$range && length(CTMM$tau)) { FEATURES <- c(FEATURES,"range") }
 
   # start with the most basic "compatible" model
   GUESS <- simplify.ctmm(CTMM,FEATURES)
   if(trace) { message("* Fitting model ",name.ctmm(GUESS),".") }
   TARGET <- CTMM
   CTMM <- ctmm.fit(data,GUESS,trace=trace2,...)
+  if(CV)
+  {
+    if(trace) { message("** Cross validating model ",name.ctmm(GUESS)) }
+    CTMM[[IC]] <- do.call(IC,list(data=data,CTMM=CTMM,cores=cores,...))
+  }
   MODELS <- list(CTMM)
   names(MODELS) <- sapply(MODELS,name.ctmm)
 
   OLD <- ctmm()
   while(!identical(CTMM,OLD))
   {
-    GUESS <- list()
     MLE <- get.mle()
-
-    # consider non-zero eccentricity
-    if(("minor" %in% FEATURES) && MLE$isotropic)
-    {
-      GUESS <- c(GUESS,list(MLE))
-      n <- length(GUESS)
-      GUESS[[n]]$isotropic <- FALSE
-      # copy over target angle, but leave eccentricity zero to start (featureless)
-      sigma <- attr(GUESS[[n]]$sigma,"par")
-      sigma["angle"] <- attr(TARGET$sigma,"par")['angle']
-      sigma <- covm(sigma,isotropic=FALSE,axes=TARGET$axes)
-      GUESS[[n]]$sigma <- sigma
-    }
-
-    # consider circulation
-    if(("circle" %in% FEATURES) && !MLE$circle)
-    {
-      GUESS <- c(GUESS,list(MLE))
-      GUESS[[length(GUESS)]]$circle <- 2 * .Machine$double.eps * sign(TARGET$circle)
-    }
+    GUESS <- lapply(FEATURES,function(feat){complexify.ctmm(MLE,feat,TARGET)})
 
     # consider a bunch of new models and update best model without duplication
     iterate(GUESS)
@@ -207,7 +243,7 @@ ctmm.select <- function(data,CTMM,verbose=FALSE,level=1,IC="AICc",MSPE="position
     CI <- confint.ctmm(CTMM,alpha=beta)
     if(length(CTMM$tau)==2 && !is.na(IC)) # OUX -> OU
     {
-      if(!CTMM$omega && CTMM$tau[1]!=CTMM$tau[2]) # OUF -> OU
+      if(!CTMM$omega && CTMM$tau[1]!=CTMM$tau[2]) # OUF -> OU / IOU -> BM
       {
         Q <- CI["tau velocity",1]
         if(is.nan(Q) || (Q<=0))
@@ -236,7 +272,7 @@ ctmm.select <- function(data,CTMM,verbose=FALSE,level=1,IC="AICc",MSPE="position
         }
       }
     }
-    else if(length(CTMM$tau)==1 && !is.na(IC)) # OU -> IID
+    else if(CTMM$range && length(CTMM$tau)==1 && !is.na(IC)) # OU -> IID
     {
       Q <- CI["tau position",1]
       if(is.nan(Q) || (Q<=0))
@@ -247,7 +283,7 @@ ctmm.select <- function(data,CTMM,verbose=FALSE,level=1,IC="AICc",MSPE="position
     }
 
     # can autocorrelation timescales be distinguished?
-    if(length(CTMM$tau)==2 && CTMM$tau[1]<Inf && (CTMM$tau[1]!=CTMM$tau[2] || CTMM$omega))
+    if(CTMM$range && length(CTMM$tau)==2 && (CTMM$tau[1]!=CTMM$tau[2] || CTMM$omega))
     {
       TEMP <- get.taus(CTMM,zeroes=TRUE)
       nu <- TEMP$f.nu[2] # frequency/difference
@@ -259,7 +295,7 @@ ctmm.select <- function(data,CTMM,verbose=FALSE,level=1,IC="AICc",MSPE="position
       if(Q<=0 || level==1 || is.na(IC))
       { GUESS <- c(GUESS,list(simplify.ctmm(MLE,"diff.tau"))) }
     }
-    else if(length(CTMM$tau)==2) # try other side if boundary if choosen model is critically damped
+    else if(CTMM$range && length(CTMM$tau)==2) # try other side if boundary if choosen model is critically damped
     {
       # try overdamped
       TEMP <- MLE
@@ -273,7 +309,7 @@ ctmm.select <- function(data,CTMM,verbose=FALSE,level=1,IC="AICc",MSPE="position
       TEMP$omega <- sqrt(.Machine$double.eps)
       GUESS <- c(GUESS,list(TEMP))
     }
-    else if(length(CTMM$tau)==1 && level==1) # OU -> OUf (bimodal likelihood)
+    else if(CTMM$range && length(CTMM$tau)==1 && level==1) # OU -> OUf (bimodal likelihood)
     { GUESS <- c(GUESS,list(simplify.ctmm(MLE,"diff.tau"))) }
 
     # consider if there is no circulation
@@ -298,8 +334,10 @@ ctmm.select <- function(data,CTMM,verbose=FALSE,level=1,IC="AICc",MSPE="position
     { GUESS <- c(GUESS,list(simplify.ctmm(MLE,"major"))) }
 
     # consider if we can relax range residence (non-likelihood comparison only)
-    if(CTMM$range && is.na(IC))
+    if(CTMM$range && length(CTMM$tau) && (is.na(IC) || CV))
     { GUESS <- c(GUESS,list(simplify.ctmm(MLE,"range"))) }
+    else if(!CTMM$range && (is.na(IC) || CV) && TARGET$tau[1]<Inf)
+    { GUESS <- c(GUESS,list(complexify.ctmm(MLE,"range",TARGET))) }
 
     # consider if the mean could be more detailed
     REFINE <- drift@refine(MLE)
@@ -382,6 +420,9 @@ name.ctmm <- function(CTMM,whole=TRUE)
 ########
 sort.ctmm <- function(x,decreasing=FALSE,IC="AICc",MSPE="position",flatten=TRUE,INF=FALSE,...)
 {
+  CV <- c("LOOCV")
+  CV <- IC %in% CV
+
   if(is.na(MSPE))
   { ICS <- sapply(x,function(m){get.IC(m,IC)}) }
   else if(is.na(IC))
@@ -439,7 +480,7 @@ sort.ctmm <- function(x,decreasing=FALSE,IC="AICc",MSPE="position",flatten=TRUE,
 
   # BM/IOU log-likelihood is infinitely lower than OU/OUF log-likelihood
   RANGE <- sapply(y,function(Y){Y[[1]]$range})
-  if(!is.na(IC) && any(RANGE) && any(!RANGE))
+  if(!is.na(IC) && !CV && any(RANGE) && any(!RANGE))
   {
     if(INF) { for(i in which(!RANGE)) { for(j in 1:length(y[[i]])) { y[[i]][[j]][[IC]] <- Inf } } }
     y <- c( y[RANGE] , y[!RANGE] )
@@ -458,8 +499,10 @@ min.ctmm <- function(x,IC="AICc",MSPE="position",...)
 ########
 summary.ctmm.list <- function(object, IC="AICc", MSPE="position", units=TRUE, ...)
 {
-  IC <- match.arg(IC,c("AICc","AIC","BIC",NA))
+  CV <- c("LOOCV")
+  IC <- match.arg(IC,c("AICc","AIC","BIC",CV,NA))
   MSPE <- match.arg(MSPE,c("position","velocity",NA))
+  CV <- IC %in% CV
 
   N <- length(object)
   object <- sort.ctmm(object,IC=IC,MSPE=MSPE,flatten=FALSE,INF=TRUE)

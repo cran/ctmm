@@ -10,12 +10,13 @@
 \details{
 \bold{General recommendations}
 \enumerate{
-\item{Never edit your CSV in Microsoft Excel. The dates will be reformatted incorrectly.}
-\item{Do not save workspaces between sessions. They can become corrupted.}
+\item{Work through the vignettes \code{vignette("variogram")} and \code{vignette("akde")}. Also, see the \code{help} file for the method of interest, and its \code{example}.}
+\item{Do not save workspaces between sessions. They will become corrupted over time. In RStudio, go to \code{Tools: Global Options: Workspace}, uncheck ``Restore'' and set ``Save'' to ``Never''.}
+\item{Never edit or save your CSV in Microsoft Excel. The dates will be reformatted incorrectly and inconsistently.}
+\item{If using Windows, make sure to have the suggested version of ``Rtools'' installed. If using MacOS, make sure to have ``Xcode'' installed. If using Ubuntu, make sure to have ``build-essential'' installed. Otherwise, you can sometimes run into problems when trying to update packages.}
 \item{Upgrade \code{R} to the latest version and update all of your packages.}
-\item{Work through the vignettes \code{vignette("variogram")} and \code{vignette("akde")}.}
-\item{Stable beta releases between the CRAN release are published \href{http://www2.physics.umd.edu/~hfleming/}{here} on request.}
 \item{The development build can be installed via \code{devtools::install_github("ctmm-initiative/ctmm")}.}
+\item{Stable beta releases between the CRAN release are published \href{http://www2.physics.umd.edu/~hfleming/}{here} on request.}
 \item{The \href{https://groups.google.com/forum/#!forum/ctmm-user}{\code{ctmm} user's group} is a good place to find and ask for help.}
 \item{Bug reports and feature requests can be raised at the \href{https://github.com/ctmm-initiative/ctmm}{Github project page}.}
 }

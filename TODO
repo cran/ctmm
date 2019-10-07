@@ -1,7 +1,25 @@
 PRIORITY
+* diffusion calculation with CIs (in summary)
+** check diffusion code  circulation + OU, OUF, OUO, OUf
+** diffusion units
+** integrate into summary()
+* default: pHREML with range-resident models and REML with non-stationary models ?
+* conditional encounter density estimation: p_E(x) \propto p_1(x)*p_2(x) (Grace, Shauhin et al)
+* merge dt==0 times (and shrink errors) for variogram/correlogram
+* mode.UD
+* as.telemetry.telemetry (do nothing)
+* bandwidth weights=TRUE dt>min(diff(t)) probably not subsetting data correctly (Pepper), need to "regularize" data for large dt, maybe this just happens with no error in model?
+* summary.list needs to descend into lists recursively for uere objects
+* simulate.telemetry with no CTMM object to simulate error only 2D/3D
+* update optimizer to pracma::randortho
+* check that the zero argument of optimizer is being used appropriately
+* weighted mean() of UDs (Nina)
+* overlap on mean()s of UDs (Ellie)
+* likelihood error in Animove error turtle example
+* mean method for ctmm objects
+* residuals in vignette 'variogram' and 'error'
 * precompute environments not carried over in Windows socket parallelization
 * area/error CI when MLE=0 (min of normal upper from VAR)
-* Telonics QFP class with no HDOP
 * mode methods for ctmm and UD object (start with generic) (Erin?)
 * akde on data.frame objects
 * 1D ctmm summary doesn't make sense
@@ -17,7 +35,6 @@ PRIORITY
 * distribute cores from ctmm.select -> ctmm.fit optimizer
 * mean, mode, median for ctmm and UD objects
 * mean ctmm object
-* overlap on mean()s of UDs (Ellie)
 * fast plot of GPS-ARGOS hybrid data
 * as.telemetry tibble->data.frame
 * update buffalo data
@@ -27,7 +44,6 @@ PRIORITY
 * ctmm.fit -> id.parameters : force.error argument for when error is estimated to be 0
 * error vignette - check back on variogram, correlogram
 * reference Guillaume's paper at the beginning of the periodogram vignette
-* occurrence() on the same grid for mean() (Ellie)
 
 OVERLAP
 * overlap needs to return DOFs in an overlap object - and then define a summary function for the overlap object
@@ -230,12 +246,7 @@ population fitting without correlation
 population fit of list
 population akde of lists
 
-optional columns with NAs are being discarded
-or maybe report if NAs are discarded?
-
 Lapack GE solve -> Lapack PO/SY solve.
-
-as.telemetry option: minimal columns, maximum columns, specified columns to keep
 
 profile CIs
 

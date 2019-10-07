@@ -1,8 +1,8 @@
 ###################################
 # make a wrapper that applies optim then afterwards numDeriv, possibly on a boundary with one-sided derivatives if necessary
-Optimizer <- function(par,fn,...,method="Nelder-Mead",lower=-Inf,upper=Inf,period=F,control=list())
+optimizer <- function(par,fn,...,method="pNewton",lower=-Inf,upper=Inf,period=FALSE,control=list())
 {
-  method <- match.arg(method,c("Nelder-Mead","BFGS","CG","L-BFGS-B","SANN","Brent","pNewton"))
+  method <- match.arg(method,c("pNewton","Nelder-Mead","BFGS","CG","L-BFGS-B","SANN","Brent"))
 
   precision <- maxit <- NULL
   default <- list(precision=1/2,maxit=.Machine$integer.max,parscale=pmin(abs(par),abs(par-lower),abs(upper-par)))
@@ -32,7 +32,9 @@ Optimizer <- function(par,fn,...,method="Nelder-Mead",lower=-Inf,upper=Inf,perio
     {
       # try optimize (can fail with high skew & kurtosis)
       tol <- 3*sqrt(2*.Machine$double.eps^precision) # digit precision
-      ATTEMPT <- stats::optimize(f=func,...,lower=max(lower,-10*abs(par)),upper=min(upper,10*abs(par)),tol=tol)
+      lower <- ifelse(lower>-Inf,lower,-10*abs(par))
+      upper <- ifelse(upper<Inf,upper,10*abs(par))
+      ATTEMPT <- stats::optimize(f=func,...,lower=lower,upper=upper,tol=tol)
       RESULT <- rbind(c(ATTEMPT$minimum,ATTEMPT$objective))
 
       # log scale backup that can't capture zero boundary
@@ -302,7 +304,7 @@ mc.min <- function(min,cores=detectCores())
 ##################################
 mc.optim <- function(par,fn,...,lower=-Inf,upper=Inf,period=F,control=list())
 {
-  DEBUG <- FALSE
+  DEBUG <- FALSE # can be overridden in control
   PMAP <- TRUE # periodic parameters are mapped locally: (-period/2,+period/2) -> (-Inf,Inf) during search steps
   # check complains about visible bindings
   fnscale <- parscale <- maxit <- precision <- trace <- cores <- hessian <- covariance <- NULL
@@ -417,7 +419,13 @@ mc.optim <- function(par,fn,...,lower=-Inf,upper=Inf,period=F,control=list())
       # store to environmental variable so that I can debug?
       par <- par*parscale
       warning("Objective function failure at c(",paste(names(par),collapse=','),') = c(',paste(par,collapse=','),')')
-
+      if(DEBUG)
+      {
+        debug(ctmm.loglike)
+        # try again with debugging
+        if(ZERO) { FN <- try(fn(par*parscale,zero=zero*fnscale,...)) }
+        else { FN <- try(fn(par*parscale,...)) }
+      }
       FN <- Inf
     }
 
@@ -835,6 +843,7 @@ mc.optim <- function(par,fn,...,lower=-Inf,upper=Inf,period=F,control=list())
         P <- line.boxer(2*par.diff,p0=par,lower=lower,upper=upper,period=period)
         par.diff <- P - par # twice the old par.diff with no boundary (reflection=1)
         M <- sqrt(sum(par.diff^2)) # total search magnitude
+        M <- clamp(M,0,1) # assume parscale is reasonable, keep search step reasonable in case of bad Hessian
         SEQ <- seq(0,M,length.out=mc.min(4,cores)+1)[-1]
       }
       else if(LINE.TYPE=="Enclosure")
@@ -884,7 +893,7 @@ mc.optim <- function(par,fn,...,lower=-Inf,upper=Inf,period=F,control=list())
         # DEBUG.LIST <<- list(par.all=par.all,fn.all=fn.all,parscale=parscale)
         if(trace) { message(sprintf("%s %s search",format(zero+fn.par,digits=16),LINE.TYPE)) }
 
-        if(DEBUG)
+        if(DEBUG>1)
         {
           graphics::plot((DIR.STEP %*% (par.all-par)),(fn.all-fn.par),xlab="Distance from MIN",ylab="Value over MIN")
           graphics::title(sprintf("%s search",LINE.TYPE))

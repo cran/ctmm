@@ -10,11 +10,8 @@
 This function calculates autocorrelated kernel density home-range estimates from \code{telemetry} data and a corresponding continuous-time movement model.
 }
 \usage{
-akde(data,CTMM,VMM=NULL,debias=TRUE,smooth=TRUE,error=0.001,res=10,grid=NULL,...)
-
-\S3method{akde}{telemetry}(data,CTMM,VMM=NULL,debias=TRUE,smooth=TRUE,error=0.001,res=10,grid=NULL,...)
-
-\S3method{akde}{list}(data,CTMM,VMM=NULL,debias=TRUE,smooth=TRUE,error=0.001,res=10,grid=NULL,...)
+akde(data,CTMM,VMM=NULL,debias=TRUE,weights=FALSE,smooth=TRUE,error=0.001,res=10,
+     grid=NULL,...)
 
 \S3method{mean}{UD}(x,...)
 
@@ -26,32 +23,41 @@ akde(data,CTMM,VMM=NULL,debias=TRUE,smooth=TRUE,error=0.001,res=10,grid=NULL,...
   \item{VMM}{An optional vertical \code{ctmm} object for 3D home-range calculation.}
   \item{debias}{Debias the distribution for area estimation (AKDEc).}
   \item{smooth}{"Smooth" out errors from the data.}
+  \item{weights}{Optimally weight the data to account for temporal sampling bias (See \code{\link{bandwidth}} for details).}
   \item{error}{Target probability error.}
   \item{res}{Number of grid points along each axis, relative to the bandwidth.}
-  \item{grid}{Optional grid specification with columns labeled \code{x} and \code{y}. Not yet supported.}
-  \item{...}{Arguments passed to all instances of \code{\link{bandwidth}}, such as \code{weights}.}
+  \item{grid}{Optional grid specification via \code{raster}, \code{UD}, or list of arguments (See `Details' below).}
+  \item{...}{Arguments passed to all instances of \code{\link{bandwidth}}.}
   \item{x}{A list of \code{UD}s calculated on the same grid.}
 }
 
-\details{For weighted AKDE, please note additional \code{...} arguments passed to \code{\link{bandwidth}} and the \code{weights=TRUE} argument, specifically.
+\details{For weighted AKDE, please note additional \code{...} arguments passed to \code{\link{bandwidth}}.
 
 When feeding in lists of \code{telemetry} and \code{ctmm} objects, all UDs will be calculated on the same grid. These UDs can be averaged with the \code{mean} command, however this is not an optimal way to calculate population ranges.
+
+If a \code{UD} or \code{raster} object is supplied in the \code{grid} argument, then the estimate will be calculated on the same grid. Alternatively, a list of grid arguments can be supplied, with any of the following components:
+\describe{
+\item{\code{r}}{A list with vectors \code{x} and \code{y} that define the grid-cell midpoints.}
+\item{\code{dr}}{A vector setting the \code{x} and \code{y} cell widths in meters. Equivalent to \code{\link{res}} for \code{raster} objects.}
+\item{\code{extent}}{The \eqn{x}-\eqn{y} extent of the grid cells, formatted as from the output of \code{\link{extent}}.}
+\item{\code{align.to.origin}}{Logical value indicating that cell midpoint locations are aligned to be an integer number of \code{dr} steps from the projection origin.}
+}
 }
 
 \value{Returns a \code{UD} object: a list with the sampled grid line locations \code{r$x} and \code{r$y}, the extent of each grid cell \code{dr}, the probability density and cumulative distribution functions evaluated on the sampled grid locations \code{PDF} & \code{CDF}, the optimal bandwidth matrix \code{H}, and the effective sample size of the data in \code{DOF.H}.
 }
 
 \references{
-C. H. Fleming, W. F. Fagan, T. Mueller, K. A. Olson, P. Leimgruber, J. M. Calabrese.
-Rigorous home-range estimation with movement data: A new autocorrelated kernel-density estimator.
+C. H. Fleming, W. F. Fagan, T. Mueller, K. A. Olson, P. Leimgruber, J. M. Calabrese,
+``Rigorous home-range estimation with movement data: A new autocorrelated kernel-density estimator'',
 \href{https://esajournals.onlinelibrary.wiley.com/doi/abs/10.1890/14-2010.1}{Ecology, 96:5, 1182-1188 (2015)}.
 
-C. H. Fleming, J. M. Calabrese.
-A new kernel-density estimator for accurate home-range and species-range area estimation.
-\href{http://onlinelibrary.wiley.com/wol1/doi/10.1111/2041-210X.12673/abstract}{Methods in Ecology and Evolution, 8:5, 571-579 (2016)}.
+C. H. Fleming, J. M. Calabrese,
+``A new kernel-density estimator for accurate home-range and species-range area estimation'',
+\href{http://onlinelibrary.wiley.com/wol1/doi/10.1111/2041-210X.12673/abstract}{Methods in Ecology and Evolution, 8:5, 571-579 (2017)}.
 
-C. H. Fleming, D. Sheldon, W. F. Fagan, P. Leimgruber, T. Mueller, D. Nandintsetseg, M. J. Noonan, K. A. Olson, E. Setyawan, A. Sianipar, J. M. Calabrese.
-Correcting for missing and irregular data in home-range estimation.
+C. H. Fleming, D. Sheldon, W. F. Fagan, P. Leimgruber, T. Mueller, D. Nandintsetseg, M. J. Noonan, K. A. Olson, E. Setyawan, A. Sianipar, J. M. Calabrese,
+``Correcting for missing and irregular data in home-range estimation'',
 \href{https://esajournals.onlinelibrary.wiley.com/doi/abs/10.1002/eap.1704}{Ecological Applications, 28:4, 1003-1010 (2018)}.
 
 %D. Marcotte. (1996). Fast variogram computation with FFT. \emph{Computers and Geosciences} 22(10), 1175-1186.

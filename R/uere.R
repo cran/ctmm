@@ -8,11 +8,17 @@ DOP.LIST <- list(unknown=list(axes=NA,geo=NA,DOP=NA,VAR=NA,COV=NA) ,
 # is the data calibrated
 is.calibrated <- function(data,type="horizontal")
 {
+  if(class(data)=="list") { return( mean( sapply(data,is.calibrated) ) ) }
+
   UERE <- attr(data,"UERE")
 
   # classes in data
   CLASS <- levels(data$class)
-  if(!length(CLASS)) { CLASS <- "all" }
+  if(!length(CLASS))
+  {
+    CLASS <- "all"
+    if(is.null(dimnames(UERE))) { dimnames(UERE) <- list(CLASS,type) }
+  }
 
   # UERE of classes in data only
   UERE <- UERE[CLASS,type]
@@ -303,13 +309,31 @@ uere.type <- function(data,trace=FALSE,type='horizontal',precision=1/2,...)
     beta <- lapply(1:length(data),function(k){ ( DOF.ML[Ci[[k]]] - 1 - colSums(gamma[[k]]) ) / DOF[Ci[[k]]] }) # (animal;time)
     dofi <- lapply(1:length(data),function(k){ DOF.ML[Ci[[k]]] - 1 - colSums(gamma[[k]]^2) }) # (animal;time)
   }
-  t2 <- lapply(1:length(data),function(k){ beta[[k]] * u2[[k]] / ( alpha[[k]]^2 - alpha[[k]]*u2[[k]]/DOF[Ci[[k]]] ) }) # (animal,time)
+  t2 <- lapply(1:length(data),function(k){ clamp( beta[[k]] * u2[[k]] / ( alpha[[k]]^2 - alpha[[k]]*u2[[k]]/DOF[Ci[[k]]] ),0,Inf) }) # (animal,time)
   Z <- log(unlist(t2))/2
-  dofi <- unlist(dofi)
-  M <- -(dofi-1)/dofi/(2*length(axes))
-  VAR <- (dofi+1)/dofi/(2*length(axes))
-  ERR <- VAR + M^2
-  Z2 <- (Z^2/ERR)
+  # M <- -clamp(dofi-1,0,Inf)/dofi/(2*length(axes)) # asymptotic only
+  # VAR <- (dofi+1)/dofi/(2*length(axes)) # asymptotic only
+  d1 <- length(axes)
+  d2 <- unlist(dofi)
+  if(length(CLASS)==1) { d2 <- d2[1] } # minimize computation if possible
+  d2 <- length(axes) * clamp(d2,0,Inf) # finish and fix for tiny samples in a class
+  M2 <- function(d2)
+  {
+    d1 <- d1/2
+    d2 <- d2/2
+
+    L1 <- -(log(d1)-digamma(d1))/2
+    L2 <- -(log(d2)-digamma(d2))/2
+
+    Q1 <- L1^2 + trigamma(d1)/4
+    Q2 <- L2^2 + trigamma(d2)/4
+
+    R <- Q1 + Q2 - 2*L1*L2
+
+    return(R)
+  }
+  V2 <- sapply(d2,M2)
+  Z2 <- (Z^2/V2)
 
   # fix missing UEREs
   if(any(BAD)) { UERE[BAD] <- NA }
@@ -339,7 +363,7 @@ summary.UERE <- function(object,level=0.95,...)
   UERE <- sapply(1:length(object),function(i){chisq.ci(object[i]^2,DOF=DOF[i],level=level)}) #(3CI,class*type)
   UERE <- sqrt(UERE)
   dim(UERE) <- c(3,dim(object)) # (3CI,class,type)
-  dimnames(UERE)[[1]] <- c("low","ML","high")
+  dimnames(UERE)[[1]] <- NAMES.CI
   dimnames(UERE)[2:3] <- dimnames(object)
   UERE <- aperm(UERE,c(2,1,3)) # (class,3CI,type)
   return(UERE)
@@ -429,6 +453,7 @@ summary.UERE.list <- function(object,level=0.95,drop=TRUE,CI=FALSE,...)
 
     if(CI)
     {
+      # is N correct here for 1D and 2D ???
       TAB[[i]] <- sapply(1:DIM[2],function(j){ chisq.ci(Zsq[i,j],COV=VAR.Zsq[i,j]/N[i,j],level=level) }) # (3CIS,models)
       TAB[[i]] <- cbind(AIC[i,],t(TAB[[i]]))
       colnames(TAB[[i]]) <- c("\u0394AICc","(       ","Z[red]\u00B2","       )")
@@ -661,14 +686,23 @@ uere.null <- function(data)
 {
   UERE <- value
 
-  # default ambiguous assignment
+  # default ambiguous assignment - overrides everything
   if(class(UERE)=="numeric" || class(UERE)=="integer")
   {
-    UERE <- cbind(UERE)
-    colnames(UERE) <- "horizontal"
-    if(is.null(names(value))) { rownames(UERE) <- "all" }
-    AIC <- NA*UERE[1,]
-    UERE <- new.UERE(UERE,DOF=NA*UERE,AICc=AIC,Zsq=AIC,VAR.Zsq=AIC,N=AIC)
+    # in case of different location classes
+    if(class(data)=="list")
+    {
+      data <- lapply(data,function(d){"uere<-"(d,value)})
+      return(data)
+    }
+
+    # at some point we might want to check the dimensions of value for different types
+
+    uere(data) <- NULL
+    UERE <- uere(data)
+    UERE[,] <- value
+    uere(data) <- UERE
+    return(data)
   }
 
   DOF <- attr(UERE,"DOF")

@@ -27,6 +27,7 @@ ctmm.loglike <- function(data,CTMM=ctmm(),REML=FALSE,profile=TRUE,zero=0,verbose
   STUFF <- squeezable.covm(CTMM)
   smgm <- STUFF$fact  # ratio of major axis to geometric mean axis
   ECC.EXT <- !STUFF$able # extreme eccentricity --- cannot squeeze data to match variances
+  if(AXES==1) { ECC.EXT <- FALSE }
 
   # simplify filter for no movement process
   if(all(eigenvalues.covm(sigma)<=0))
@@ -77,10 +78,10 @@ ctmm.loglike <- function(data,CTMM=ctmm(),REML=FALSE,profile=TRUE,zero=0,verbose
   }
 
   # check for bad variances
-  if(max(eigenvalues.covm(sigma))<=0)
+  if(min(eigenvalues.covm(sigma))<=.Machine$double.eps)
   {
     ZERO <- rep(FALSE,n)
-    for(i in 1:dim(error)[2]) { ZERO <- ZERO | (error[,i,i]==0) }
+    for(i in 1:dim(error)[2]) { ZERO <- ZERO | (error[,i,i]<=.Machine$double.eps) }
     if(any(ZERO)) { return(-Inf) }
   }
 
@@ -287,6 +288,7 @@ ctmm.loglike <- function(data,CTMM=ctmm(),REML=FALSE,profile=TRUE,zero=0,verbose
       dim(COV.mu) <- c(AXES*M,AXES*M)
     }
   }   ### END KALMAN FILTER RUNS ###
+  COV.mu <- nant(COV.mu,0)
 
   # discard infinite prior uncertainty in stationary mean for BM/IOU
   if(!CTMM$range) { logdetcov <- ifelse(M==1,0, -log(det(COV.mu[-(1:AXES),-(1:AXES)])) ) }
@@ -365,6 +367,7 @@ ctmm.loglike <- function(data,CTMM=ctmm(),REML=FALSE,profile=TRUE,zero=0,verbose
 
   # mean structure terms
   if(REML) { loglike <- loglike + CTMM$REML.loglike + logdetcov/2 }
+  loglike <- nant(loglike,-Inf) # Inf - Inf
 
   if(verbose)
   {
@@ -412,9 +415,20 @@ telemetry.mins <- function(data,axes=c('x','y'))
 
 ###########################################################
 # FIT MODEL WITH LIKELIHOOD FUNCTION (convenience wrapper to optim)
-ctmm.fit <- function(data,CTMM=ctmm(),method="ML",COV=TRUE,control=list(),trace=FALSE)
+ctmm.fit <- function(data,CTMM=ctmm(),method="pHREML",COV=TRUE,control=list(),trace=FALSE)
 {
+  method <- match.arg(method,c("ML","pREML","pHREML","HREML","REML"))
+
   axes <- CTMM$axes
+
+    if(is.null(CTMM$sigma))
+  {
+    if(is.null(CTMM$tau))
+    { CTMM$sigma <- covm(stats::cov(get.telemetry(data,axes)),isotropic=CTMM$isotropic,axes=axes) }
+    else # above fails for IOU
+    { CTMM <- ctmm.guess(data,CTMM=CTMM,interactive=FALSE) }
+  }
+
   # standardize data for numerical stability
   # pre-centering the data reduces later numerical error across models (tested)
   SHIFT <- colMeans(get.telemetry(data,axes))
@@ -422,8 +436,10 @@ ctmm.fit <- function(data,CTMM=ctmm(),method="ML",COV=TRUE,control=list(),trace=
   # add mu.center back to the mean value after kalman filter / mean profiling
   # pre-standardizing the data should also help
   SCALE <- sqrt(mean(get.telemetry(data,axes)^2))
-  data <- unit.telemetry(data,length=SCALE)
-  CTMM <- unit.ctmm(CTMM,length=SCALE)
+  # standardize time by median diff time
+  TSCALE <- stats::median(diff(data$t))
+  data <- unit.telemetry(data,length=SCALE,time=TSCALE)
+  CTMM <- unit.ctmm(CTMM,length=SCALE,time=TSCALE)
 
   # used for minimum scale of parameter inspection
   n <- length(data$t)
@@ -435,7 +451,7 @@ ctmm.fit <- function(data,CTMM=ctmm(),method="ML",COV=TRUE,control=list(),trace=
   # unstandardize (includes likelihood adjustment)
   unscale.ctmm <- function(CTMM)
   {
-    CTMM <- unit.ctmm(CTMM,length=1/SCALE)
+    CTMM <- unit.ctmm(CTMM,length=1/SCALE,time=1/TSCALE)
     # log-likelihood adjustment
     CTMM$loglike <- CTMM$loglike - length(axes)*n*log(SCALE)
     # translate back to origin from center
@@ -444,12 +460,10 @@ ctmm.fit <- function(data,CTMM=ctmm(),method="ML",COV=TRUE,control=list(),trace=
     return(CTMM)
   }
 
-  method <- match.arg(method,c("ML","pREML","pHREML","HREML","REML"))
-
-  default <- list(method="Nelder-Mead",precision=1/2,maxit=.Machine$integer.max)
+  default <- list(method="pNewton",precision=1/2,maxit=.Machine$integer.max)
   control <- replace(default,names(control),control)
   precision <- control$precision
-  optimizer <- control$method
+  op.method <- control$method
   control$method <- NULL
 
   if(method=="REML") { REML <- TRUE }
@@ -460,7 +474,6 @@ ctmm.fit <- function(data,CTMM=ctmm(),method="ML",COV=TRUE,control=list(),trace=
   drift <- get(CTMM$mean)
   CTMM$mu <- NULL # can always profile mu analytically
   range <- CTMM$range
-  if(is.null(CTMM$sigma)) { CTMM$sigma <- covm(stats::cov(get.telemetry(data,axes)),isotropic=CTMM$isotropic,axes=axes) }
 
   # save for fitting
   COV.init <- CTMM$COV
@@ -477,21 +490,22 @@ ctmm.fit <- function(data,CTMM=ctmm(),method="ML",COV=TRUE,control=list(),trace=
   CTMM <- ctmm.prepare(data,CTMM,tau=FALSE) # don't muck with taus
   UERE <- attr(CTMM$error.mat,"flag") # do we fit the error? Need to know for optimization
 
-  # id and characterize parameters for profiling
+  ### id and characterize parameters for profiling ###
   pars <- NAMES <- parscale <- lower <- upper <- period <- NULL
   ORIGINAL <- CTMM # original structure of model before fitting
+  linear.cov <- FALSE # represent sigma linearly (for perturbation) versus * (for optimization)
   setup.parameters <- function(CTMM,profile=TRUE,linear=FALSE)
   {
-    STUFF <- id.parameters(CTMM,profile=profile,linear=linear,UERE=UERE,dt=dt,df=df,dz=dz,STRUCT=ORIGINAL)
+    STUFF <- id.parameters(CTMM,profile=profile,linear=linear,linear.cov=linear.cov,UERE=UERE,dt=dt,df=df,dz=dz,STRUCT=ORIGINAL)
     NAMES <<- STUFF$NAMES
     parscale <<- STUFF$parscale
     lower <<- STUFF$lower
     upper <<- STUFF$upper
     period <<- STUFF$period
     # initial guess for optimization
-    pars <<- get.parameters(CTMM,NAMES)
+    pars <<- get.parameters(CTMM,NAMES,linear.cov=linear.cov)
   }
-  setup.parameters(CTMM)
+  setup.parameters(CTMM,profile=TRUE)
   if("error" %nin% NAMES) { CTMM$error <- as.logical(CTMM$error) } # fix numeric error when it should be logical
 
   # degrees of freedom, including the mean, variance/covariance, tau, and error model
@@ -502,8 +516,8 @@ ctmm.fit <- function(data,CTMM=ctmm(),method="ML",COV=TRUE,control=list(),trace=
   fn <- function(p,zero=0)
   {
     names(p) <- NAMES
-    p <- clean.parameters(p)
-    CTMM <- set.parameters(CTMM,p)
+    p <- clean.parameters(p,linear.cov=linear.cov)
+    CTMM <- set.parameters(CTMM,p,linear.cov=linear.cov)
 
     # negative log likelihood
     return(-ctmm.loglike(data,CTMM,REML=REML,zero=-zero,profile=profile))
@@ -523,7 +537,7 @@ ctmm.fit <- function(data,CTMM=ctmm(),method="ML",COV=TRUE,control=list(),trace=
     return(COV)
   }
 
-  # NOW OPTIMIZE
+  ### NOW OPTIMIZE ###
   profile <- TRUE
   if(length(NAMES)==0) # EXACT
   {
@@ -547,13 +561,13 @@ ctmm.fit <- function(data,CTMM=ctmm(),method="ML",COV=TRUE,control=list(),trace=
     COVSTUFF <- COV.covm(CTMM$sigma,n=n,k=k.mean,REML=REML)
     CTMM$COV <- COVSTUFF$COV
   }
-  else # all further cases require optimization
+  else ### all further cases require optimization ###
   {
     if(trace) { message("Maximizing likelihood.") }
     control$covariance <- covariance()
     control$parscale <- parscale
     control$zero <- TRUE
-    RESULT <- Optimizer(par=pars,fn=fn,method=optimizer,lower=lower,upper=upper,period=period,control=control)
+    RESULT <- optimizer(par=pars,fn=fn,method=op.method,lower=lower,upper=upper,period=period,control=control)
     pars <- clean.parameters(RESULT$par)
     # copy over hessian from fit to COV.init ?
 
@@ -561,9 +575,9 @@ ctmm.fit <- function(data,CTMM=ctmm(),method="ML",COV=TRUE,control=list(),trace=
     store.pars <- function(pars,profile=TRUE,finish=TRUE)
     {
       names(pars) <- NAMES
-      pars <- clean.parameters(pars)
+      pars <- clean.parameters(pars,linear.cov=linear.cov)
 
-      CTMM <<- set.parameters(CTMM,pars)
+      CTMM <<- set.parameters(CTMM,pars,linear.cov=linear.cov)
 
       # this is a wasted evaluation !!! store verbose glob in environment?
       if(finish) { CTMM <<- ctmm.loglike(data,CTMM,REML=REML,verbose=TRUE,profile=profile) }
@@ -572,10 +586,10 @@ ctmm.fit <- function(data,CTMM=ctmm(),method="ML",COV=TRUE,control=list(),trace=
 
     profile <- FALSE # no longer solving covariance analytically
     setup.parameters(CTMM,profile=FALSE)
-
     ### COV CALCULATION #############
-    if(COV || method %in% c("pREML","pHREML","HREML"))
+    if(COV || method %in% c("pREML","pHREML"))
     {
+      # if pREML, calculate Hessian in safe parameterization and then transform afterwards
       if(trace) { message("Calculating Hessian.") }
       DIFF <- genD(par=pars,fn=fn,zero=-CTMM$loglike,lower=lower,upper=upper,parscale=parscale,Richardson=2,mc.cores=1)
       hess <- DIFF$hessian
@@ -595,22 +609,32 @@ ctmm.fit <- function(data,CTMM=ctmm(),method="ML",COV=TRUE,control=list(),trace=
     else
     { empty.env(MLE.env) }
 
-    # pREML correction ############################### only do pREML if sufficiently away from boundaries
+    ### pREML correction ########## only do pREML if sufficiently away from boundaries
     if(method %in% c("pREML","pHREML") && mat.min(hess) > .Machine$double.eps*length(NAMES))
     {
       # parameter correction
       REML <- TRUE
       #ML.grad <- grad # save old ML gradient
       if(trace) { message("Calculating REML gradient.") }
-      DIFF <- genD(par=pars,fn=fn,zero=-CTMM$loglike,lower=lower,upper=upper,parscale=parscale,Richardson=2,order=1,mc.cores=1)
+      DIFF <- genD(par=pars,fn=fn,lower=lower,upper=upper,parscale=parscale,Richardson=2,order=1,mc.cores=1)
 
-      # trying to make this robust here
-      # COV is -1/Hessian, grad is of -loglike
-      # using least-squares solution in the case of degeneracy (under parscale natural units)
-      # hess <- t(hess*parscale)*parscale
-      # d.pars <- -c(PDsolve(t(hess)%*%hess,pseudo=TRUE) %*% t(hess)%*%(DIFF$gradient*parscale)) * parscale
-      # OK, that didn't work so well... sticking with this
-      d.pars <- -c(CTMM$COV %*% DIFF$gradient)
+      J <- diag(length(pars))
+      dimnames(J) <- list(NAMES,NAMES)
+      # invoke Jacobian (major,minor/major,angle) -> linear parameterization !!!
+      if(!CTMM$isotropic)
+      {
+        # Jacobian matrix d sigma / d par
+        SUB <- names(CTMM$sigma@par)
+        J[SUB,SUB] <- J.sigma.par(CTMM$sigma@par)
+      }
+
+      # apply linear parameter correction
+      linear.cov <- TRUE
+      setup.parameters(CTMM,profile=FALSE)
+
+      # calculate linear parameter correction
+      d.pars <- -c(J %*% CTMM$COV %*% DIFF$gradient)
+      # Jacobians cancel out between inverse Hessian and gradient
 
       # increment transformed parameters
       # pars <- pars + d.pars
@@ -618,12 +642,12 @@ ctmm.fit <- function(data,CTMM=ctmm(),method="ML",COV=TRUE,control=list(),trace=
       pars <- line.boxer(d.pars,pars,lower=lower,upper=upper,period=period)
       names(pars) <- NAMES
 
-      # store parameter correction only if a correction was made
-      if(method=="pREML")
-      {
-        profile <- FALSE
-        store.pars(pars,profile=FALSE,finish=TRUE)
-      }
+      # store parameter correction
+      profile <- FALSE
+      store.pars(pars,profile=FALSE,finish=TRUE)
+
+      linear.cov <- FALSE
+      setup.parameters(CTMM,profile=FALSE)
     }
     else if(method %in% c("pREML",'pHREML'))
     {
@@ -631,13 +655,13 @@ ctmm.fit <- function(data,CTMM=ctmm(),method="ML",COV=TRUE,control=list(),trace=
       if(method=='pREML') { method <- 'ML' }
       else if(method=='pHREML') { method <- 'HREML' }
     }
+    ### end pREML correction ###
 
-    # profile REML parameters
+    ### profile linear REML parameters ###
     if(method %in% c('pHREML','HREML'))
     {
       REML <- TRUE
       profile <- TRUE
-      store.pars(pars,profile=TRUE,finish=TRUE)
 
       # profile REML linear parameters numerically if necessary (error || circle)
       setup.parameters(CTMM,profile=TRUE,linear=TRUE)
@@ -648,33 +672,30 @@ ctmm.fit <- function(data,CTMM=ctmm(),method="ML",COV=TRUE,control=list(),trace=
         control$covariance <- covariance()
         control$parscale <- parscale
         control$zero <- TRUE
-        RESULT <- Optimizer(par=pars,fn=fn,method=optimizer,lower=lower,upper=upper,period=period,control=control)
+        RESULT <- optimizer(par=pars,fn=fn,method=op.method,lower=lower,upper=upper,period=period,control=control)
         pars <- clean.parameters(RESULT$par)
-
-        store.pars(pars,profile=TRUE,finish=TRUE)
       }
+      # includes free profile
+      store.pars(pars,profile=TRUE,finish=TRUE)
     }
 
-    # FINAL COVARIANCE ESTIMATE
-    TEST <- method %in% c('pREML','pHREML','HREML')
-    if(TEST && COV) ### CALCULATE COVARIANCE MATRIX ###
+    ### FINAL COVARIANCE ESTIMATE ###
+    if(COV && method %in% c('pREML','pHREML','HREML')) ### CALCULATE COVARIANCE MATRIX ###
     {
       profile <- FALSE
       setup.parameters(CTMM,profile=FALSE)
 
       if(trace) { message("Calculating REML Hessian.") }
       # calcualte REML Hessian at pREML parameters
-      DIFF <- genD(par=pars,fn=fn,zero=-CTMM$loglike,lower=lower,upper=upper,parscale=parscale,Richardson=2,mc.cores=1)
+      DIFF <- genD(par=pars,fn=fn,lower=lower,upper=upper,parscale=parscale,Richardson=2,mc.cores=1)
       # Using MLE gradient, which should be zero off boundary
       CTMM$COV <- cov.loglike(DIFF$hessian,grad)
     }
-    else if(TEST) ### don't confuse the ML COV with pREML COV
-    { CTMM$COV <- NULL }
 
     if(COV) { dimnames(CTMM$COV) <- list(NAMES,NAMES) }
   } # end optimized estimates
 
-  # model likelihood
+  # model likelihood (not REML for AIC)
   if(method!='ML') { CTMM$loglike <- ctmm.loglike(data,CTMM=CTMM,REML=FALSE,profile=FALSE) }
   CTMM$method <- method
 
@@ -683,8 +704,29 @@ ctmm.fit <- function(data,CTMM=ctmm(),method="ML",COV=TRUE,control=list(),trace=
 
   # unstandardize (includes likelihood adjustment)
   CTMM <- unscale.ctmm(CTMM)
-
   CTMM$features <- NAMES # store all auto-covariance features
+
+  # calculate AIC,AICc,BIC,MSPE,...
+  CTMM <- ic.ctmm(CTMM,n)
+
+  # would be temporary ML COV for pREML/pHREML
+  if(!COV) { CTMM$COV <- NULL }
+
+  return(CTMM)
+}
+
+
+#################
+# calculate AIC/BIC/AICc/MSPE/...
+#################
+ic.ctmm <- function(CTMM,n)
+{
+  NAMES <- CTMM$features
+  axes <- CTMM$axes
+  range <- CTMM$range
+  k.mean <- nrow(CTMM$mu)
+  method <- CTMM$method
+
   nu <- length(NAMES)
   # all parameters
   q <- length(axes)
@@ -701,6 +743,9 @@ ctmm.fit <- function(data,CTMM=ctmm(),method="ML",COV=TRUE,control=list(),trace=
   { CTMM$AICc <- -2*CTMM$loglike + (q*n)^2/(q*n+q*k.mean) * 2*k/(q*n-k-nu) }
   else if(method %in% c('pHREML','HREML','REML'))
   { CTMM$AICc <- -2*CTMM$loglike + (q*n-q*k.mean) * 2*k/(q*n-k-nu) }
+
+  # fix divergence
+  if(q*n<=k+nu) { CTMM$AICc <- Inf }
 
   # Mean square prediction error
   mspe <- function(K=1)
@@ -750,6 +795,7 @@ ctmm.fit <- function(data,CTMM=ctmm(),method="ML",COV=TRUE,control=list(),trace=
 
     return(MSPE)
   }
+  drift <- get(CTMM$mean)
   STUFF <- drift@energy(CTMM)
   UU <- STUFF$UU
   VV <- STUFF$VV

@@ -1,3 +1,60 @@
+ctmm 0.5.7 (2019-10-06)
+================
+
+  * new function optimizer
+  
+  * new function SpatialPolygonsDataFrame.telemetry for location estimate error circles/ellipses
+  
+  * 'pNewton' now the default optimization method
+  
+  * 'pHREML' now the default estimator & all CI names updated
+  
+  * grid argument now supported in akde and occurrence methods
+  
+  * outlie output now includes CIs with plot method
+  
+  * error-adjusted variogram implemented when fast=FALSE
+  
+  * LOOCV now supported in ctmm.select, summary
+  
+  * new buffer argument in occurrence
+  
+  * head, tail methods for telemetry objects
+  
+  * str method for ctmm objects
+  
+  * new data object 'pelican'
+
+  * SpatialPointsDataFrame now includes timestamp
+  
+  * uere(data) <- numeric now overrides all location classes
+  
+  * improved support for ARGOS-GPS hybrid data
+  
+  * missing DOP values now correctly treated as separate location class
+  
+  * bugfix in conditional simulations with dt argument
+  
+  * bugfix in plot.UD gridlines
+  
+  * bugfix in as.telemetry timeout argument when datasets lack timed-out values
+  
+  * stability fixes in ctmm.fit for BM/IOU models
+  
+  * further stability enhancements in ctmm.loglike and optimizer
+  
+  * bugfix in simultaneously fit RMS UERE CIs
+  
+  * AICc formulas fixed for tiny n
+  
+  * reduced Z^2 now exactly normalized in UERE objects
+  
+  * minor enhancements to cleave function
+  
+  * as.telemetry no longer automatically calibrates e-obs errors (inconsistent with newer devices)
+  
+  * as.telemetry no longer complains on reverse-time-ordered files
+
 ctmm 0.5.6 (2019-05-14)
 ================
 

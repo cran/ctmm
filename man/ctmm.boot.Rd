@@ -6,14 +6,15 @@
 \description{This function allows the point estimates and confidence intervals of an initial estimated movement model to be improved by parametric boostrap, as described in Fleming et al (2019).
 }
 \usage{
-ctmm.boot(data,CTMM,method=CTMM$method,iterate=FALSE,robust=FALSE,error=0.01,cores=1,
-          trace=TRUE,...)
+ctmm.boot(data,CTMM,method=CTMM$method,AICc=FALSE,iterate=FALSE,robust=FALSE,error=0.01,
+          cores=1,trace=TRUE,...)
 }
 %- maybe also 'usage' for other objects documented here.
 \arguments{
   \item{data}{ Timeseries data represented as a \code{telemetry} object. }
   \item{CTMM}{ A \code{ctmm} movement-model object from the output of \code{ctmm.fit} containing the initial parameter estimates.}
   \item{method}{Fitting method to use: \code{"ML"}, \code{"HREML"}, \code{"pREML"}, \code{"pHREML"}, or \code{"REML"}. See \code{\link{ctmm.fit}} for descriptions.}
+  \item{AICc}{Run dual set of simulations to approximate AICc values via Kullback–Leibler divergence. Otherwise, only the AIC is updated.}
 %  \item{multiplicative}{Removes multiplicative bias (rather than additive) bias from positive scale parameters like area.}
   \item{iterate}{Iteratively solve for the parameters such that the average estimate (of \code{method}) is that of the data, whereas with \code{iterate=FALSE} only the first-order correction is calculated from the initial estimate.}
   \item{robust}{Uses robust estimates of the average and covariation for debiasing. Useful when parameters are near boundaries.}
@@ -27,9 +28,13 @@ ctmm.boot(data,CTMM,method=CTMM$method,iterate=FALSE,robust=FALSE,error=0.01,cor
 %\code{ctmm.boot} can leverage multiple estimators via the \code{method} argument (see \code{\link{ctmm.fit}}) and as described in Fleming et al (2019), though generally this is only useful if the specified estimators deviate substantially from each other realtive to the target \code{error}.
 %}
 
-\value{A model fit object with relatively unbiased estimates of location covariance, and autocorrelation timescales (and more accurate CIs than \code{ctmm.fit}).}
+\value{A model fit object with relatively unbiased estimates of location covariance, and autocorrelation timescales (and more accurate CIs than \code{ctmm.fit}). If \code{AICc=TRUE}, then, in addition to an updated \code{AICc} slot, the model fit object will also contain a \code{VAR.AICc} slot quantifying the numerical variance in the \code{AICc} estimate. This variance can be decreased by decreasing argument \code{error}.}
 
-%\references{}
+\references{
+C. H. Fleming, M. J. Noonan, E. P. Medici, J. M. Calabrese,
+``Overcoming the challenge of small effective sample sizes in home-range estimation'',
+\href{https://besjournals.onlinelibrary.wiley.com/doi/10.1111/2041-210X.13270}{Methods in Ecology and Evolution 10:10, 1679-1689 (2019)}.
+}
 
 \author{ C. H. Fleming. }
 

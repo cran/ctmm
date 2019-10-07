@@ -131,7 +131,7 @@ ctmm.reduce <- function(CTMM)
 #####################################
 # multi-estimator parametric bootstrap
 # + concurrent double-bootstrap AICc
-ctmm.boot <- function(data,CTMM,method=CTMM$method,iterate=FALSE,robust=FALSE,error=0.01,cores=1,trace=TRUE,...)
+ctmm.boot <- function(data,CTMM,method=CTMM$method,AICc=FALSE,iterate=FALSE,robust=FALSE,error=0.01,cores=1,trace=TRUE,...)
 {
   if("COV" %nin% names(CTMM)) { stop("CTMM needs to be output from ctmm.select or ctmm.fit.") }
 
@@ -188,9 +188,19 @@ ctmm.boot <- function(data,CTMM,method=CTMM$method,iterate=FALSE,robust=FALSE,er
   Replicate <- function(i=0,DATA=simulate(CTMM,data=FRAME,precompute=precompute),...)
   {
     FIT <- ctmm.fit(DATA,CTMM,method=method,COV=FALSE,...)
+    if(AICc)
+    {
+      # double expectation value
+      DATA <- simulate(CTMM,data=FRAME,precompute=precompute)
+      # update KLD sum
+      AIC <- -2*ctmm.loglike(DATA,FIT,profile=FALSE)
+    }
+    else
+    { AIC <- 0 }
     FIT <- get.parameters(FIT,NAMES)
     names(FIT) <- NAMES
     FIT <- Transform(FIT)
+    attr(FIT,"AIC") <- AIC # attach to slot
     return(FIT)
   }
 
@@ -237,14 +247,17 @@ ctmm.boot <- function(data,CTMM,method=CTMM$method,iterate=FALSE,robust=FALSE,er
 
   ### outer loop: designing the weight matrix until estimate converges
   P0 <- P1 <- EST <- Transform(get.parameters(CTMM,NAMES)) # null model for parametric bootstrap
-  if(trace>1) { print(Transform(P0,inverse=TRUE)) }
+  #if(trace>1) { print(Transform(P0,inverse=TRUE)) }
   ERROR <- Inf -> ERROR.OLD
   BEST <- list()
   tol <- error*sqrt(length(NAMES)) # eigen-value tolerance for pseudo-inverse
   MAX <- max(1/error^2,length(NAMES)+1) # maximum sample size
   if(trace) { pb <- utils::txtProgressBar(style=3) }
-  while(ERROR>error)
+  while(ERROR>error && ERROR<=ERROR.OLD)
   {
+    # base progress
+    PG <- sqrt(error/ERROR.OLD)
+
     # initialize results
     SAMPLE <- NULL # sampling distribution sample (transformed)
     AVE <- array(0,length(NAMES)) # average of EST
@@ -260,17 +273,20 @@ ctmm.boot <- function(data,CTMM,method=CTMM$method,iterate=FALSE,robust=FALSE,er
     # INITIAL simulation precomputes Kalman filter matrix
     precompute <- TRUE
     ADD <- Replicate() # [par] (transformed)
+    AIC <- attr(ADD,"AIC") # to store ensemble of -2*KLD
     dim(ADD) <- c(length(NAMES),1) # [par,1]
     rolling_update(ADD)
 
     # inner loop: adding to ensemble until average converges
     precompute <- -1 # now use precomputed Kalman filter matrices
+    ERROR <- Inf
     while(N<=MAX && ERROR>=error) # standard error ratio criterias
     {
       # calculate burst of cores estimates
       ADD <- plapply(1:cores,Replicate,cores=cores,fast=FALSE)
-      ADD <- simplify2array(ADD) # [par,method,run]
-      dim(ADD) <- c(length(NAMES),cores) # [par*method,run]
+      AIC <- c(AIC, sapply(ADD, function(add){attr(add,"AIC")} ) )
+      ADD <- simplify2array(ADD) # [par,run]
+      dim(ADD) <- c(length(NAMES),cores) # [par,run]
       rolling_update(ADD)
 
       # alternative test if bias is relatively well resolved
@@ -282,8 +298,10 @@ ctmm.boot <- function(data,CTMM,method=CTMM$method,iterate=FALSE,robust=FALSE,er
         if(is.nan(ERROR)) { ERROR <- Inf }
       }
 
-      if(trace) { utils::setTxtProgressBar(pb,clamp(max(N/MAX,(error/ERROR)^2))) }
+      if(trace) { utils::setTxtProgressBar(pb,PG+(1-PG)*max(N/MAX,sqrt(error/ERROR))) }
     } # END INNER LOOP
+    VAR.AIC <- stats::var(AIC)
+    AIC <- mean(AIC)
 
     ## recalculate error & store best model
     ERROR <- AVE - EST # how far off were we?
@@ -297,6 +315,8 @@ ctmm.boot <- function(data,CTMM,method=CTMM$method,iterate=FALSE,robust=FALSE,er
 
       BEST$COV <- COV
       BEST$BIAS <- BIAS
+      BEST$AIC <- AIC
+      BEST$VAR.AIC <- VAR.AIC
 
       # final iteration --- calculate final parameter estimate COV
       if(ERROR<=error || !iterate)
@@ -320,6 +340,8 @@ ctmm.boot <- function(data,CTMM,method=CTMM$method,iterate=FALSE,robust=FALSE,er
       # go back to previous (best) result
       BEST$COV -> COV
       BEST$BIAS -> BIAS
+      BEST$AIC -> AIC
+      BEST$VAR.AIC -> VAR.AIC
     }
 
     ## calculate best estimate
@@ -327,15 +349,20 @@ ctmm.boot <- function(data,CTMM,method=CTMM$method,iterate=FALSE,robust=FALSE,er
 
     P <- Transform(P1,inverse=TRUE)
     CTMM <- set.parameters(CTMM,P)
-    if(trace) { message("\nRelative error = ",ERROR) }
+    #if(trace) { message("\nRelative error = ",ERROR) }
     P1 -> P0
 
-    if(!iterate || ERROR>ERROR.OLD) { break }
-    if(trace>1) { print(P) }
+    #if(trace>1) { print(P) }
   } # END OUTER LOOP
 
   # fix COV[mean] with a verbose likelihood evaluation
   CTMM <- ctmm.loglike(data,CTMM,profile=FALSE,verbose=TRUE)
+
+  # fix AIC/BIC/MSPE
+  CTMM <- ic.ctmm(CTMM,nrow(data))
+
+  # store simulated AICc
+  if(AICc) { CTMM$AICc <- AIC; CTMM$VAR.AICc <- VAR.AIC }
 
   if(trace) { close(pb) }
   return(CTMM)

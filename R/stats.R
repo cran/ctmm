@@ -84,7 +84,7 @@ chisq.ci <- function(MLE,COV=NULL,level=0.95,alpha=1-level,DOF=2*MLE^2/COV,robus
     if(CI[3]<UPPER) { CI[3] <- UPPER }
   }
 
-  names(CI) <- c("low","ML","high")
+  names(CI) <- NAMES.CI
   return(CI)
 }
 
@@ -153,7 +153,7 @@ norm.ci <- function(MLE,COV,alpha=0.05)
   # normal ci
   CI <- MLE + z*sqrt(COV)
 
-  names(CI) <- c("low","ML","high")
+  names(CI) <- NAMES.CI
   return(CI)
 }
 
@@ -263,4 +263,41 @@ chi.dof <- function(M1,M2,error=1/2)
   }
 
   return(DOF)
+}
+
+
+# highest density region of truncated normal distribution
+# mu is mode
+# lower <= mu <= upper
+tnorm.hdr <- function(mu=0,VAR=1,lower=0,upper=Inf,level=0.95)
+{
+  sd <- sqrt(VAR)
+  MASS <- stats::pnorm(upper,mean=mu,sd=sd) - stats::pnorm(lower,mean=mu,sd=sd)
+  CDF <- function(a,b) { ( stats::pnorm(b,mean=mu,sd=sd) - stats::pnorm(a,mean=mu,sd=sd) )/MASS }
+
+  CI <- c(lower,mu,upper)
+  DIFF <- diff(CI)
+
+  if(DIFF[1]<=DIFF[2] && CDF(lower,mu+DIFF[1])<=level) # we hit the lower boundary
+  {
+    level <- level - CDF(lower,mu) # upper half mass remaining
+    level <- level * MASS # mass remaining (when not truncated)
+    CI[3] <- stats::qnorm(level+0.5,mean=mu,sd=sd,lower.tail=TRUE)
+  }
+  else if(DIFF[2]<=DIFF[1] && CDF(mu-DIFF[2],upper)<=level) # we hit the upper boundary
+  {
+    level <- level - CDF(mu,upper) # lower half mass remaining
+    level <- level * MASS # mass remining (when not truncated)
+    CI[1] <- stats::qnorm(level+0.5,mean=mu,sd=sd,lower.tail=FALSE)
+  }
+  else # no boundary hit
+  {
+    level <- level/2 # probability mass on each side
+    level <- level * MASS # mass on each side (when not truncated)
+    CI[1] <- stats::qnorm(level+0.5,mean=mu,sd=sd,lower.tail=FALSE)
+    CI[3] <- stats::qnorm(level+0.5,mean=mu,sd=sd,lower.tail=TRUE)
+  }
+
+  names(CI) <- NAMES.CI
+  return(CI)
 }

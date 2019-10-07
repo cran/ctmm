@@ -225,12 +225,14 @@ smoother <- function(DATA,CTMM,precompute=FALSE,sample=FALSE,residual=FALSE,...)
 ########################################
 # fill in data gaps with missing observations of infinite error
 ########################################
-fill.data <- function(data,CTMM=ctmm(tau=Inf),verbose=FALSE,t=NULL,dt=NULL,res=1,cor.min=0,dt.max=NULL,DT=diff(t))
+fill.data <- function(data,CTMM=ctmm(tau=Inf),verbose=FALSE,t=NULL,dt=NULL,res=1,cor.min=0,dt.max=NULL,DT=diff(t),buffer=FALSE)
 {
+  DT.MAX <- dt.max # store for later
+
   # is this recorded data or empty gap
   data$record <- TRUE
 
-  if(!length(CTMM$tau) || CTMM$tau[1]==0) { t <- data$t } # don't add further times
+  if(is.null(t) && (!length(CTMM$tau) || CTMM$tau[1]==0)) { t <- data$t } # don't add further times
 
   # FIX THE TIME GRID TO AVOID TINY DT
   if(is.null(t))
@@ -241,8 +243,17 @@ fill.data <- function(data,CTMM=ctmm(tau=Inf),verbose=FALSE,t=NULL,dt=NULL,res=1
     # target resolution
     if(is.null(dt)){ dt <- stats::median(DT)/res }
 
-    # maximum gap to bridge
-    if(cor.min>0 && length(CTMM$tau)>1 && CTMM$tau[2]>0) { dt.max <- max(dt.max,-log(cor.min)*CTMM$tau[2]) }
+    # can cor.min argument be applied
+    if(length(CTMM$tau)<2 || CTMM$tau[2]<=0) { cor.min <- FALSE }
+
+    if(cor.min)
+    {
+      # convert from correlation to time
+      cor.min <- -log(cor.min)*CTMM$tau[2] # need for buffer=TRUE
+      # maximum gap to bridge
+      dt.max <- max(DT.MAX,cor.min)
+    }
+    if(is.null(dt.max)) { dt.max <- Inf } # default don't skip gaps
     dt.max2 <- dt.max/2
 
     # this regularization is not perfectly regular, but holds up to sampling drift in caribou data
@@ -273,7 +284,33 @@ fill.data <- function(data,CTMM=ctmm(tau=Inf),verbose=FALSE,t=NULL,dt=NULL,res=1
       t.new <- c(t.new,t.sub[c(-1,-n.sub)])
     }
 
-    # half weight repeated endpoints in grid
+    # buffer observation period
+    dt.max <- min(cor.min,DT.MAX) * buffer
+    if(dt.max)
+    {
+      if(cor.min==Inf) { stop("buffer=TRUE incompatible with cor.min=0.") }
+      dt.max2 <- dt.max/2
+
+      dt.buffer <- seq(0,dt.max2,by=dt)
+      buffer <- rev( t.grid[1] - dt.buffer )
+      t.grid <- c(buffer,t.grid)
+      t.new <- c(buffer[-length(buffer)],t.new)
+
+      buffer <- last(t.grid) + dt.buffer
+      t.grid <- c(t.grid,buffer)
+      t.new <- c(t.new,buffer[-1])
+
+      dt.buffer <- array(dt,length(dt.buffer))
+      dt.grid <- c(dt.buffer,dt.grid,dt.buffer)
+    }
+
+    # don't need to repeat if dt doesn't change
+    SAME <- diff(t.grid)==0 & diff(dt.grid)==0
+    SAME <- c(SAME,FALSE) # keep last time
+    t.grid <- t.grid[!SAME] # drop first same
+    dt.grid <- dt.grid[!SAME] # drop first same
+
+    # half weight repeated times
     w.grid <- dt.grid
     REPEAT <- which(diff(t.grid)==0)
     w.grid[REPEAT] <- w.grid[REPEAT]/2
@@ -314,8 +351,10 @@ fill.data <- function(data,CTMM=ctmm(tau=Inf),verbose=FALSE,t=NULL,dt=NULL,res=1
 # cor.min is roughly the correlation required between locations to bridge them
 # dt.max is (alternatively) the maximum gap allowed between locations to bridge them
 #################################
-occurrence <- function(data,CTMM,H=0,res.time=10,res.space=10,grid=NULL,cor.min=0.05,dt.max=NULL)
+occurrence <- function(data,CTMM,H=0,res.time=10,res.space=10,grid=NULL,cor.min=0.05,dt.max=NULL,buffer=TRUE)
 {
+  validate.grid(data,grid)
+
   axes <- CTMM$axes
   CTMM0 <- CTMM
   dt <- stats::median(diff(data$t))
@@ -330,7 +369,7 @@ occurrence <- function(data,CTMM,H=0,res.time=10,res.space=10,grid=NULL,cor.min=
   MIN.ERR <- min(error) # Fix something here?
 
   # format data to be relatively evenly spaced with missing observations
-  data <- fill.data(data,CTMM,verbose=TRUE,res=res.time,cor.min=cor.min,dt.max=dt.max)
+  data <- fill.data(data,CTMM,verbose=TRUE,res=res.time,cor.min=cor.min,dt.max=dt.max,buffer=buffer)
   t.grid <- data$t.grid
   dt.grid <- data$dt.grid
   w.grid <- data$w.grid
@@ -391,7 +430,7 @@ occurrence <- function(data,CTMM,H=0,res.time=10,res.space=10,grid=NULL,cor.min=
   dr <- sqrt(dr)
 
   # using the same data format as AKDE, but with only the ML estimate (alpha=1)
-  KDE <- kde(data,H=H,W=w.grid,dr=dr/res.space)
+  KDE <- kde(data,H=H,W=w.grid,dr=dr/res.space,grid=grid)
   KDE$H <- diag(0,2)
   KDE <- new.UD(KDE,info=info,type='occurrence',CTMM=CTMM0)
   return(KDE)
@@ -408,6 +447,10 @@ simulate.ctmm <- function(object,nsim=1,seed=NULL,data=NULL,t=NULL,dt=NULL,res=1
     nsim <- 1
   }
 
+  # no movement model
+  if(is.null(object)) { object <- ctmm(sigma=0,mu=c(0,0),error=TRUE) }
+  ZERO <- all(diag(object$sigma)==0) # no movement model logical
+
   if(!is.null(seed)){ set.seed(seed) }
 
   info <- attr(object,"info")
@@ -417,9 +460,9 @@ simulate.ctmm <- function(object,nsim=1,seed=NULL,data=NULL,t=NULL,dt=NULL,res=1
 
   CLASS <- class(data)
   CONDITIONAL <- FALSE
-  if((CLASS=="telemetry" || CLASS=='data.frame'))
+  if(CLASS=="telemetry" || CLASS=='data.frame')
   {
-    if(all(object$axes %in% names(data))) # condition off of data
+    if(!ZERO && all(object$axes %in% names(data))) # condition off of data
     { CONDITIONAL <- TRUE }
     else # use data time & error for unconditional simulation
     { t <- data$t }
@@ -485,52 +528,66 @@ simulate.ctmm <- function(object,nsim=1,seed=NULL,data=NULL,t=NULL,dt=NULL,res=1
     STUFF <- c('Green','Sigma','error','object','mu','Lambda','n','K','z','v','circle','R','UERE')
     if(precompute>=0)
     {
-      if(is.null(data)) { error <- UERE <- FALSE }
-      else { error <- get.error(data,object) ; UERE <- attr(error,'flag') } # get error if provided
+      if(is.null(data))
+      { error <- UERE <- FALSE }
+      else # get error if provided
+      {
+        error <- get.error(data,object)
+        UERE <- attr(error,'flag')
+      }
       object <- ctmm.prepare(data.frame(t=t),object) # mean.vec calculated here
 
-      tau <- object$tau
-      if(is.null(tau)) { tau = 0 }
-      K <- length(tau)
-
-      mu <- object$mu
-      if(is.null(mu)) { mu <- array(0,c(1,AXES)) }
-      sigma <- object$sigma
-      if(is.null(sigma)) { sigma <- covm(1,axes=axes) }
-
-      Lambda <- sqrtm.covm(sigma)
-
-      K <- length(tau)
-
       n <- length(t)
-      dt <- c(Inf,diff(t)) # time lags
 
-      # where we will store the data
-      z <- array(0,c(n,AXES))
-      if(K>1) { v <- array(0,c(n,AXES)) } else { v <- NULL }
-
-      Green <- array(0,c(n,K,K))
-      Sigma <- array(0,c(n,K,K))
-
-      object$sigma <- 1
-      object <- get.taus(object) # pre-compute stuff for Langevin equation solutions
-      for(i in 1:n)
+      if(ZERO) # no model - simulation of errors only
       {
-        # tabulate propagators if necessary
-        if((i==1)||(dt[i]!=dt[i-1])) { Langevin <- langevin(dt=dt[i],CTMM=object) }
-        Green[i,,] <- Langevin$Green
-        Sigma[i,,] <- Langevin$Sigma
+        z <- get.telemetry(data)
+        v <- NULL
       }
-      if(!object$range) { Sigma[1,,] <- 0 } # start at first point instead of random point on Earth
+      else # have model
+      {
+        tau <- object$tau
+        if(is.null(tau)) { tau = 0 }
+        K <- length(tau)
 
-      # Sigma is now standardization matrix
-      Sigma <- vapply(1:n,function(i){PDfunc(Sigma[i,,],func=function(x){sqrt(abs(x))},pseudo=TRUE)},Sigma[1,,]) # (K,K,n)
-      dim(Sigma) <- c(K,K,n)
-      Sigma <- aperm(Sigma,c(3,1,2)) # (n,K,K)
+        mu <- object$mu
+        if(is.null(mu)) { mu <- array(0,c(1,AXES)) }
+        sigma <- object$sigma
+        if(is.null(sigma)) { sigma <- covm(1,axes=axes) }
 
-      # circulation stuff
-      circle <- object$circle
-      R <- exp(1i*circle*(t-t[1]))
+        Lambda <- sqrtm.covm(sigma)
+
+        K <- length(tau)
+
+        dt <- c(Inf,diff(t)) # time lags
+
+        # where we will store the data
+        z <- array(0,c(n,AXES))
+        if(K>1) { v <- array(0,c(n,AXES)) } else { v <- NULL }
+
+        Green <- array(0,c(n,K,K))
+        Sigma <- array(0,c(n,K,K))
+
+        object$sigma <- 1
+        object <- get.taus(object) # pre-compute stuff for Langevin equation solutions
+        for(i in 1:n)
+        {
+          # tabulate propagators if necessary
+          if((i==1)||(dt[i]!=dt[i-1])) { Langevin <- langevin(dt=dt[i],CTMM=object) }
+          Green[i,,] <- Langevin$Green
+          Sigma[i,,] <- Langevin$Sigma
+        }
+        if(!object$range) { Sigma[1,,] <- 0 } # start at first point instead of random point on Earth
+
+        # Sigma is now standardization matrix
+        Sigma <- vapply(1:n,function(i){PDfunc(Sigma[i,,],func=function(x){sqrt(abs(x))},pseudo=TRUE)},Sigma[1,,]) # (K,K,n)
+        dim(Sigma) <- c(K,K,n)
+        Sigma <- aperm(Sigma,c(3,1,2)) # (n,K,K)
+
+        # circulation stuff
+        circle <- object$circle
+        R <- exp(1i*circle*(t-t[1]))
+      } # end if(!is.null(object))
 
       # pre-compute error matrices
       if(UERE && UERE<=3) # circular errors
@@ -547,40 +604,44 @@ simulate.ctmm <- function(object,nsim=1,seed=NULL,data=NULL,t=NULL,dt=NULL,res=1
     # store precomputed objects for later
     if(precompute>0) { for(thing in STUFF) { assign(thing,get(thing),pos=Kalman.env) } }
 
-    # initial hidden state, for standardized process
-    H <- array(0,c(K,AXES))
-    for(i in 1:n)
+    if(!ZERO) # have model
     {
-      # generate standardized process - R arrays are something awful... awful
-      H[] <- cbind(Green[i,,]) %*% H[,,drop=FALSE] + cbind(Sigma[i,,]) %*% array(stats::rnorm(K*AXES),c(K,AXES))
-      # pull out location from hidden state
-      z[i,] <- H[1,]
-      if(K>1) { v[i,] <- H[2,] }
-    }
+      # initial hidden state, for standardized process
+      H <- array(0,c(K,AXES))
+      for(i in 1:n)
+      {
+        # generate standardized process - R arrays are something awful... awful
+        H[] <- cbind(Green[i,,]) %*% H[,,drop=FALSE] + cbind(Sigma[i,,]) %*% array(stats::rnorm(K*AXES),c(K,AXES))
+        # pull out location from hidden state
+        z[i,] <- H[1,]
+        if(K>1) { v[i,] <- H[2,] }
+      }
 
-    # rotate process if necessary
-    if(circle)
-    {
-      z <- z[,1] + 1i*z[,2]
-      z <- R * z
-      z <- cbind(Re(z),Im(z))
+      # rotate process if necessary
+      if(circle)
+      {
+        z <- z[,1] + 1i*z[,2]
+        z <- R * z
 
+        if(K>1)
+        {
+          v <- v[,1] + 1i*v[,2]
+          v <- (R*v) + 1i*circle*z # mean-zero z
+          v <- cbind(Re(v),Im(v))
+        }
+
+        z <- cbind(Re(z),Im(z))
+      }
+
+      # calculate mean function
+      z <- (z %*% Lambda) + (object$mean.vec %*% mu)
+      colnames(z) <- axes
       if(K>1)
       {
-        v <- v[,] + 1i*v[,2]
-        v <- (R*v) + 1i*circle*z # mean zero here
-        v <- cbind(Re(v),Im(v))
+        v <- (v %*% Lambda) + (get(object$mean)@velocity(t,object) %*% mu)
+        colnames(v) <- paste0("v",axes)
       }
-    }
-
-    # calculate mean function
-    z <- (z %*% Lambda) + (object$mean.vec %*% mu)
-    colnames(z) <- axes
-    if(K>1)
-    {
-      v <- (v %*% Lambda) + (get(object$mean)@velocity(t,object) %*% mu)
-      colnames(v) <- paste0("v",axes)
-    }
+    } # end if(!is.null(object))
 
     # throw in error
     if(UERE)
@@ -623,6 +684,7 @@ simulate.telemetry <- function(object,nsim=1,seed=NULL,CTMM=NULL,t=NULL,dt=NULL,
     CTMM <- nsim
     nsim <- 1
   }
+
   simulate.ctmm(CTMM,nsim=nsim,seed=seed,data=object,t=t,dt=dt,res=res,complete=complete,precompute=precompute,...)
 }
 

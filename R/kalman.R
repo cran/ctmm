@@ -52,7 +52,7 @@ langevin <- function(dt,CTMM)
     {
       dtau <- dt/tau[2]
       Exp <- exp(-dtau)
-      DExp <- dexp1(dtau,Exp) # 1-exp(dt/tau[2]/2)^2 # 1-exp(dt/tau[2])
+      DExp <- dexp1(dtau,Exp) # 1-exp(dt/tau[2])
 
       if(dt<Inf)
       {
@@ -61,12 +61,13 @@ langevin <- function(dt,CTMM)
         Green[2,2] <- Exp
       }
 
-      # absorbing one 1/tau[1] into each sigma & Omega^2
-      c12 <- DExp^2 # (1-exp(dt/tau[2]/2)^2)^2 # modulo two powers of 1/tau[1]
-      Sigma[1,1] <- 2*dt - 2*tau[2]*DExp - c12/Omega2
-      if(dt<Inf) { Sigma[c(2,3)] <- TT*c12 } # 0 at dt=Inf
-      Sigma[2,2] <- Omega2 * dexp2(dtau,Exp)
-    }
+      # remember that sigma is D=sigma/tau[1]
+      DExp2 <- DExp^2 # (1-exp(-dt/tau[2]))^2
+      Sigma[1,1] <- clamp( 2*dt - tau[2]*(2*DExp+DExp2) ,0,Inf) # does this still underflow?
+      Sigma[2,2] <- dexp2(dtau,Exp)/tau[2]
+      if(dt<Inf) { Sigma[c(2,3)] <- clamp(DExp2,0, sqrt(Sigma[1,1]*Sigma[2,2]) ) } # how does this get so far off?
+      # 0 at dt=Inf
+    } # END IOU
     else if(dt<Inf) # (IOU,OUF/OUO,IID]
     {
       # function representation choice
@@ -263,14 +264,19 @@ kalman <- function(z,u,dt,CTMM,error=NULL,smooth=FALSE,sample=FALSE,residual=FAL
     for(i in 1:n)
     {
       # residual covariance
-      sForP <- sFor[i,,] %*% P # (K*DIM,OBS*DIM)
-      sRes[i,,] <- ((t(P) %*% sForP) + error[i,,]) # (OBS*DIM,OBS*DIM)
+      # 0*Inf -> 0; 0 projection of Inf covariance
+      sForP <- nant(sFor[i,,] %*% P,0) # (K*DIM,OBS*DIM)
+      sRes[i,,] <- (nant(t(P) %*% sForP,0) + error[i,,]) # (OBS*DIM,OBS*DIM)
+      # nant's here might be stop-gap solutions
 
       # forcast residuals
       zRes[i,,] <- zRes[i,,] - (t(P) %*% zFor[i,,]) # (OBS*DIM,VEC) # zRes is initially just z
 
       Gain <- sForP %*% PDsolve(sRes[i,,]) # (K*DIM,OBS*DIM) # updated to invert Inf uncertainty to 0
-      Gain <- nant(Gain,1) # 0/0 NaN have Gain of 1
+      # 0/0 NaN have Gain of 1 (P) # # Inf*epsilon have Gain of 1 (P)
+      INF <- is.nan(Gain) | (Gain==Inf)
+      if(any(INF)) { Gain[INF] <- P[INF] }
+      #for(j in 1:ncol(Gain)) { if(any(is.nan(Gain[,j])) || any(abs(Gain[,j])==Inf)) { Gain[,j] <- P[,j] } }
 
       # concurrent estimates
       zCon[i,,] <- zFor[i,,] + (Gain %*% zRes[i,,]) # (K*DIM,VEC)
@@ -285,9 +291,23 @@ kalman <- function(z,u,dt,CTMM,error=NULL,smooth=FALSE,sample=FALSE,residual=FAL
       # update forcast estimates for next iteration
       if(i<n)
       {
-        #update forcast estimates now
+        # update forcast estimates now
         zFor[i+1,,] <- Green[i+1,,] %*% zCon[i,,] # (K*DIM,VEC)
-        sFor[i+1,,] <- ((Green[i+1,,] %*% sCon[i,,] %*% t(Green[i+1,,])) + Sigma[i+1,,]) # (K*DIM,K*DIM)
+        # work around for when initial location estimates are NULL
+        TCON <- sCon[i,,]
+        dim(TCON) <- c(K*DIM,K*DIM)
+        INF <- TCON==Inf
+        ANY <- any(INF)
+        if(ANY) { TCON[INF] <- 0 } # prevent lots of NaNs that should be zero
+        TCON <- Green[i+1,,] %*% TCON %*% t(Green[i+1,,]) + Sigma[i+1,,] # (K*DIM,K*DIM)
+        if(ANY) # restore Inf variances after avoiding NaNs -- delete finie correlations with infinite variance (impossible?)
+        {
+          INF <- diag(INF)
+          TCON[INF,] <- 0
+          TCON[,INF] <- 0
+          diag(TCON)[INF] <- Inf
+        }
+        sFor[i+1,,] <- TCON
       }
     }
 
@@ -325,6 +345,7 @@ kalman <- function(z,u,dt,CTMM,error=NULL,smooth=FALSE,sample=FALSE,residual=FAL
       dim(isRes) <- c(OBS*DIM,OBS*DIM,n) # R arrays are awful
       uisRes <- vapply(1:n,function(i){isRes[,,i] %*% zRes[i,,MEAN]},array(0,c(OBS*DIM,length(MEAN)))) # (OBS*DIM,MEAN,n) - dont need data terms
       dim(uisRes) <- c(OBS*DIM,length(MEAN),n) # R arrays are awful
+      uisRes <- nant(uisRes,0) # 0/0 infinite precision zero shouldn't be anything but zero in weighting
 
       ### everything below is hard-coded for OBS==1 ###
       # if DIM==1, none of this does anything interesting #
@@ -372,9 +393,17 @@ kalman <- function(z,u,dt,CTMM,error=NULL,smooth=FALSE,sample=FALSE,residual=FAL
       # fix for BM/IOU conditioning off first location (not really a model parameter)
       if(!CTMM$range && length(mu))
       {
+        DIMS <- dim(zRes)
+        dim(zRes) <- c(n,OBS,DIM,VEC)
         # overwrite NaN stationary mean value with first location (maximizes likelihood)
-        mu[1,] <- zRes[1,DATA]
-        # remove stationary mean terms from COV
+        if(DIM==1)
+        { mu[1,] <- zRes[1,1,,DATA] }
+        else # account for dimension packing in mean
+        { mu[1+c(0,nrow(mu)/2),1] <- zRes[1,1,,DATA] }
+        dim(zRes) <- DIMS
+        # ! TODO: remove stationary mean terms from COV
+        # ! TODO: remove stationary mean terms from COV
+        # ! TODO: remove stationary mean terms from COV
       }
 
       # separate data from trend
@@ -422,12 +451,24 @@ kalman <- function(z,u,dt,CTMM,error=NULL,smooth=FALSE,sample=FALSE,residual=FAL
       dim(zRes) <- c(n*OBS*DIM,length(DATA))
 
       sigma <- (zisRes %*% zRes)/(n*DIM) # REML fixes this exactly for BM/IOU
+      # divergence fix
+      INF <- diag(sigma)==Inf
+      if(any(INF))
+      {
+        # force positive definite
+        sigma[INF,] <- sigma[,INF] <- 0
+        # restore infinite variance
+        diag(sigma)[INF] <- Inf
+      }
 
       # log det autocorrelation matrix == trace log autocorrelation matrix
+      logdet <- apply(sRes,1,det) # just determinants
+      # zero variances are improbable, but not balanced out elsewhere in log-like
+      logdet <- ifelse(logdet>0,log(abs(logdet)),Inf)
       if(CTMM$range) # this is 1/n times the full term
-      { logdet <- mean(log(apply(sRes,1,det))) }
+      { logdet <- mean(logdet) }
       else # this is 1/(n-1) times the full term, after first is dropped
-      { logdet <- mean(log(apply(sRes,1,det)[-1])) }
+      { logdet <- mean(logdet[-1]) }
 
       return(list(mu=mu,W=W,iW=iW,sigma=sigma,logdet=logdet))
     }
@@ -462,12 +503,20 @@ kalman <- function(z,u,dt,CTMM,error=NULL,smooth=FALSE,sample=FALSE,residual=FAL
     # upgrade concurrent estimates to Kriged estimates (covariance only)
     for(i in (n-1):1)
     {
-      L[i,,] <- sCon[i,,] %*% t(Green[i+1,,]) %*% PDsolve(sFor[i+1,,],pseudo=TRUE) # (K*DIM,K*DIM)
+      TL <- nant(sCon[i,,] %*% t(Green[i+1,,]),0) %*% PDsolve(sFor[i+1,,],pseudo=TRUE) # (K*DIM,K*DIM)
+      INF <- diag(is.nan(TL))
+      if(any(INF))
+      {
+        TL[INF,] <- 0
+        TL[,INF] <- 0
+        diag(TL)[INF] <- 1 # Inf/Inf->1
+      }
+      L[i,,] <- TL
       # manifestly symmetric backsolver
       # sCon[i,,] <- sCon[i,,] + L %*% (sCon[i+1,,]-sFor[i+1,,]) %*% t(L)
       # manifestly PSD backsolver
       JOSEPH <- IdH - (L[i,,] %*% Green[i+1,,]) # (K*DIM,K*DIM)
-      sCon[i,,] <- (JOSEPH %*% sCon[i,,] %*% t(JOSEPH)) + (L[i,,] %*% (sCon[i+1,,]+Sigma[i+1,,]) %*% t(L[i,,])) # (K*DIM,K*DIM)
+      sCon[i,,] <- nant(JOSEPH %*% sCon[i,,],0) %*% t(JOSEPH) + (L[i,,] %*% (sCon[i+1,,]+Sigma[i+1,,]) %*% t(L[i,,])) # (K*DIM,K*DIM)
 
       #################
       # RANDOM SAMPLER
