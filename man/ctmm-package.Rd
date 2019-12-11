@@ -17,15 +17,17 @@ Péron et al (2017) <doi:10.1002/ecm.1260>,
 Fleming et al (2017) <doi:10.1016/j.ecoinf.2017.04.008>,
 Fleming et al (2018) <doi:10.1002/eap.1704>,
 Winner & Noonan et al (2018) <doi:10.1111/2041-210X.13027>,
+Fleming et al (2019) <doi:10.1111/2041-210X.13270>,
 and
-Fleming et al (2019) <doi:10.1111/2041-210X.13270>.
+Noonan & Fleming et al (2019) <doi:10.1186/s40462-019-0177-1>.
+
 }
 \details{
 \tabular{ll}{
 Package: \tab ctmm\cr
 Type: \tab Package\cr
-Version: \tab 0.5.7 \cr
-Date: \tab 2019-10-06 \cr
+Version: \tab 0.5.8 \cr
+Date: \tab 2019-12-09 \cr
 License: \tab GPL-3 \cr
 }
 
@@ -50,7 +52,7 @@ Maintainer: Christen H. Fleming <flemingc@si.edu>
 \references{
 C. H. Fleming, J. M. Calabrese, T. Mueller, K.A. Olson, P. Leimgruber, W. F. Fagan,
 ``From fine-scale foraging to home ranges: A semi-variance approach to identifying movement modes across spatiotemporal scales'',
-\href{http://www.jstor.org/discover/10.1086/675504}{The American Naturalist, 183:5, E154-E167 (2014)}.
+\href{http://www.jstor.org/stable/info/10.1086/675504}{The American Naturalist, 183:5, E154-E167 (2014)}.
 
 C. H. Fleming, J. M. Calabrese, T. Mueller, K. A. Olson, P. Leimgruber, W. F. Fagan,
 ``Non-Markovian maximum likelihood estimation of autocorrelated movement processes'',
@@ -102,7 +104,7 @@ C. H. Fleming, M. J. Noonan, E. P. Medici, J. M. Calabrese,
 
 M. J. Noonan, C. H. Fleming, T. S. Akre, J. Drescher-Lehman, E. Gurarie, A.-L. Harrison, R. Kays, Justin Calabrese,
 ``Scale-insensitive estimation of speed and distance traveled from animal tracking data'',
-Movement Ecology, \emph{in press}.
+\href{https://movementecologyjournal.biomedcentral.com/articles/10.1186/s40462-019-0177-1}{Movement Ecology, 7:35 (2019)}.
 }
 
 %~~ Optionally other standard keywords, one per line, from file KEYWORDS in ~~

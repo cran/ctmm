@@ -11,7 +11,7 @@ ctmm.loglike <- function(data,CTMM=ctmm(),REML=FALSE,profile=TRUE,zero=0,verbose
   # prepare model for numerics
   CTMM <- ctmm.prepare(data,CTMM)
 
-  drift <- get(CTMM$mean)
+  # drift <- get(CTMM$mean)
 
   range <- CTMM$range
   isotropic <- CTMM$isotropic
@@ -52,14 +52,17 @@ ctmm.loglike <- function(data,CTMM=ctmm(),REML=FALSE,profile=TRUE,zero=0,verbose
   u <- CTMM$mean.vec
   M <- ncol(u) # number of linear parameters per spatial dimension
 
+  if(range) { N <- n } else { N <- n-1 } # condition off first point
+  # degrees of freedom
+  if(REML) { DOF <- n-M } else { DOF <- N }
+  # REML variance debias factor # ML constant
+  VAR.MULT <- N/DOF
+
   # pre-centering the data reduces later numerical error across models (tested)
   # mu.center <- colMeans(z)
   # z <- t( t(z) - mu.center )
   # add mu.center back to the mean value after kalman filter / mean profiling
   # pre-standardizing the data would also help
-
-  # REML variance debias factor # ML constant
-  if(REML) { VAR.MULT <- n/(n-M) } else  { VAR.MULT <- 1 }
 
   # get the error information
   error <- CTMM$error.mat # note for fitted errors, this is error matrix @ UERE=1 (CTMM$error)
@@ -294,17 +297,13 @@ ctmm.loglike <- function(data,CTMM=ctmm(),REML=FALSE,profile=TRUE,zero=0,verbose
   if(!CTMM$range) { logdetcov <- ifelse(M==1,0, -log(det(COV.mu[-(1:AXES),-(1:AXES)])) ) }
 
   # missing variances/covariances from profiling
-  log.det.sigma <- ifelse(UNIT==1,AXES*log(max.var),log(det.covm(M.sigma)))
   if(UNIT)
   {
+    if(UNIT==1) { log.det.sigma <- AXES*log(max.var) }
+    else if(UNIT==2) { log.det.sigma <- log(det.covm(M.sigma)) }
+
     logdetCOV <- logdetCOV + log.det.sigma # per n
     logdetcov <- logdetcov + M*log.det.sigma # absolute
-  }
-  else if(!CTMM$range && REML)
-  {
-    # sigma was sum(var)/n and not sum(var)/(n-1) even though var[1]==0 from conditioning
-    # but we discarded COV[mu.stationary]==Inf above # let REML fix this even if we didn't PROFILE
-    logdetcov <- logdetcov + log.det.sigma
   }
 
   if(SQUEEZE) # de-squeeze
@@ -349,12 +348,10 @@ ctmm.loglike <- function(data,CTMM=ctmm(),REML=FALSE,profile=TRUE,zero=0,verbose
   # should I drop the mean indices in COV.mu and DOF.mu if possible ?
   if(M==1) { dim(COV.mu) <- c(AXES,AXES) }
 
-  # re-write all of this to calculate constant, divide constant by n, and then subtract off from sum term by term?
+  # re-write all of this to calculate constant, divide constant by n || (n-1), and then subtract off from sum term by term?
   # likelihood constant/n: 2pi from det second term from variance-profiled quadratic term (which we will subtract if variance is not profiled)
-  if(REML)
-  { LL.CONST <- -(n-M)/n*AXES/2*log(2*pi) - AXES/2 } # not fixing this second term for REML yet... not wrong, but suboptimal maybe }
-  else # ML constant
-  { LL.CONST <- -AXES/2*log(2*pi) - AXES/2 }
+  LL.CONST <- -AXES/2*log(2*pi)/VAR.MULT - AXES/2
+  # not fixing this second term for REML yet... not wrong, but suboptimal maybe
 
   ### loglike: ( quadratic term of loglikelihood first )
   if(PROFILE && profile) { RATIO <- 1/VAR.MULT } # everything could be profiled - or transformed to variances whose mean could be profiled
@@ -362,8 +359,8 @@ ctmm.loglike <- function(data,CTMM=ctmm(),REML=FALSE,profile=TRUE,zero=0,verbose
   # PROFILE && !profile was filter specific !
   # finish off the loglikelihood calculation # RATIO is variance ratio from above
   loglike <- -AXES/2*(RATIO-1) - logdetCOV/2 #
-  loglike <- n * (loglike + (LL.CONST-zero/n)) # I expect the last part (all constants) to mostly cancel out
-  logdetCOV <- n * logdetCOV
+  loglike <- N * (loglike + (LL.CONST-zero/N)) # I expect the last part (all constants) to mostly cancel out
+  logdetCOV <- N * logdetCOV # what is this for?
 
   # mean structure terms
   if(REML) { loglike <- loglike + CTMM$REML.loglike + logdetcov/2 }
@@ -392,11 +389,6 @@ ctmm.loglike <- function(data,CTMM=ctmm(),REML=FALSE,profile=TRUE,zero=0,verbose
 }
 
 
-# environment for storing MLE when using pREML/pHREML/HREML
-MLE.env <- new.env()
-empty.env(MLE.env) # default to empty
-
-
 # smallest resolutions in data (for soft bounding parameter guesstimates)
 telemetry.mins <- function(data,axes=c('x','y'))
 {
@@ -418,15 +410,23 @@ telemetry.mins <- function(data,axes=c('x','y'))
 ctmm.fit <- function(data,CTMM=ctmm(),method="pHREML",COV=TRUE,control=list(),trace=FALSE)
 {
   method <- match.arg(method,c("ML","pREML","pHREML","HREML","REML"))
-
   axes <- CTMM$axes
+  CTMM <- get.mle(CTMM) # if has better start for pREML/HREML/pHREML
 
-    if(is.null(CTMM$sigma))
+  if(is.null(CTMM$sigma))
   {
-    if(is.null(CTMM$tau))
+    K <- length(CTMM$tau)
+    if(K==0 && CTMM$range)
     { CTMM$sigma <- covm(stats::cov(get.telemetry(data,axes)),isotropic=CTMM$isotropic,axes=axes) }
-    else # above fails for IOU
-    { CTMM <- ctmm.guess(data,CTMM=CTMM,interactive=FALSE) }
+    else # above fails for IOU/BM
+    {
+      CTMM <- ctmm.guess(data,CTMM=CTMM,interactive=FALSE)
+      # preserve continuity
+      if(K==0 && !CTMM$range) # assume BM
+      { CTMM$tau <- Inf }
+      else if(K==1) # OU/BM
+      { CTMM$tau <- CTMM$tau[1] }
+    }
   }
 
   # standardize data for numerical stability
@@ -560,6 +560,8 @@ ctmm.fit <- function(data,CTMM=ctmm(),method="pHREML",COV=TRUE,control=list(),tr
     # fast calculation of sigma covariance
     COVSTUFF <- COV.covm(CTMM$sigma,n=n,k=k.mean,REML=REML)
     CTMM$COV <- COVSTUFF$COV
+
+    MLE <- NULL
   }
   else ### all further cases require optimization ###
   {
@@ -600,14 +602,8 @@ ctmm.fit <- function(data,CTMM=ctmm(),method="pHREML",COV=TRUE,control=list(),tr
       dimnames(CTMM$COV) <- list(NAMES,NAMES)
     }
 
-    # store MLE for faster model selection (ML is what is optimized, not pREML or HREML)
-    if(method %in% c("pREML","pHREML","HREML"))
-    {
-      assign("EMPTY",FALSE,pos=MLE.env)
-      assign("MLE",unscale.ctmm(CTMM),pos=MLE.env) # convert units back and store
-    }
-    else
-    { empty.env(MLE.env) }
+    # store MLE for faster re-optimization #
+    MLE <- unscale.ctmm(CTMM)
 
     ### pREML correction ########## only do pREML if sufficiently away from boundaries
     if(method %in% c("pREML","pHREML") && mat.min(hess) > .Machine$double.eps*length(NAMES))
@@ -712,6 +708,14 @@ ctmm.fit <- function(data,CTMM=ctmm(),method="pHREML",COV=TRUE,control=list(),tr
   # would be temporary ML COV for pREML/pHREML
   if(!COV) { CTMM$COV <- NULL }
 
+  if(method %in% c('pREML','pHREML','HREML') && !is.null(MLE))
+  {
+    # calculate checksum
+    MLE$checksum <- digest::digest(CTMM,algo="md5")
+    CTMM$MLE <- MLE
+    # now if anyone modifies CTMM, then MLE will not be used
+  }
+
   return(CTMM)
 }
 
@@ -730,7 +734,11 @@ ic.ctmm <- function(CTMM,n)
   nu <- length(NAMES)
   # all parameters
   q <- length(axes)
-  if(!range) { k.mean <- k.mean - 1 }
+  if(!range)
+  {
+    k.mean <- k.mean - 1
+    n <- n - 1
+  }
   k <- nu + q*k.mean
 
   CTMM$AIC <- 2*k - 2*CTMM$loglike
@@ -828,7 +836,7 @@ ctmm.guess <- function(data,CTMM=ctmm(),variogram=NULL,name="GUESS",interactive=
   u <- drift(data$t,CTMM)
 
   # estimate circulation period if circle=TRUE
-  if(CTMM$circle && class(CTMM$circle)=="logical")
+  if(CTMM$circle && class(CTMM$circle)[1]=="logical")
   {
     # residuals
     z <- get.telemetry(data,CTMM$axes)

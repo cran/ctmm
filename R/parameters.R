@@ -87,31 +87,46 @@ id.parameters <- function(CTMM,profile=TRUE,linear=FALSE,linear.cov=FALSE,UERE=F
 
   SIGMIN <- dz^2*ifelse(CTMM$range,1,df)
 
-  if("major" %in% NAMES)
-  {
-    parscale <- c(parscale,max(sigma['major'],SIGMIN))
-    lower <- c(lower,0)
-    upper <- c(upper,Inf)
-    period <- c(period,FALSE)
-  }
+  MAX <- eigenvalues.covm(CTMM$sigma)[1]
+  MAX <- max(MAX,SIGMIN)
 
-  # minor and angle
-  if("minor" %in% NAMES)
+  if(!linear.cov) # nonlinear sigma: major, major/minor, angle
   {
-    if(!linear.cov)
+    if("major" %in% NAMES)
     {
-      parscale <- c(parscale,sigma['minor'],pi/2)
+      parscale <- c(parscale,MAX)
+      lower <- c(lower,0)
+      upper <- c(upper,Inf)
+      period <- c(period,FALSE)
+    }
+
+    # minor and angle
+    if("minor" %in% NAMES)
+    {
+      parscale <- c(parscale,1,pi/2)
+      lower <- c(lower,0,-Inf)
+      upper <- c(upper,Inf,Inf) # could be 1 for minor/major
       period <- c(period,FALSE,pi)
     }
-    else
+  }
+  else # linear sigma: xx, yy, xy
+  {
+    if("major" %in% NAMES)
     {
-      sigma <- CTMM$sigma
-      parscale <- c(parscale,pmax(abs(sigma[c(4,2)]),SIGMIN))
+      parscale <- c(parscale,MAX)
+      lower <- c(lower,0)
+      upper <- c(upper,Inf)
+      period <- c(period,FALSE)
+    }
+
+    if("minor" %in% NAMES)
+    {
+      parscale <- c(parscale,MAX,MAX)
+      lower <- c(lower,0,-Inf)
+      upper <- c(upper,Inf,Inf)
       period <- c(period,FALSE,FALSE)
     }
-    lower <- c(lower,0,-Inf)
-    upper <- c(upper,Inf,Inf) # could make 1 for minor/major
-  }
+  } # end linear sigma
 
   if(!linear) # nonlinear autocorrelation parameters
   {
@@ -232,4 +247,38 @@ set.parameters <- function(CTMM,par,linear.cov=FALSE)
   NAME <- "error"; if(NAME %in% NAMES) { CTMM[[NAME]] <- par[NAME] }
 
   return(CTMM)
+}
+
+
+# copy autocovariance parameters 'par' from 'value' to 'x', which might have more parameters
+copy.parameters <- function(x,value,par=value$features,destructive=TRUE)
+{
+  Pv <- par
+  Px <- x$features
+
+  if('minor' %in% Pv) { x$isotropic <- value$isotropic }
+  if('minor' %in% Pv || 'minor' %nin% Px) # copy over full covariance matrix
+  { x$sigma <- value$sigma }
+  else # copy over variance only
+  {
+    sigma <- x$sigma@par
+    sigma['major'] <- value$sigma@par['major']
+    x$sigma <- covm(sigma,isotropic=FALSE,axes=x$axes)
+  }
+
+  if("tau position" %in% Pv) { x$tau[1] <- value$tau[1] }
+  if("tau velocity" %in% Pv) { x$tau[2] <- value$tau[2] }
+  if("tau" %in% Pv) { x$tau <- value$tau }
+  if("omega" %in% Pv) { x$omega <- value$omega }
+  if("circle" %in% Pv) { x$circle <- value$circle }
+  if("error" %in% Pv) { x$error <- value$error }
+
+  # don't think I need this
+  if("MLE" %in% names(x))
+  {
+    if("MLE" %in% names(value)) { value <- value$MLE }
+    x$MLE <- copy.parameters(x$MLE,value,par=par,destructive=destructive)
+  }
+
+  return(x)
 }

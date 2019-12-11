@@ -4,7 +4,7 @@ BESSEL_LIMIT <- 2^16
 # estimate and assign speeds to times
 outlie <- function(data,UERE=10,standardize=FALSE,plot=TRUE,...)
 {
-  if(class(data)=="list") { return( lapply(1:length(data), function(i){outlie(data[i],UERE=UERE,standardize=standardize,plot=plot); graphics::title(names(data)[i])} ) ) }
+  if(class(data)[1]=="list") { return( lapply(1:length(data), function(i){outlie(data[i],UERE=UERE,standardize=standardize,plot=plot); graphics::title(names(data)[i])} ) ) }
 
   error <- get.error(data,ctmm(error=UERE,axes=c("x","y")),circle=TRUE)
 
@@ -65,7 +65,7 @@ outlie <- function(data,UERE=10,standardize=FALSE,plot=TRUE,...)
 
 #########################
 # plot outlier information with error bars
-plot.outlie <- function(x,level=0.95,...)
+plot.outlie <- function(x,level=0.95,units=TRUE,...)
 {
   n <- nrow(x)
   v <- x$speed
@@ -74,12 +74,12 @@ plot.outlie <- function(x,level=0.95,...)
   v <- sapply(1:n,function(i){tnorm.hdr(v[i],x$VAR.speed[i],level=level)})
   d <- sapply(1:n,function(i){tnorm.hdr(d[i],x$VAR.distance[i],level=level)})
 
-  # unit conversions ...
-  UNITS <- unit(v,dimension='speed',concise=TRUE)
+  # unit conversions ... (simpler)
+  UNITS <- unit(v,dimension='length',concise=TRUE,SI=!units)
   v <- v/UNITS$scale
-  ylab <- paste0("Minimum speed (",UNITS$name,")")
+  ylab <- paste0("Minimum speed (",UNITS$name,"/s)")
 
-  UNITS <- unit(d,dimension='length',concise=TRUE)
+  UNITS <- unit(d,dimension='length',concise=TRUE,SI=!units)
   d <- d/UNITS$scale
   xlab <- paste0("Core deviation (",UNITS$name,")")
 

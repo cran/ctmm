@@ -20,7 +20,7 @@ optimizer <- function(par,fn,...,method="pNewton",lower=-Inf,upper=Inf,period=FA
     func <- function(par,...)
     {
       FN <- try(fn(par,...))
-      if(class(FN)!="numeric" || is.nan(FN))
+      if(class(FN)[1] != "numeric" || is.nan(FN))
       {
         warning("Objective function failure at c(",paste(names(par),collapse=','),') = c(',paste(par,collapse=','),')')
         FN <- Inf
@@ -85,12 +85,12 @@ box.search <- function(p0,grad,hess,cov=PDsolve(hess),lower=-Inf,upper=Inf,perio
   # passes through lower boundary ?
   dlo <- lower-p1
   LO <- (dlo>=0)
-  if(any(LO)) { lambda[LO] <- ifelse( dp[LO]<0 , 1 - abs( dlo[LO]/dp[LO] ) , 1 ) }
+  if(!any(is.nan(LO)) && any(LO)) { lambda[LO] <- ifelse( dp[LO]<0 , 1 - abs( dlo[LO]/dp[LO] ) , 1 ) }
 
   # passes through upper boundary ?
   dhi <- p1-upper
   HI <- (dhi>=0)
-  if(any(HI)) { lambda[HI] <- ifelse( dp[HI]>0 , 1 - abs( dhi[HI]/dp[HI] ) , 1 ) }
+  if(!any(is.nan(HI)) && any(HI)) { lambda[HI] <- ifelse( dp[HI]>0 , 1 - abs( dhi[HI]/dp[HI] ) , 1 ) }
 
   PER <- as.logical(period)
   if(any(PER)) { lambda[PER] <- min(1, abs(dp[PER])/(period[PER]*period.max) ) }
@@ -413,7 +413,7 @@ mc.optim <- function(par,fn,...,lower=-Inf,upper=Inf,period=F,control=list())
     else { FN <- try(fn(par*parscale,...)) }
     # ordinary objective function
 
-    if(class(FN)=="numeric" && !is.nan(FN)) { FN <- FN/fnscale }
+    if(class(FN)[1]=="numeric" && !is.nan(FN)) { FN <- FN/fnscale }
     else
     {
       # store to environmental variable so that I can debug?
