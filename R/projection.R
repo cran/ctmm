@@ -1,6 +1,18 @@
 # global variable
 DATA.EARTH <- list(R.EQ=6378137,R.PL=6356752.3142) # equatorial & polar radii
 
+#setGeneric("projection", function(x,...) { standardGeneric("projection") }, signature='x')
+#setGeneric("projection<-", function(x,value,...) { standardGeneric("projection<-") }, signature='x')
+
+# setMethod('projection',signature(x='Raster'),raster::projection)
+# setMethod('projection',signature(x='RasterLayer'),raster::projection)
+# setMethod('projection',signature(x='RasterStack'),raster::projection)
+# setMethod('projection',signature(x='RasterBrick'),raster::projection)
+# setMethod('projection<-',signature(x='Raster'),raster::projection)
+# setMethod('projection<-',signature(x='RasterLayer'),raster::projection)
+# setMethod('projection<-',signature(x='RasterStack'),raster::projection)
+# setMethod('projection<-',signature(x='RasterBrick'),raster::projection)
+
 # otherwise returns NA
 projection.NULL <- function(x,asText=TRUE) { return(NULL) }
 setMethod('projection', signature(x='NULL'), projection.NULL)
@@ -13,8 +25,19 @@ projection.telemetry <- function(x,asText=TRUE)
   return(proj)
 }
 setMethod('projection', signature(x='telemetry'), projection.telemetry)
+projection.ctmm <- projection.telemetry
 setMethod('projection', signature(x='ctmm'), projection.telemetry)
+projection.UD <- projection.telemetry
 setMethod('projection', signature(x='UD'), projection.telemetry)
+
+
+project <- function(x,from=DATUM,to=DATUM)
+{
+  x <- sp::SpatialPoints(x,proj4string=sp::CRS(from))
+  x <- sp::spTransform(x,sp::CRS(to))
+  x <- sp::coordinates(x)
+  return(x)
+}
 
 
 projection.list <- function(x,asText=TRUE)
@@ -58,8 +81,8 @@ setMethod('projection<-', signature(x='list'), `projection<-.list`)
 
   ### project locations ###
   R <- cbind(x$longitude,x$latitude)
+  R <- project(R,to=value)
   colnames(R) <- c("x","y")
-  R <- rgdal::project(R,value)
   x[c('x','y')] <- R
   rm(R)
 
@@ -118,8 +141,8 @@ northing <- function(x,proj)
   d.lambda <- 1/sqrt((R.EQ*sin(x$latitude))^2+(R.PL*cos(x$latitude))^2)
   # could use grad() but would be slowwwww....
   u <- cbind(x$longitude,x$latitude + d.lambda*(360/2/pi)) # arg, degrees!
+  u <- project(u,to=proj)
   colnames(u) <- c("x","y")
-  u <- rgdal::project(u,proj)
   # difference vectors pointing North ~1 meters
   u <- u - get.telemetry(x) # [n,2]
   # difference vectors pointing North 1 meters exact

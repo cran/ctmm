@@ -116,7 +116,7 @@ Adj <- function(M) { t(Conj(M)) }
 He <- function(M) { (M + Adj(M))/2 }
 
 
-# map function for PSD matrices
+# map function for real-valued PSD matrices
 PDfunc <-function(M,func=function(m){1/m},force=FALSE,pseudo=FALSE,tol=.Machine$double.eps)
 {
   DIM <- dim(M)[1]
@@ -128,8 +128,17 @@ PDfunc <-function(M,func=function(m){1/m},force=FALSE,pseudo=FALSE,tol=.Machine$
   else if(DIM==2)
   {
     TR <- (M[1,1] + M[2,2])/2 # half trace
-    DET <- M[1,1]*M[2,2] - M[1,2]*M[2,1]
-    DET <- TR^2 - DET
+    BIGNUM <- TR^2 > .Machine$double.xmax * .Machine$double.eps
+    if(BIGNUM)
+    {
+      DET <- (M[1,1]/TR)*(M[2,2]/TR) - (M[1,2]/TR)*(M[2,1]/TR)
+      DET <- 1 - DET
+    }
+    else
+    {
+      DET <- M[1,1]*M[2,2] - M[1,2]*M[2,1]
+      DET <- TR^2 - DET
+    }
     if(DET<0) # this shouldn't ever happen with Hermitian matrices
     {
       if(!force && !pseudo) { stop("Matrix not positive definite.") }
@@ -144,6 +153,7 @@ PDfunc <-function(M,func=function(m){1/m},force=FALSE,pseudo=FALSE,tol=.Machine$
     else
     {
       DET <- sqrt(DET) # now root term
+      if(BIGNUM) { DET <- DET * TR }
 
       # hermitian formula
       V <- diag(1/2,2) %o% c(1,1) + ((M-TR*diag(2))/(DET*2)) %o% c(1,-1)
@@ -155,9 +165,9 @@ PDfunc <-function(M,func=function(m){1/m},force=FALSE,pseudo=FALSE,tol=.Machine$
   {
     M <- eigen(M)
     V <- M$vectors
-    M <- M$values
+    M <- Re(M$values)
 
-    V <- vapply(1:DIM,function(i){V[,i] %o% Conj(V[,i])},diag(1,DIM))
+    V <- vapply(1:DIM,function(i){Re(V[,i] %o% Conj(V[,i]))},diag(1,DIM))
   }
 
   if(any(M<0) && !force && !pseudo) { stop("Matrix not positive definite.") }
@@ -216,7 +226,7 @@ PDsolve <- function(M,force=FALSE,pseudo=FALSE,tol=.Machine$double.eps)
 
     # regular inverse of remaining dimensions
     REM <- !(INF|ZERO)
-    if(any(REM)) { M[REM,REM] <- PDsolve(M[REM,REM]) }
+    if(any(REM)) { M[REM,REM] <- PDsolve(M[REM,REM,drop=FALSE]) }
 
     return(M)
   }
@@ -342,22 +352,45 @@ sqrtm <- function(M,force=FALSE,pseudo=FALSE)
 # condition number
 conditionNumber <- function(M)
 {
-  M <- eigen(M)$values
-  M <- range(M)
-  return(M[2]/M[1])
+  M <- try(eigen(M,only.values=TRUE)$values)
+  if(class(M)[1]=="numeric")
+  {
+    M <- last(M)/M[1]
+    M <- nant(M,Inf) # worst case
+    return(M)
+  }
+  else
+  { return(Inf) } # worst case
 }
 
 
 # Positive definite part of matrix
-PDclamp <- function(M)
+PDclamp <- function(M,lower=0,upper=Inf)
 {
-  # symmetrize
-  M <- He(M)
+  # Inf fix
+  INF <- diag(M)==Inf
+  if(any(INF))
+  {
+    if(any(INF))
+    {
+      M[INF,INF] <- 0
+      diag(M)[INF] <- upper # Inf
+    }
 
-  M <- PDfunc(M,function(m){clamp(m,0,Inf)},pseudo=TRUE)
+    # regular clamp of remaining dimensions
+    REM <- !INF
+    if(any(REM)) { M[REM,REM] <- PDclamp(M[REM,REM,drop=FALSE],lower=lower,upper=upper) }
+  }
+  else
+  {
+    # symmetrize
+    M <- He(M)
 
-  # symmetrize
-  M <- He(M)
+    M <- PDfunc(M,function(m){clamp(m,lower,upper)},pseudo=TRUE)
+
+    # symmetrize
+    M <- He(M)
+  }
 
   return(M)
 }
@@ -366,7 +399,7 @@ PDclamp <- function(M)
 # relatively smallest eigen value of matrix
 mat.min <- function(M)
 {
-  if(any(diag(M)==0)) { return(0) }
+  if(any(is.na(M)) || any(abs(M)==Inf) || any(diag(M)==0)) { return(0) }
   diag(M) <- abs(diag(M))
   M <- stats::cov2cor(M)
   M <- eigen(M,only.values=TRUE)$values

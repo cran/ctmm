@@ -1,3 +1,5 @@
+DATUM <- "+proj=longlat +datum=WGS84"
+
 subset.telemetry <- function(x,...)
 {
    info <- attr(x,"info")
@@ -89,22 +91,28 @@ set.telemetry <- function(data,value,axes=colnames(value))
 
 #######################
 # Generic import function
-as.telemetry <- function(object,timeformat="",timezone="UTC",projection=NULL,timeout=Inf,na.rm="row",mark.rm=FALSE,keep=FALSE,drop=TRUE,...) UseMethod("as.telemetry")
+as.telemetry <- function(object,timeformat="",timezone="UTC",projection=NULL,datum=NULL,timeout=Inf,na.rm="row",mark.rm=FALSE,keep=FALSE,drop=TRUE,...) UseMethod("as.telemetry")
 
 
 # MoveStack object
-as.telemetry.MoveStack <- function(object,timeformat="",timezone="UTC",projection=NULL,timeout=Inf,na.rm="row",mark.rm=FALSE,keep=FALSE,drop=TRUE,...)
+as.telemetry.MoveStack <- function(object,timeformat="",timezone="UTC",projection=NULL,datum=NULL,timeout=Inf,na.rm="row",mark.rm=FALSE,keep=FALSE,drop=TRUE,...)
 {
   # get individual names
   NAMES <- move::trackId(object)
   NAMES <- levels(NAMES)
 
+  # preserve Move object projection if possible
+  if(is.null(projection) && !raster::isLonLat(object)) { projection <- raster::projection(object) }
+
   # convert individually
   object <- move::split(object)
-  object <- lapply(object,function(mv){ as.telemetry.Move(mv,timeformat=timeformat,timezone=timezone,projection=projection,timeout=timeout,na.rm=na.rm,mark.rm=mark.rm,keep=keep,...) })
+  object <- lapply(object,function(mv){ as.telemetry.Move(mv,timeformat=timeformat,timezone=timezone,projection=projection,datum=datum,timeout=timeout,na.rm=na.rm,mark.rm=mark.rm,keep=keep,...) })
   # name by MoveStack convention
   names(object) <- NAMES
   for(i in 1:length(object)) { attr(object,"info")$identity <- NAMES[i] }
+
+  # unified projection if missing (somewhat redundant, but whatever)
+  if(is.null(projection)) { projection(object) <- median(object,k=2) }
 
   if(drop && length(object)==1) { object <- object[[1]] }
 
@@ -113,7 +121,7 @@ as.telemetry.MoveStack <- function(object,timeformat="",timezone="UTC",projectio
 
 
 # Move object
-as.telemetry.Move <- function(object,timeformat="",timezone="UTC",projection=NULL,timeout=Inf,na.rm="row",mark.rm=FALSE,keep=FALSE,drop=TRUE,...)
+as.telemetry.Move <- function(object,timeformat="",timezone="UTC",projection=NULL,datum=NULL,timeout=Inf,na.rm="row",mark.rm=FALSE,keep=FALSE,drop=TRUE,...)
 {
   # preserve Move object projection if possible
   if(is.null(projection) && !raster::isLonLat(object)) { projection <- raster::projection(object) }
@@ -126,7 +134,7 @@ as.telemetry.Move <- function(object,timeformat="",timezone="UTC",projection=NUL
 
 
 # convert Move object back to MoveBank CSV
-Move2CSV <- function(object,timeformat="",timezone="UTC",projection=NULL,...)
+Move2CSV <- function(object,timeformat="",timezone="UTC",projection=NULL,datum=NULL,...)
 {
   DATA <- data.frame(timestamp=move::timestamps(object))
 
@@ -136,7 +144,7 @@ Move2CSV <- function(object,timeformat="",timezone="UTC",projection=NULL,...)
     if(is.null(projection)) { warning("Move objects in geographic coordinates are automatically projected.") }
   }
   else # projection will be preserved, but still need long-lat
-  { DATA[,c('location.long','location.lat')] <- sp::coordinates(sp::spTransform(object,sp::CRS("+proj=longlat +datum=WGS84"))) }
+  { DATA[,c('location.long','location.lat')] <- sp::coordinates(sp::spTransform(object,sp::CRS(DATUM))) }
 
   # break Move object up into data.frame and idData
   idData <- move::idData(object)
@@ -286,7 +294,7 @@ merge.class <- function(class1,class2)
 
 
 # read in a MoveBank object file
-as.telemetry.character <- function(object,timeformat="",timezone="UTC",projection=NULL,timeout=Inf,na.rm="row",mark.rm=FALSE,keep=FALSE,drop=TRUE,...)
+as.telemetry.character <- function(object,timeformat="",timezone="UTC",projection=NULL,datum=NULL,timeout=Inf,na.rm="row",mark.rm=FALSE,keep=FALSE,drop=TRUE,...)
 {
   # read with 3 methods: fread, temp_unzip, read.csv, fall back to next if have error.
   # fread error message is lost, we can use print(e) for debugging.
@@ -302,7 +310,7 @@ as.telemetry.character <- function(object,timeformat="",timezone="UTC",projectio
       data <- utils::read.csv(object,...)
     }
   }
-  data <- as.telemetry.data.frame(data,timeformat=timeformat,timezone=timezone,projection=projection,timeout=timeout,na.rm=na.rm,mark.rm=mark.rm,keep=keep,drop=drop)
+  data <- as.telemetry.data.frame(data,timeformat=timeformat,timezone=timezone,projection=projection,datum=datum,timeout=timeout,na.rm=na.rm,mark.rm=mark.rm,keep=keep,drop=drop)
   return(data)
 }
 
@@ -329,14 +337,15 @@ asPOSIXct <- function(x,timeformat="",timezone="UTC",...)
 
 
 # this assumes a MoveBank data.frame
-as.telemetry.data.frame <- function(object,timeformat="",timezone="UTC",projection=NULL,timeout=Inf,na.rm="row",mark.rm=FALSE,keep=FALSE,drop=TRUE,...)
+as.telemetry.data.frame <- function(object,timeformat="",timezone="UTC",projection=NULL,datum=NULL,timeout=Inf,na.rm="row",mark.rm=FALSE,keep=FALSE,drop=TRUE,...)
 {
   NAMES <- list()
   NAMES$timestamp <- c('timestamp','timestamp.of.fix','Acquisition.Time',
                        'Date.Time','Date.Time.GMT','UTC.Date.Time',"DT.TM",'Ser.Local','GPS_YYYY.MM.DD_HH.MM.SS',
                        'Acquisition.Start.Time','start.timestamp',
                        'Time.GMT','GMT.Time','time',"\u6642\u523B",
-                       'Date.GMT','Date','Date.Local',"\u65E5\u4ED8")
+                       'Date.GMT','Date','Date.Local',"\u65E5\u4ED8",
+                       't','t_dat')
   NAMES$id <- c("animal.ID","individual.local.identifier","local.identifier","individual.ID","Name","ID","ID.Names","Animal","Full.ID",
                 "tag.local.identifier","tag.ID","band.number","band.num","device.info.serial","Device.ID","collar.id","Logger",
                 "Deployment","deployment.ID","track.ID")
@@ -353,7 +362,7 @@ as.telemetry.data.frame <- function(object,timeformat="",timezone="UTC",projecti
   NAMES$GDOP <- c("GPS.GDOP","GDOP","Geometric.DOP","GPS.Geometric.Dilution","Geometric.Dilution","Geo.Dil","Geo.DOP")
   NAMES$VDOP <- c("GPS.VDOP","VDOP","Vertical.DOP","GPS.Vertical.Dilusion","Vertical.Dilution","Ver.Dil","Ver.DOP")
   NAMES$nsat <- c("GPS.satellite.count","satellite.count","Sat.Count","Number.of.Sats","Num.Sats","Nr.Sat","NSat","NSats","Sat.Num","satellites.used","Satellites","Sats","SVs.in.use") # Counts? Messages?
-  NAMES$FIX <- c("GPS.fix.type","GPS.fix.type.raw","fix.type","type.of.fix","e.obs.type.of.fix","Fix.Attempt","GPS.Fix.Attempt","Telonics.Fix.Attempt","Fix.Status","sensor.type","Fix","2D/3D")
+  NAMES$FIX <- c("GPS.fix.type","GPS.fix.type.raw","fix.type","type.of.fix","e.obs.type.of.fix","Fix.Attempt","GPS.Fix.Attempt","Telonics.Fix.Attempt","Fix.Status","sensor.type","Fix","2D/3D","Nav","Validated","VALID")
   NAMES$TTF <- c("GPS.time.to.fix","time.to.fix","GPS.TTF","TTF","GPS.fix.time","fix.time","time.to.get.fix","used.time.to.get.fix","e.obs.used.time.to.get.fix","Duration","GPS.navigation.time","navigation.time","Time.On")
   NAMES$z <- c("height.above.ellipsoid","height.above.msl","height.above.mean.sea.level","height.raw","height","height.m","barometric.height","Argos.altitude","GPS.Altitude","altitude","altitude.m","Alt","barometric.depth","depth","elevation","elevation.m","elev")
   NAMES$v <- c("ground.speed",'speed.over.ground',"speed","GPS.speed")
@@ -444,6 +453,17 @@ as.telemetry.data.frame <- function(object,timeformat="",timezone="UTC",projecti
     { stop("Could not identify location columns.") }
 
     rm(zone,XY)
+  } # end UTM
+  else if(!is.null(datum)) # convert from input datum to default DATUM
+  {
+    ROWS <- is.na(DATA$longitude) | is.na(DATA$latitude)
+    ROWS <- !ROWS
+
+    XY <- DATA[ROWS,c('longitude','latitude')]
+    XY <- project(XY,from=datum)
+    DATA[ROWS,c('longitude','latitude')] <- XY
+
+    rm(ROWS,XY)
   }
 
   ###############################################
@@ -588,8 +608,18 @@ as.telemetry.data.frame <- function(object,timeformat="",timezone="UTC",projecti
   ###########################
   # generic location classes
   # includes Telonics Gen4 location classes (use with HDOP information)
-  COL <- pull.column(object,NAMES$FIX,FUNC=as.factor)
-  if(length(COL)) { DATA$class <- merge.class(COL,DATA$class) } # retain ARGOS location classes if mixed
+  # unlike other data, don't use first choice but loop over all columns
+  # retain ARGOS location classes if mixed, and any previous class
+  for(COL in NAMES$FIX)
+  {
+    if(COL %in% names(object))
+    {
+      CLASS <- as.factor(object[[COL]])
+      DATA$class <- merge.class(CLASS,DATA$class)
+    }
+  }
+  #COL <- pull.column(object,NAMES$FIX,FUNC=as.factor)
+  #if(length(COL)) { DATA$class <- merge.class(COL,DATA$class) }
 
   # detect if Telonics by location classes
   if(!TELONICS && "class" %in% names(DATA))

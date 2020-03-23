@@ -12,24 +12,22 @@ clean.parameters <- function(par,linear.cov=FALSE)
   {
     if(!linear.cov)
     {
-      # swap major and minor axis
-      if(par["minor"]>1)
+      # swap major and minor axis --- if not profiling major axis
+      if('major' %in% NAMES && par["minor"]>par['major'])
       {
         par["angle"] <- par["angle"] - pi/2
 
-        # not profiled
-        if('major' %in% NAMES) { par['major'] <- par['major'] * par['minor'] }
-        # else 'major' will be profiled
-
-        par['minor'] <- 1/par['minor']
+        VARS <- par[c('minor','major')]
+        par['major'] <- max(VARS)
+        par['minor'] <- min(VARS)
       }
 
-      # wrap angle back
+      # wrap angle back to (-pi/2,+pi/2)
       par["angle"] <- (((par["angle"]/pi+1/2) %% 1) - 1/2)*pi
     }
     else
     {
-      # sigma[x,x] sigma[y,y]
+      # sigma[x,x] sigma[y,y] --- positive semi-definite
       MAX <- sqrt(prod(par[c('major','minor')]))
       # sigma[x,y]
       par['angle'] <- clamp(par['angle'],-MAX,MAX)
@@ -59,18 +57,20 @@ id.parameters <- function(CTMM,profile=TRUE,linear=FALSE,linear.cov=FALSE,UERE=F
     if(!profile || (STRUCT$error && UERE>=3)) # must fit all 1-3 covariance parameters
     { if(STRUCT$isotropic) { NAMES <- c(NAMES,"major") } else { NAMES <- c(NAMES,names(sigma)) } }
     else if(STRUCT$error || STRUCT$circle) # must fit shape, but scale/area/var can be profiled for free
-    { if(!STRUCT$isotropic) { NAMES <- c(NAMES,names(sigma[2:3])) } } # the latter are ratios to the former
+    { if(!STRUCT$isotropic) { NAMES <- c(NAMES,names(sigma[2:3])) } }
   }
 
   if(!linear) # nonlinear autocorrelation parameters
   {
-    TAU <- CTMM$tau
+    TAU <- STRUCT$tau # for structure here
     if(!STRUCT$range) { TAU <- TAU[-1] }
     if(length(TAU))
     {
       if(length(TAU)==2 && TAU[1]==TAU[2]) { TAU <- TAU[1] ; NAMES <- c(NAMES,"tau") } # identical timescales
       else { NAMES <- c(NAMES,paste("tau",names(TAU))) } # distinct timescales
     }
+    TAU <- CTMM$tau # for parscale later
+    if("tau" %in% NAMES) { TAU <- mean(TAU) } # just the one
 
     if(STRUCT$omega) { NAMES <- c(NAMES,"omega") }
 
@@ -84,6 +84,7 @@ id.parameters <- function(CTMM,profile=TRUE,linear=FALSE,linear.cov=FALSE,UERE=F
   lower <- NULL
   upper <- NULL
   period <- NULL
+  # reflect <- NULL
 
   SIGMIN <- dz^2*ifelse(CTMM$range,1,df)
 
@@ -103,15 +104,15 @@ id.parameters <- function(CTMM,profile=TRUE,linear=FALSE,linear.cov=FALSE,UERE=F
     # minor and angle
     if("minor" %in% NAMES)
     {
-      parscale <- c(parscale,1,pi/2)
+      parscale <- c(parscale,MAX,pi/2)
       lower <- c(lower,0,-Inf)
-      upper <- c(upper,Inf,Inf) # could be 1 for minor/major
+      upper <- c(upper,Inf,Inf)
       period <- c(period,FALSE,pi)
     }
   }
   else # linear sigma: xx, yy, xy
   {
-    if("major" %in% NAMES)
+    if("major" %in% NAMES) # xx || yy
     {
       parscale <- c(parscale,MAX)
       lower <- c(lower,0)
@@ -119,7 +120,7 @@ id.parameters <- function(CTMM,profile=TRUE,linear=FALSE,linear.cov=FALSE,UERE=F
       period <- c(period,FALSE)
     }
 
-    if("minor" %in% NAMES)
+    if("minor" %in% NAMES) # yy & xy
     {
       parscale <- c(parscale,MAX,MAX)
       lower <- c(lower,0,-Inf)
@@ -217,7 +218,7 @@ get.parameters <- function(CTMM,NAMES,linear.cov=FALSE)
 
 
 # write autocovariance parameter array into a CTMM object
-set.parameters <- function(CTMM,par,linear.cov=FALSE)
+set.parameters <- function(CTMM,par,linear.cov=FALSE,optimize=FALSE)
 {
   NAMES <- names(par)
 
@@ -225,7 +226,7 @@ set.parameters <- function(CTMM,par,linear.cov=FALSE)
   if(!linear.cov)
   {
     sigma <- sigma@par
-    NAME <- "major"; if(NAME %in% NAMES) { sigma[NAME] <- par[NAME] }
+    NAME <- "major"; if(NAME %in% NAMES) { sigma[NAME] <- par[NAME]; if(length(CTMM$axes)>1) { sigma['minor'] <- par[NAME] } } # incase of isotropic
     NAME <- "minor"; if(NAME %in% NAMES) { sigma[NAME] <- par[NAME] }
     NAME <- "angle"; if(NAME %in% NAMES) { sigma[NAME] <- par[NAME] }
   }
@@ -261,9 +262,10 @@ copy.parameters <- function(x,value,par=value$features,destructive=TRUE)
   { x$sigma <- value$sigma }
   else # copy over variance only
   {
-    sigma <- x$sigma@par
-    sigma['major'] <- value$sigma@par['major']
-    x$sigma <- covm(sigma,isotropic=FALSE,axes=x$axes)
+    sigma <- scale.covm(x$sigma) # var-1
+    sigma <- scale.covm( sigma, var.covm(value$sigma,ave=TRUE) )
+    sigma@isotropic=FALSE
+    x$sigma <- sigma
   }
 
   if("tau position" %in% Pv) { x$tau[1] <- value$tau[1] }

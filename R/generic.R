@@ -36,7 +36,9 @@ mpsigamma <- function(x,deriv=0,dim=1)
 {
   PSI <- 1 - 1:dim
   PSI <- x + PSI/2
-  PSI <- sapply(PSI,function(p) psigamma(p,deriv=deriv))
+  if(deriv>=0) { PSI <- sapply(PSI,function(p) psigamma(p,deriv=deriv)) }
+  else if(deriv==-1) { PSI <- sapply(PSI,function(p) lgamma(p)) }
+  else { stop("Derivative ",deriv+1," of log(Gamma(x)) not supported.") }
   PSI <- sum(PSI)
   return(PSI)
 }
@@ -80,7 +82,15 @@ plot.list <- function(x,...)
 # forwarding function for list of a particular datatype
 summary.list <- function(object,...)
 {
-  CLASS <- class(object[[1]])[1]
+  # recurse if necessary
+  CLASS <- "list"
+  DATA <- object
+  while(CLASS=="list")
+  {
+    DATA <- DATA[[1]]
+    CLASS <- class(DATA)
+  }
+
   utils::getS3method("summary",CLASS)(object,...)
 }
 
@@ -108,7 +118,7 @@ is.odd <- Vectorize(function(x) {x %% 2 != 0})
 
 
 # generalized covariance from -likelihood derivatives
-cov.loglike <- function(hess,grad=rep(0,nrow(hess)))
+cov.loglike <- function(hess,grad=rep(0,sqrt(length(hess))),tol=.Machine$double.eps)
 {
   # in case of bad derivatives, use worst-case numbers
   grad <- nant(grad,Inf)
@@ -129,8 +139,7 @@ cov.loglike <- function(hess,grad=rep(0,nrow(hess)))
   V <- pmax(V,abs(grad))
 
   # don't divide by zero
-  # TOL <- .Machine$double.eps * length(V)
-  TEST <- V==0
+  TEST <- V<=tol
   if(any(TEST)) { V[TEST] <- 1 }
 
   W <- V %o% V
@@ -150,7 +159,7 @@ cov.loglike <- function(hess,grad=rep(0,nrow(hess)))
       for(i in 2:N)
       {
         CALL <- deparse(sys.call(-i))[1]
-        CALL <- grepl("ctmm.select",CALL)
+        CALL <- grepl("ctmm.select",CALL) || grepl("cv.like",CALL)
         if(CALL)
         {
           WARN <- FALSE
@@ -179,7 +188,6 @@ cov.loglike <- function(hess,grad=rep(0,nrow(hess)))
     { values[i] <- ((sqrt(DET)-grad[i])/values[i])^2 }
     else # minimum loglike? optim probably failed or hit a boundary
     {
-      # warning("MLE is near a boundary.")
       # (parameter distance to worst parameter * 1/2 / loglike difference to worst parameter)^2
       # values[i] <- 1/grad[i]^2
       # pretty close to the other formula, so just using that
@@ -188,6 +196,7 @@ cov.loglike <- function(hess,grad=rep(0,nrow(hess)))
   }
 
   COV <- array(0,dim(hess))
+  values <- nant(values,Inf) # worst case NaN fix
   SUB <- values<Inf
   if(any(SUB)) # separate out the finite part
   { COV <- COV + Reduce("+",lapply((1:length(grad))[SUB],function(i){ values[i] * outer(vectors[,i]) })) }

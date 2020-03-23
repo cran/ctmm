@@ -1,7 +1,7 @@
 Encoding: UTF-8
 Package: ctmm
-Version: 0.5.8
-Date: 2019-12-09
+Version: 0.5.9
+Date: 2019-03-23
 Title: Continuous-Time Movement Modeling
 Authors@R: c(person(c("Christen","H."),"Fleming",email="flemingc@si.edu",role=c("aut","cre")),
              person(c("Justin","M."),"Calabrese",email="calabresej@si.edu",role="aut"),
@@ -17,7 +17,8 @@ Authors@R: c(person(c("Christen","H."),"Fleming",email="flemingc@si.edu",role=c(
              person(c("Rogério","C."),"de Paula",role="dtc"),
              person("Thomas","Akre",role="dtc"),
              person("Jonathan","Drescher-Lehman",role="dtc"),
-             person("Autumn-Lynn","Harrison",role="dtc"))
+             person("Autumn-Lynn","Harrison",role="dtc"),
+             person(c("Ronaldo G."),"Morato",role="dtc"))
 URL: https://github.com/ctmm-initiative/ctmm,
         http://biology.umd.edu/movement.html
 Depends: R (>= 3.5.0)
@@ -45,7 +46,7 @@ License: GPL-3
 VignetteBuilder: knitr
 NeedsCompilation: no
 RoxygenNote: 6.1.1
-Packaged: 2019-12-11 03:30:28 UTC; Christen
+Packaged: 2020-03-23 08:49:57 UTC; Christen
 Author: Christen H. Fleming [aut, cre],
   Justin M. Calabrese [aut],
   Xianghui Dong [ctb],
@@ -60,7 +61,8 @@ Author: Christen H. Fleming [aut, cre],
   Rogério C. de Paula [dtc],
   Thomas Akre [dtc],
   Jonathan Drescher-Lehman [dtc],
-  Autumn-Lynn Harrison [dtc]
+  Autumn-Lynn Harrison [dtc],
+  Ronaldo G. Morato [dtc]
 Maintainer: Christen H. Fleming <flemingc@si.edu>
 Repository: CRAN
-Date/Publication: 2019-12-11 15:00:02 UTC
+Date/Publication: 2020-03-23 11:30:09 UTC

@@ -1,3 +1,36 @@
+ctmm 0.5.9 (2019-03-23)
+================
+
+  * new exact variogram CI argument "Gauss"
+  
+  * new mean.UD argument weights
+  
+  * new datum argument in as.telemetry---input and ouput datums can now differ
+  
+  * new data 'jaguar'
+  
+  * bugfix for infinte loop in ctmm.select
+  
+  * improvements in ctmm.select, ctmm.loglike for collapsing variance/error estimates
+  
+  * rewrite of optimizer's line search to be more exact & reliable
+  
+  * improvements in optimizer for degenerate likelihood surfaces
+  
+  * improvements in optimization for bad covariance estimates---fit object structure changed
+  
+  * bugfix in uere.fit with multiple location classes in different orders
+  
+  * bugfix in speed when fast=FALSE and sampled models lose features
+  
+  * bugfix in IID pREML CIs
+  
+  * bugfix in ctmm.guess with large errors causing eigen() to fail
+  
+  * bugfix in optimizer expansion search step size not increasing
+  
+  * MoveStack objects are given a common projection if not projected
+
 ctmm 0.5.8 (2019-12-09)
 ================
 

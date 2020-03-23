@@ -7,7 +7,7 @@ dexp1 <- function(x,Exp=exp(-x)) { ifelse(Exp<0.5,1-Exp,2*sqrt(Exp)*sinh(x/2)) }
 ###############################
 # Propagator/Green's function and Two-time correlation from Langevin equation for Kalman filter and simulations
 # random CTMM objects need to be run through get.taus() first, to precompute various parameters
-langevin <- function(dt,CTMM)
+langevin <- function(dt,CTMM,DIM=1)
 {
   K <- CTMM$K
   tau <- CTMM$tau
@@ -151,11 +151,12 @@ langevin <- function(dt,CTMM)
   }
 
   # fix the dimension of the filter
-  DIM <- dim(sigma)[1]
-  if(is.null(DIM)) # 1D filter
+  if(DIM==1) # 1D filter
   { Sigma <- sigma * Sigma }
   else # 2D filter
   {
+    if(length(sigma)==1) { sigma <- diag(sigma,DIM) }
+
     K <- max(1,K)
 
     Sigma <- outer(Sigma,sigma) # (k,k,d,d)
@@ -176,10 +177,27 @@ langevin <- function(dt,CTMM)
 
 
 ########################
+# 0/0 -> NaN -> to
+# fixes a priori known limits
 nant <- function(x,to)
 {
   NAN <- is.nan(x)
   if(any(NAN)) { x[NAN] <- to }
+  return(x)
+}
+
+# fix for infite PD matrix
+# useful after nant(x,Inf)
+inft <- function(x,to=0)
+{
+  INF <- diag(x)==Inf
+  if(any(INF))
+  {
+    # force positive definite
+    x[INF,] <- x[,INF] <- 0
+    # restore infinite variance
+    diag(x)[INF] <- Inf
+  }
   return(x)
 }
 
@@ -196,7 +214,7 @@ nant <- function(x,to)
 # # FALSE: don't assume or return computed glob
 # # +1: store a computed glob in the environment
 # # -1: use a computed glob from the environment
-kalman <- function(z,u,dt,CTMM,error=NULL,smooth=FALSE,sample=FALSE,residual=FALSE,precompute=FALSE)
+kalman <- function(z,u,dt,CTMM,error=NULL,DIM=1,smooth=FALSE,sample=FALSE,residual=FALSE,precompute=FALSE)
 {
   # STUFF THAT CAN BE PRECOMPUTED IF DOING MULTIPLE SIMULATIONS
   if(precompute>=0)
@@ -204,10 +222,9 @@ kalman <- function(z,u,dt,CTMM,error=NULL,smooth=FALSE,sample=FALSE,residual=FAL
     n <- nrow(z)
     if(CTMM$range) { N <- n } else { N <- n-1 } # condition off first point
 
-    DIM <- dim(CTMM$sigma)[1] # infer necessary dimension
-    if(is.null(DIM)) { DIM <- 1 } # default dimension, scalar sigma
     if(is.null(error)) { error <- array(0,c(n,DIM,DIM)) }
 
+    CTMM <- get.taus(CTMM,simplify=TRUE) # pre-compute some stuff for Langevin equation solutions
     tau <- CTMM$tau
     K <- max(1,length(tau))  # dimension of hidden state per spatial dimension
     OBS <- 1 # observed dynamical dimensions: OBS <= K
@@ -248,12 +265,11 @@ kalman <- function(z,u,dt,CTMM,error=NULL,smooth=FALSE,sample=FALSE,residual=FAL
     Sigma <- array(0,c(n,K*DIM,K*DIM))
 
     # Propagators from Langevin equation
-    CTMM <- get.taus(CTMM) # pre-compute some stuff for Langevin equation solutions
     for(i in 1:n)
     {
       # does the time lag change values? Then update the propagators.
       if(i==1 || dt[i] != dt[i-1])
-      { Langevin <- langevin(dt=dt[i],CTMM=CTMM) }
+      { Langevin <- langevin(dt=dt[i],CTMM=CTMM,DIM=DIM) }
 
       Green[i,,] <- Langevin$Green # (K*DIM,K*DIM)
       Sigma[i,,] <- Langevin$Sigma # (K*DIM,K*DIM)
@@ -301,13 +317,8 @@ kalman <- function(z,u,dt,CTMM,error=NULL,smooth=FALSE,sample=FALSE,residual=FAL
         ANY <- any(INF)
         if(ANY) { TCON[INF] <- 0 } # prevent lots of NaNs that should be zero
         TCON <- Green[i+1,,] %*% TCON %*% t(Green[i+1,,]) + Sigma[i+1,,] # (K*DIM,K*DIM)
-        if(ANY) # restore Inf variances after avoiding NaNs -- delete finie correlations with infinite variance (impossible?)
-        {
-          INF <- diag(INF)
-          TCON[INF,] <- 0
-          TCON[,INF] <- 0
-          diag(TCON)[INF] <- Inf
-        }
+        # restore Inf variances after avoiding NaNs -- delete finie correlations with infinite variance (impossible?)
+        if(ANY) { TCON <- inft(TCON) }
         sFor[i+1,,] <- TCON
       }
     }
@@ -504,14 +515,29 @@ kalman <- function(z,u,dt,CTMM,error=NULL,smooth=FALSE,sample=FALSE,residual=FAL
     # upgrade concurrent estimates to Kriged estimates (covariance only)
     for(i in (n-1):1)
     {
-      TL <- nant(sCon[i,,] %*% t(Green[i+1,,]),0) %*% PDsolve(sFor[i+1,,],pseudo=TRUE) # (K*DIM,K*DIM)
-      INF <- diag(is.nan(TL))
-      if(any(INF))
+      # Inf * 0 -> 0
+      TL <- nant( sCon[i,,] %*% t(Green[i+1,,]) ,0)
+      INV <- PDsolve(sFor[i+1,,],force=TRUE,tol=0)
+      # 0/0 & Inf/Inf -> 1
+      #NAN <- diag(TL)==0 & diag(INV)==Inf
+      # Inf * 1 -> Inf # even though off-diagnals contribute Inf * 0
+      # INF <- diag(TL)!=0 & diag(INV)==Inf
+      # complete multiplication
+      TL <- TL %*% INV # (K*DIM,K*DIM)
+      NAN <- is.nan(diag(TL))
+      # now take limits
+      if(any(NAN))
       {
-        TL[INF,] <- 0
-        TL[,INF] <- 0
-        diag(TL)[INF] <- 1 # Inf/Inf->1
+        TL[NAN,] <- 0
+        TL[,NAN] <- 0
+        diag(TL)[NAN] <- 1 # Inf/Inf->1
       }
+      # if(any(INF))
+      # {
+      #   TL[INF,] <- 0
+      #   TL[,INF] <- 0
+      #   diag(TL)[INF] <- Inf # Inf*1->Inf
+      # }
       L[i,,] <- TL
       # manifestly symmetric backsolver
       # sCon[i,,] <- sCon[i,,] + L %*% (sCon[i+1,,]-sFor[i+1,,]) %*% t(L)

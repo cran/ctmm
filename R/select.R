@@ -127,10 +127,12 @@ get.mle <- function(FIT)
 {
   if("MLE" %in% names(FIT))
   {
+    axes <- FIT$axes
     MLE <- FIT$MLE
     FIT$MLE <- NULL
     # have parameters been altered after the fact?
     if(MLE$checksum==digest::digest(FIT,algo='md5')) { FIT <- MLE }
+    FIT$axes <- axes # goes missing in MLE?
   }
   return(FIT)
 }
@@ -140,6 +142,9 @@ get.mle <- function(FIT)
 # keep removing uncertain parameters until AIC stops improving
 ctmm.select <- function(data,CTMM,verbose=FALSE,level=1,IC="AICc",MSPE="position",trace=FALSE,cores=1,...)
 {
+  LIST <- list(...)
+  if(!is.null(LIST$control$message)) { message <- LIST$control$message }
+
   CV <- c("LOOCV","HSCV")
   IC <- match.arg(IC,c("AICc","AIC","BIC",CV,NA))
   MSPE <- match.arg(MSPE,c("position","velocity",NA))
@@ -155,16 +160,45 @@ ctmm.select <- function(data,CTMM,verbose=FALSE,level=1,IC="AICc",MSPE="position
   # accept list as completed candidates after first
   # for internal recursion, not for end users
   if(class(CTMM)[1]=="ctmm")
-  { MODELS <- list(CTMM) }
+  {
+    TRYS <- NULL
+    MODELS <- list()
+  }
   else if(class(CTMM)[1]=="list")
   {
-    MODELS <- CTMM
-    CTMM <- MODELS[[1]]
+    TRYS <- attr(CTMM,"attempted") # models that we have tried
+    MODELS <- CTMM[-1]
+    CTMM <- CTMM[[1]]
   }
-  names(MODELS) <- sapply(MODELS,name.ctmm)
-  CAND <- length(MODELS) - 1 # number of extra candidate models included
+  CAND <- length(MODELS) # number of extra candidate models included for features
+  if(CAND) { names(MODELS) <- sapply(MODELS,name.ctmm) }
 
   UERE <- get.error(data,CTMM,flag=TRUE) # error flag only
+
+  # best non-zero variance estimates -- avoid zero collapse in intermediate model propagating to best model
+  axes <- CTMM$axes
+  AXES <- length(axes)
+  ERROR <- CTMM$error # best non-zero error estimate
+  VAR <- CTMM$sigma@par[1:AXES]
+  fix.vars <- function(M)
+  {
+    if(length(M))
+    {
+      for(i in 1:length(M))
+      {
+        if(M[[i]]$error<=.Machine$double.eps) { M[[i]]$error <- ERROR }
+        M.VAR <- M[[i]]$sigma@par
+        for(j in 1:AXES) { if(M.VAR[j]<=.Machine$double.eps) { M.VAR[j] <- VAR[j] } }
+        M[[i]]$sigma <- covm(M.VAR,axes=axes,isotropic=M[[i]]$isotropic)
+      }
+    }
+    return(M)
+  }
+  update.fix <- function(CTMM)
+  {
+    if(CTMM$error>.Machine$double.eps) { ERROR <<- CTMM$error }
+    for(i in 1:AXES) { if(CTMM$sigma@par[i]>.Machine$double.eps) { VAR[i] <<- CTMM$sigma@par[i] } }
+  }
 
   drift <- get(CTMM$mean)
   if(CTMM$mean=="periodic")
@@ -176,13 +210,17 @@ ctmm.select <- function(data,CTMM,verbose=FALSE,level=1,IC="AICc",MSPE="position
   # consider a bunch of new models and update best model without duplication
   iterate <- function(DROP,REFINE=list(),phase=1)
   {
+    # make sure everything tries errors
+    DROP <- fix.vars(DROP)
+    REFINE <- fix.vars(REFINE)
+
     # name the proposed models
     names(DROP) <- sapply(DROP,name.ctmm)
     names(REFINE) <- sapply(REFINE,name.ctmm)
 
-    # remove models already fit
-    DROP <- DROP[!(names(DROP) %in% names(MODELS))]
-    REFINE <- REFINE[!(names(REFINE) %in% names(MODELS))]
+    # remove models already attempted
+    DROP <- DROP[!(names(DROP) %in% TRYS)]
+    REFINE <- REFINE[!(names(REFINE) %in% TRYS)]
 
     # copy over best initial parameter guess for refined drops
     if(!drift@is.stationary(CTMM) && length(DROP))
@@ -205,17 +243,30 @@ ctmm.select <- function(data,CTMM,verbose=FALSE,level=1,IC="AICc",MSPE="position
     } # end refined drop adjustments
 
     GUESS <- c(DROP,REFINE)
+    # add to TRYS before potential feature collapse
+    TRYS.OLD <- TRYS # don't count new attempts for next select
+    if(length(GUESS))
+    {
+      TRYS <<- c(TRYS,names(GUESS))
+      TRYS <<- unique(TRYS)
+    }
 
    if(length(GUESS)>1) # keep selecting (recursive)
     {
       # fit every model
-      if(trace) { message("* Fitting models ",paste(names(GUESS),collapse=", "),".") }
-      GUESS <- plapply(GUESS,function(g){ctmm.select(data,c(list(g),MODELS),verbose=TRUE,level=0,IC=IC,MSPE=MSPE,trace=trace,...)},cores=cores)
-      if(length(GUESS)) { GUESS <- do.call(c,GUESS) } # concatenate list of lists
+      if(trace && FALSE) { message("* Fitting models ",paste(names(GUESS),collapse=", "),".") }
+      GUESS <- plapply(GUESS,function(g){M<-c(list(g),MODELS); attr(M,"attempted")<-TRYS.OLD; ctmm.select(data,M,verbose=TRUE,level=0,IC=IC,MSPE=MSPE,trace=trace,...)},cores=cores)
+      GUESS[sapply(GUESS,is.null)] <- NULL # delete collapsed repeats
+      if(length(GUESS)) # concatenate list of lists
+      {
+        TRYS <- c(TRYS, do.call(c, sapply(GUESS,function(g){attr(g,"attempted")}) ) ) # do.call incase of NULL
+        TRYS <- unique(TRYS)
+        GUESS <- do.call(c,GUESS)
+      }
     }
     else if(length(GUESS)==1) # fit last model
     {
-      if(trace) { message("* Fitting model ",names(GUESS),".") }
+      if(trace) { message("* Fitting model ",names(GUESS)) }
       GUESS[[1]] <- ctmm.fit(data,GUESS[[1]],trace=trace2,...)
 
       # cross-validate
@@ -225,7 +276,15 @@ ctmm.select <- function(data,CTMM,verbose=FALSE,level=1,IC="AICc",MSPE="position
         GUESS[[1]][[IC]] <- do.call(IC,list(data=data,CTMM=GUESS[[1]],cores=cores,...))
       }
     }
+    # corrected name after potential feature collapse
     names(GUESS) <- sapply(GUESS,name.ctmm)
+    # add to TRYS after potential feature collapse
+    if(length(GUESS))
+    {
+      TRYS <<- c(TRYS,names(GUESS))
+      TRYS <<- unique(TRYS)
+    }
+    # TRYS can be longer than MODELS
 
     MODELS <<- c(GUESS,MODELS)
 
@@ -233,16 +292,12 @@ ctmm.select <- function(data,CTMM,verbose=FALSE,level=1,IC="AICc",MSPE="position
     N <- length(MODELS) - CAND
     if(N>1) { MODELS[1:N] <<- sort.ctmm(MODELS[1:N],IC=IC,MSPE=MSPE) }
 
-    # remove redundant models (is this still necessary?)
-    # NAMES <- sapply(MODELS,name.ctmm) ->> names(MODELS)
-    # KEEP <- c(TRUE, NAMES[-1]!=NAMES[-length(NAMES)] )
-    # MODELS <<- MODELS[KEEP]
-
     # what is the new best model?
     OLD <<- CTMM
     CTMM <<- MODELS[[1]]
+    update.fix(CTMM) # update best non-zero error estimate
     # CTMM <<- min.ctmm(c(GUESS,list(CTMM)),IC=IC,MSPE=MSPE)
-  }
+  } # end iterate()
 
   ########################
   # PHASE 0: pair down to essential features for 'compatibility'
@@ -259,21 +314,22 @@ ctmm.select <- function(data,CTMM,verbose=FALSE,level=1,IC="AICc",MSPE="position
   # start with the most basic "compatible" model, if not included in candidates
   GUESS <- simplify.ctmm(CTMM,FEATURES)
   NAME <- name.ctmm(GUESS)
-  if(NAME %in% names(MODELS[-1])) # we already have the paired down model among our candidates
-  {
-    CTMM <- MODELS[[NAME]]
-    MODELS <- MODELS[2:length(MODELS)] # drop 1st (guess) instead of overwrite with fit (like below)
-  }
+  if(NAME %in% TRYS) # we have tried the paired down model
+  { CTMM <- MODELS[[1]] }
   else # fit paired down model
   {
-    if(trace) { message("* Fitting model ",NAME,".") }
+    if(trace) { message("* Fitting model ",NAME) }
+    TRYS <- c(NAME,TRYS)
     CTMM <- ctmm.fit(data,GUESS,trace=trace2,...)
     if(CV)
     {
       if(trace) { message("** Cross validating model ",name.ctmm(GUESS)) }
       CTMM[[IC]] <- do.call(IC,list(data=data,CTMM=CTMM,cores=cores,...))
     }
-    MODELS[[1]] <- CTMM # update initial guess to fit
+    TRYS <- c(name.ctmm(CTMM),TRYS)
+    TRYS <- unique(TRYS)
+    MODELS <- c(list(CTMM),MODELS) # update initial guess to fit
+    update.fix(CTMM)
   }
   names(MODELS) <- sapply(MODELS,name.ctmm)
 
@@ -284,8 +340,6 @@ ctmm.select <- function(data,CTMM,verbose=FALSE,level=1,IC="AICc",MSPE="position
   {
     MLE <- get.mle(CTMM)
     GUESS <- lapply(FEATURES,function(feat){complexify.ctmm(MLE,feat,TARGET)})
-
-    # SOMETHING IS WRONG HERE, NO TERMINATION OF SELECT TO FIT !!!
 
     # consider a bunch of new models and update best model without duplication
     iterate(GUESS)
@@ -302,20 +356,22 @@ ctmm.select <- function(data,CTMM,verbose=FALSE,level=1,IC="AICc",MSPE="position
     MLE <- get.mle(CTMM)
     beta <- alpha.ctmm(CTMM,alpha)
 
+    VARS <- dimnames(CTMM$COV)[[1]] # could be NULL
+
     # consider if smallest timescale is zero
     CI <- confint.ctmm(CTMM,alpha=beta)
     if(length(CTMM$tau)==2 && !is.na(IC)) # OUX -> OUx
     {
-      if(!CTMM$omega && CTMM$tau[1]!=CTMM$tau[2]) # OUF -> OU / IOU -> BM
+      if("tau velocity" %in% VARS) # OUF -> OU / IOU -> BM
       {
         Q <- CI["tau velocity",1]
-        if(is.nan(Q) || (Q<=0))
+        if(is.na(Q) || (Q<=0))
         { GUESS <- c(GUESS,list(simplify.ctmm(MLE,'tau velocity'))) }
       }
-      else if(!CTMM$omega) # OUf -> OU, IID
+      else if("omega" %nin% VARS) # OUf -> OU, IID
       {
         Q <- CI["tau",1]
-        if(is.nan(Q) || (Q<=0))
+        if(is.na(Q) || (Q<=0))
         {
           GUESS <- c(GUESS,list(simplify.ctmm(MLE,'tau'))) # OUf -> IID
           GUESS <- c(GUESS,list(simplify.ctmm(MLE,'tau velocity'))) # OUf -> OU
@@ -324,19 +380,19 @@ ctmm.select <- function(data,CTMM,verbose=FALSE,level=1,IC="AICc",MSPE="position
       else # OUO -> OUf
       {
         Q <- 1/CI["tau period",3]
-        if(is.nan(Q) || (Q<=0))
+        if(is.na(Q) || (Q<=0))
         { GUESS <- c(GUESS,list(simplify.ctmm(MLE,'omega'))) }
       }
     } # end # OUX -> OUx
     else if(CTMM$range && length(CTMM$tau)==1 && !is.na(IC)) # OU -> IID
     {
       Q <- CI["tau position",1]
-      if(is.nan(Q) || (Q<=0))
+      if(is.na(Q) || (Q<=0))
       { GUESS <- c(GUESS,list(simplify.ctmm(MLE,'tau position'))) }
     } # end # OU -> IID
 
     # can autocorrelation timescales be distinguished?
-    if(CTMM$range && length(CTMM$tau)==2 && (CTMM$tau[1]!=CTMM$tau[2] || CTMM$omega))
+    if(all(c('tau position','tau velocity') %in% VARS) || "omega" %in% VARS) # isn't omega redundant?
     {
       TEMP <- get.taus(CTMM,zeroes=TRUE)
       nu <- TEMP$f.nu[2] # frequency/difference
@@ -345,10 +401,10 @@ ctmm.select <- function(data,CTMM,verbose=FALSE,level=1,IC="AICc",MSPE="position
       Q <- c(J %*% CTMM$COV[Q,Q] %*% J) # variance of nu
       Q <- ci.tau(nu,Q,alpha=beta)[1]
 
-      if(Q<=0 || level==1 || is.na(IC))
+      if(is.na(Q) || Q<=0 || level==1 || is.na(IC))
       { GUESS <- c(GUESS,list(simplify.ctmm(MLE,"diff.tau"))) }
     }
-    else if(CTMM$range && length(CTMM$tau)==2) # try other side if boundary if choosen model is critically damped
+    else if("tau" %in% VARS) # try other side if boundary if choosen model is critically damped
     {
       # try overdamped
       TEMP <- TARGET
@@ -360,30 +416,31 @@ ctmm.select <- function(data,CTMM,verbose=FALSE,level=1,IC="AICc",MSPE="position
       if(!TEMP$omega) { TEMP$omega <- sqrt(.Machine$double.eps) }
       GUESS <- c(GUESS,list(complexify.ctmm(MLE,"omega",TEMP)))
     }
-    else if(CTMM$range && length(CTMM$tau)==1 && level==1) # OU -> OUf (bimodal likelihood)
+    else if("tau position" %in% VARS && level==1) # OU -> OUf (bimodal likelihood)
     { GUESS <- c(GUESS,list(simplify.ctmm(MLE,"diff.tau"))) }
 
     # consider if there is no circulation
-    if(CTMM$circle)
+    if("circle" %in% VARS)
     {
       Q <- CI["circle",3]
-      if(is.nan(Q) || (Q==Inf) || is.na(IC))
+      if(is.na(Q) || (Q==Inf) || is.na(IC))
       { GUESS <- c(GUESS,list(simplify.ctmm(MLE,"circle"))) }
     }
 
-    # consider if eccentricity is zero
+    # consider if eccentricity is zero --- log(major)==log(minor)
     if(!CTMM$isotropic)
     {
       Q <- c("major","minor")
-      GRAD <- c(1/CTMM$sigma@par[1],-1/CTMM$sigma@par[2])
+      GRAD <- c(1/CTMM$sigma@par['major'],-1/CTMM$sigma@par['minor'])
       SD <- ifelse(all(Q %in% CTMM$features),sqrt(c(GRAD %*% CTMM$COV[Q,Q] %*% GRAD)),Inf) # variance could collapse early
-      Q <- stats::qnorm(beta/2,mean=log(CTMM$sigma@par[1]/CTMM$sigma@par[2]),sd=SD)
-      if(Q<=0 || is.na(IC))
+      Q <- log(CTMM$sigma@par['major']/CTMM$sigma@par['minor'])
+      Q <- stats::qnorm(beta/2,mean=Q,sd=SD)
+      if(is.na(Q) || Q<=0 || is.na(IC))
       { GUESS <- c(GUESS,list(simplify.ctmm(MLE,"minor"))) }
     }
 
     # is the animal even moving?
-    if(!CTMM$sigma@par['major'] && CTMM$error)
+    if(!CTMM$sigma@par['major'] && "error"%in%VARS)
     { GUESS <- c(GUESS,list(simplify.ctmm(MLE,"major"))) }
 
     # consider if we can relax range residence (non-likelihood comparison only)
@@ -406,12 +463,23 @@ ctmm.select <- function(data,CTMM,verbose=FALSE,level=1,IC="AICc",MSPE="position
   # return the best or return the full list of models
   if(verbose)
   {
-    MODELS <- sort.ctmm(MODELS,IC=IC,MSPE=MSPE)
+    if(N>1) { MODELS <- sort.ctmm(MODELS,IC=IC,MSPE=MSPE) }
 
-    # remove redundant models
-    NAMES <- sapply(MODELS,name.ctmm) -> names(MODELS)
-    KEEP <- c(TRUE, NAMES[-1]!=NAMES[-length(NAMES)] )
-    MODELS <- MODELS[KEEP]
+    # remove redundant models if outer most run
+    CALL <- deparse(sys.call(-1))[1]
+    CALL <- grepl("ctmm.select",CALL)
+    if(CALL) # necessary when ctmm.select called recusively
+    { attr(MODELS,'attempted') <- TRYS }
+    else # finishing stuff
+    {
+      NAMES <- sapply(MODELS,name.ctmm) -> names(MODELS)
+      if(N>1)
+      {
+        IN <- rep(TRUE,N)
+        for(i in 2:N) { if(NAMES[i] %in% NAMES[1:(i-1)]) { IN[i] <- FALSE } }
+        MODELS <- MODELS[IN]
+      }
+    }
 
     return(MODELS)
   }
@@ -486,8 +554,11 @@ sort.ctmm <- function(x,decreasing=FALSE,IC="AICc",MSPE="position",flatten=TRUE,
   { ICS <- sapply(x,function(m){get.IC(m,IC)}) }
   else if(is.na(IC))
   { ICS <- sapply(x,function(m){get.MSPE(m,MSPE)}) }
+
   if(is.na(MSPE) || is.na(IC))
   {
+    ICS <- nant(ICS,Inf)
+
     IND <- sort(ICS,index.return=TRUE,decreasing=decreasing)$ix
     x <- x[IND]
 
