@@ -5,7 +5,7 @@ lag.DOF <- function(data,dt=NULL,weights=NULL,lag=NULL,FLOOR=NULL,p=NULL)
   # intelligently select algorithm
   n <- length(t)
 
-  # important infor for later
+  # important information for later
   w2 <- sum(weights^2)
   # otherwise this gets corrupted by gridding/smearing
 
@@ -407,6 +407,12 @@ akde <- function(data,CTMM,VMM=NULL,debias=TRUE,weights=FALSE,smooth=TRUE,error=
   CTMM <- listify(CTMM)
   VMM <- listify(VMM)
 
+  # force grids to be compatible
+  COMPATIBLE <- length(data)>1 && !is.grid.complete(grid)
+
+  axes <- CTMM[[1]]$axes
+  grid <- format.grid(grid,axes=axes)
+
   n <- length(data)
   weights <- array(weights,n)
 
@@ -458,27 +464,23 @@ akde <- function(data,CTMM,VMM=NULL,debias=TRUE,weights=FALSE,smooth=TRUE,error=
   COL <- length(axes)
 
   # determine desired (absolute) resolution
-  dr <- sapply(1:n,function(i){sqrt(diag(KDE[[i]]$H))/res}) # (axes,n)
+  dr <- sapply(1:n,function(i){sqrt(diag(KDE[[i]]$H))/res}) # (axes,individuals)
   dim(dr) <- c(COL,n)
   dr <- apply(dr,1,min)
 
-  # combine everything for grid calculation
-  H.all <- lapply(1:n,function(i){N=length(data[[i]]$t);K=prepare.H(KDE[[i]]$H,n=N,axes=axes);dim(K)=c(N,COL^2);return(K)})
-  H.all <- do.call("rbind", H.all)
-  dim(H.all) <- c(length(H.all)/COL^2,COL,COL)
-
-  # take only the necessary columns
-  data.all <- lapply(data,function(d) { d[,c("t",axes)] })
-  data.all <- do.call("rbind", data.all)
-
-  # complete grid specification
-  EXT <- extent(CTMM,level=1-error) # Gaussian extent (includes uncertainty)
-  grid <- kde.grid(data.all,H=H.all,axes=axes,alpha=error,res=res,dr=dr,grid=grid,EXT.min=EXT)
+  if(COMPATIBLE) # force grids compatible
+  {
+    grid$align.to.origin <- TRUE
+    if(is.null(grid$dr)) { grid$dr <- dr }
+  }
 
   # loop over individuals
   for(i in 1:n)
   {
-    KDE[[i]] <- c(KDE[[i]],kde(data[[i]],KDE[[i]]$H,axes=axes,bias=DEBIAS[[i]],W=KDE[[i]]$weights,alpha=error,dr=dr,grid=grid))
+    EXT <- extent(CTMM[[i]],level=1-error)[,axes] # Gaussian extent (includes uncertainty)
+    GRID <- kde.grid(data[[i]],H=KDE[[i]]$H,axes=axes,alpha=error,res=res,dr=dr,grid=grid,EXT.min=EXT) # individual grid
+
+    KDE[[i]] <- c(KDE[[i]],kde(data[[i]],KDE[[i]]$H,axes=axes,bias=DEBIAS[[i]],W=KDE[[i]]$weights,alpha=error,dr=dr,grid=GRID))
 
     KDE[[i]] <- new.UD(KDE[[i]],info=attr(data[[i]],"info"),type='range',CTMM=ctmm())
     # in case bandwidth is pre-calculated...
@@ -517,165 +519,8 @@ prepare.H <- function(H,n,axes=c('x','y'))
 }
 
 
-############################################
-# construct a grid for the density function
-# non-destructuve WRT argument 'grid'
-# non-grid arguments are merely suggestions
-kde.grid <- function(data,H,axes=c("x","y"),alpha=0.001,res=NULL,dr=NULL,EXT=NULL,EXT.min=NULL,grid=NULL)
-{
-  H <- prepare.H(H,n=length(data$t),axes=axes) # (times,dim,dim)
-
-  # how far to extend range from data as to ensure alpha significance in total probability
-  z <- sqrt(-2*log(alpha))
-  dH <- z * apply(H,1,function(h){sqrt(diag(h))}) # (dim,times)
-  dH <- t(dH) # (times,dim)
-
-  # format lazy grid arguments
-  if(!is.null(grid) && class(grid)[1]=="list" && all(axes %in% names(grid))) # assuming coordinate list
-  { grid <- list(r=grid) }
-  else if(!is.null(grid) && class(grid)[1] %nin% c("list","UD","RasterLayer"))
-  {
-    if(class(grid)[1]=="Extent")
-    { grid <- list(extent=grid) }
-    else # assuming extent or dr
-    {
-      if(length(dim(grid))==2) # assuming extent
-      { grid <- list(extent=grid) }
-      else if(length(grid)==1 || length(grid)==length(axes)) # assuming dr
-      { grid <- list(dr=grid) }
-      else
-      { stop("Malformed grid argument.") }
-    }
-  }
-
-  # recycle resolution if necessary
-  if("dr" %in% names(grid)) { grid$dr <- array(grid$dr,length(axes)); names(grid$dr) <- axes }
-
-  # centered sequence (mu) with n steps by by
-  cseq <- function(mu,n,by)
-  {
-    n <- 1:n
-    n <- n - mean(n)
-    return(mu + n*by)
-  }
-
-  ### SPECIFY GRID ###
-  if(class(grid)[1]=="RasterLayer") ### grid defined by raster ###
-  {
-    EXT <- raster::extent(grid)
-    EXT <- cbind( c(EXT@xmin,EXT@xmax) , c(EXT@ymin,EXT@ymax) )
-    dEXT <- EXT[2,]-EXT[1,]
-
-    res <- dim(grid)[2:1]
-    dr <- raster::res(grid)
-
-    # grid locations
-    R <- list(x=raster::xFromCol(grid),y=rev(raster::yFromRow(grid)))
-  } # end raster
-  else if(!is.null(grid$r)) ### grid fully pre-specified ###
-  {
-    R <- grid$r
-    # UD object will also have dr
-    if(!is.null(grid$dr))
-    { dr <- grid$dr }
-    else
-    { dr <- sapply(R,function(r){mean(diff(r))}) }
-
-    #EXT <- sapply(1:length(axes),function(i){c(first(R[[i]]),last(R[[i]])) + c(-1,1)*dr[i]/2}) # (ext,axes)
-    #dEXT <- EXT[2,]-EXT[1,]
-  }
-  else if(!is.null(grid$dr) && !is.null(grid$extent)) ### grid fully pre-specified... with possible conflict ###
-  { # resolution takes presidence over extent
-    dr <- grid$dr
-    EXT <- as.matrix(grid$extent)
-    if(isTRUE(grid$align.to.origin)) { EXT <- t((round(t(EXT)/dr+1/2)-1/2)*dr) } # assume mostly correct
-
-    dEXT <- EXT[2,]-EXT[1,]
-    res <- round(dEXT/dr) # extent could be slightly off --- assuming mostly correct
-
-    # grid center
-    mu <- apply(EXT,2,mean)
-    # preserve dr
-    R <- lapply(1:length(axes),function(i){cseq(mu[i],n=res[i],by=dr[i])})
-    # correct extent
-    #EXT <- sapply(1:length(axes),function(i){c(first(R[[i]]),last(R[[i]])) + c(-1,1)*dr[i]/2})
-    #dEXT <- EXT[2,]-EXT[1,]
-  }
-  else if(!is.null(grid$extent)) ### grid extent specified, but not resolution ###
-  {
-    # align.to.origin doesn't make sense without dr specified
-    EXT <- as.matrix(grid$extent)
-    dEXT <- EXT[2,]-EXT[1,]
-
-    if(is.null(dr)) { dr <- dEXT/res }
-    res <- ceiling(dEXT/dr)
-    dr <- dEXT/res # correct dr if necessary
-
-    R <- lapply(1:length(axes),function(i){seq(EXT[1,i]+dr[i]/2,EXT[2,i]-dr[i]/2,length.out=res[i])})
-  } ### end grid extent specified ###
-  else if(!is.null(grid$dr)) ### grid resolution specified, but not extent ###
-  {
-    dr <- grid$dr
-
-    R <- get.telemetry(data,axes) # (times,dim)
-    # minimum extent
-    if(is.null(EXT)) { EXT <- rbind( apply(R-dH,2,min) , apply(R+dH,2,max) ) } # (ext,dim) }
-    # align to origin if requested
-    if(isTRUE(grid$align.to.origin))
-    {
-      EXT[1,] <- (floor(EXT[1,]/dr+1/2)-1/2)*dr
-      EXT[2,] <- (ceiling(EXT[2,]/dr-1/2)+1/2)*dr
-    }
-
-    dEXT <- EXT[2,]-EXT[1,]
-    res <- ceiling(dEXT/dr)
-
-    # grid center
-    mu <- apply(EXT,2,mean)
-    # preserve dr
-    # add one cell buffer on all sides for occurrence with zero-error IID models
-    R <- lapply(1:length(axes),function(i){cseq(mu[i],n=res[i]+2,by=dr[i])})
-    # correct extent
-    #EXT <- sapply(1:length(axes),function(i){c(first(R[[i]]),last(R[[i]])) + c(-1,1)*dr[i]/2})
-    #dEXT <- EXT[2,]-EXT[1,]
-  } ### end grid resolution specified ###
-  else ### grid not specified at all ###
-  {
-    # align.to.origin doesn't make sense without dr
-    R <- get.telemetry(data,axes) # (times,dim)
-
-    if(is.null(EXT)) { EXT <- rbind( apply(R-dH,2,min) , apply(R+dH,2,max) ) } # (ext,dim) }
-    colnames(EXT) <- axes
-    if(!is.null(EXT.min)) { EXT <- as.matrix(extent(list(EXT,EXT.min),level=1)) }
-    dEXT <- EXT[2,]-EXT[1,]
-
-    # grid center
-    mu <- apply(EXT,2,mean)
-
-    # complete suggestions
-    if(is.null(dr)) { dr <- dEXT/res }
-    res <- ceiling(dEXT/dr)
-    dr <- dEXT/res
-
-    # grid locations
-    # add one cell buffer on all sides for occurrence with zero-error IID models
-    R <- lapply(1:length(axes),function(i){ seq(EXT[1,i]-dr[i]/2,EXT[2,i]+dr[i]/2,length.out=res[i]+2) } ) # (grid,dim)
-  } ### end not grid specification at all ###
-  ### END SPECIFY GRID ###
-
-  names(R) <- axes
-  names(dr) <- axes
-  #colnames(EXT) <- axes
-  #rownames(EXT) <- c('min','max')
-  #names(dEXT) <- axes
-  #grid <- list(r=R,dH=dH,dr=dr,extent=EXT,dEXT=dEXT,axes=axes)
-  grid <- list(r=R,dH=dH,dr=dr,axes=axes)
-  return(grid)
-}
-
-
 ##################################
-# construct my own kde objects
+# construct my own KDE objects
 # was using ks-package but it has some bugs
 # alpha is the error goal in my total probability
 kde <- function(data,H,axes=c("x","y"),bias=FALSE,W=NULL,alpha=0.001,res=NULL,dr=NULL,grid=NULL)
@@ -715,6 +560,9 @@ kde <- function(data,H,axes=c("x","y"),bias=FALSE,W=NULL,alpha=0.001,res=NULL,dr
     i1 <- pmax(i1,1)
     i2 <- pmin(i2,dim(PMF))
 
+    CHECK <- i2>=i1
+    if(any(!CHECK)) { stop("Grid incompatible with data.") }
+
     SUB <- lapply(1:length(i1),function(d){ i1[d]:i2[d] })
 
     # I can't figure out how to do this in one line
@@ -745,7 +593,7 @@ kde <- function(data,H,axes=c("x","y"),bias=FALSE,W=NULL,alpha=0.001,res=NULL,dr
       PMF2 <- debias.volume(PMF,bias=vbias)$PMF
       PMF2 <- debias.area(PMF2,bias=abias)$PMF
 
-      # area then volumen correction
+      # area then volume correction
       PMF <- debias.area(PMF,bias=abias)$PMF
       PMF <- debias.volume(PMF,bias=vbias)$PMF
 
@@ -781,8 +629,17 @@ debias.volume <- function(PMF,bias=1)
   # counting volume by dV
   VOL <- 1:length(CDF)
 
+  # extrapolation issue with bias<1
+  # introduce a NULL cell with 0 probability
+  VOL <- c(0,VOL)
+  CDF <- c(0,CDF)
+
   # evaluate the debiased cdf on the original volume grid
   CDF <- stats::approx(x=VOL/bias,y=CDF,xout=VOL,yleft=0,yright=1)$y
+
+  # drop null cell
+  CDF <- CDF[-1]
+
   # fix tiny numerical errors from ?roundoff?
   CDF <- sort(CDF)
 

@@ -24,29 +24,92 @@ subset.telemetry <- function(x,...)
 head.telemetry <- function(x, n = 6L, ...) { utils::head(data.frame(x),n=n,...) }
 tail.telemetry <- function(x, n = 6L, ...) { utils::tail(data.frame(x),n=n,...) }
 
+
 # rbind track segments
-# rbind.telemetry <- function(...,deparse.level=1,make.row.names=TRUE,stringsAsFactors=default.stringsAsFactors())
-# {
-#   # sorting checks
-#   x <- list(...)
-#   t1 <- sapply(x,function(y){ y$t[1] })
-#   t2 <- sapply(x,function(y){ last(y$t) })
-#   IND1 <- sort(t1,method="quick",index.return=TRUE)$ix
-#   IND2 <- sort(t2,method="quick",index.return=TRUE)$ix
-#   if(any(IND1!=IND2)) { warning("Segments are overlapping and will be intermixed.") }
-#   # all other sorting is segment-segment sorting, which is valid
-#
-#   # combine data
-#   info <- mean.info(x)
-#   x <- rbind.data.frame(...,stringsAsFactors=FALSE)
-#   x <- new.telemetry(x,info=info)
-#
-#   # sort times
-#   IND <- sort(x$t,method="quick",index.return=TRUE)$ix
-#   x <- x[IND,]
-#
-#   return(x)
-# }
+tbind <- function(...)
+{
+  x <- list(...)
+  if(length(x)==1)
+  {
+    x <- x[[1]]
+    if(class(x)[1]=="telemetry") { return(x) }
+  }
+
+  info <- mean.info(x)
+  UERE <- lapply(x,uere) # combine...
+
+  n <- sapply(x,nrow)
+  n <- c(0,cumsum(n))
+
+  COLS <- lapply(x,names)
+  COLS <- do.call(c,COLS)
+  COLS <- unique(COLS)
+
+  # somehow R does not have built-in functionality to rbind data.frames with extra/missing columns...
+  y <- data.frame(stringsAsFactors=FALSE)
+  for(col in COLS)
+  {
+    for(i in 1:length(x))
+    {
+      r1 <- 1 + n[i]
+      r2 <- n[i+1]
+      if(col %in% names(x[[i]]))
+      { y[r1:r2,col] <- x[[i]][[col]] }
+      else
+      { y[r1:r2,col] <- NA }
+    }
+  }
+  rm(x)
+
+  # handle missing error information
+  for(i in 2:length(DOP.LIST))
+  {
+    # missing DOP <- infinite
+    if(DOP.LIST[[i]]$DOP %in% COLS)
+    {
+      NAS <- is.na(y[[DOP.LIST[[i]]$DOP]])
+      if(any(NAS)) { y[[DOP.LIST[[i]]$DOP]][NAS] <- Inf }
+    }
+
+    # missing variance <- infinite
+    if(DOP.LIST[[i]]$VAR %in% COLS)
+    {
+      NAS <- is.na(y[[DOP.LIST[[i]]$VAR]])
+      if(any(NAS)) { y[[DOP.LIST[[i]]$VAR]][NAS] <- Inf }
+    }
+
+    # missing error ellipse <- error circle
+    if(DOP.LIST[[i]]$COV[1] %in% COLS)
+    {
+      NAS <- is.na(y[[DOP.LIST[[i]]$COV[1]]])
+      if(any(NAS))
+      {
+        y[[DOP.LIST[[i]]$COV[1]]][NAS] <- y[[DOP.LIST[[i]]$VAR]][NAS] # COV.x.x
+        y[[DOP.LIST[[i]]$COV[2]]][NAS] <- 0 # COV.x.y
+        y[[DOP.LIST[[i]]$COV[3]]][NAS] <- y[[DOP.LIST[[i]]$VAR]][NAS] # COV.x.y
+
+        if(DOP.LIST[[i]]$COV.geo[1] %in% COLS)
+        {
+          y[[DOP.LIST[[i]]$COV.geo[1]]][NAS] <- y[[DOP.LIST[[i]]$VAR]][NAS] # COV.major
+          y[[DOP.LIST[[i]]$COV.geo[2]]][NAS] <- y[[DOP.LIST[[i]]$VAR]][NAS] # COV.minor
+          y[[DOP.LIST[[i]]$COV.geo[3]]][NAS] <- 0 # COV.angle
+        }
+      }
+    }
+  }
+
+  # sort times
+  IND <- sort(y$t,index.return=TRUE)$ix
+  y <- y[IND,]
+
+  y <- new.telemetry(y,info=info)
+
+  # merge uere information
+  # TODO
+  # TODO
+
+  return(y)
+}
 
 
 # time-ordered sample of a track
@@ -87,6 +150,16 @@ set.telemetry <- function(data,value,axes=colnames(value))
   else if(length(axes)>1) { data[,axes] <- value }
 
   return(data)
+}
+
+######
+set.name <- function(x,NAMES=NULL,drop=TRUE)
+{
+  x <- listify(x)
+  for(i in 1:length(x))
+  { names(x)[i] <- ifelse(is.null(NAMES),attr(x[[i]],"info")$identity,NAMES[i]) }
+  if(length(x)==1 && drop) { x <- x[[1]] }
+  return(x)
 }
 
 #######################
@@ -148,14 +221,26 @@ Move2CSV <- function(object,timeformat="",timezone="UTC",projection=NULL,datum=N
 
   # break Move object up into data.frame and idData
   idData <- move::idData(object)
+  NAMES <- names(idData)
+  idData2 <- attr(object,"idData") # backup
+  NAMES2 <- names(idData2)
+
   object <- as.data.frame(object)
 
   # add data.frame columns to data
   DATA <- cbind(DATA,object)
 
   # add idData to data
-  # DATA[,names(idData)] <- t(array(idData,c(length(idData),nrow(DATA))))
-  for(i in 1:length(idData)) { DATA[,names(idData)[i]] <- idData[i] }
+  if(length(idData))
+  {
+    for(i in 1:length(idData))
+    {
+      NAME <- NAMES[i]
+      if(is.null(NAME)) { NAME <- NAMES2[i] } # idData() method can drop name from attribute
+      if(is.null(NAME)) { NAME <- "Animal.ID" } # just in case
+      DATA[,NAME] <- idData[i]
+    }
+  }
 
   return(DATA)
 }
@@ -167,11 +252,12 @@ canonical.name <- function(NAME,UNIQUE=TRUE)
   NAME <- gsub("[.:_ -]","",NAME) # remove separators
   NAME <- gsub("\\(|\\)","",NAME) # remove parentheses
   NAME <- gsub("\\[|\\]", "", NAME) # remove square brackets
-  NAME <- gsub("\\\uFF08|\\\uFF09","",NAME) # THIS DOES NOT WORK
+  NAME <- gsub("\\\uFF08|\\\uFF09","",NAME) # THIS DOES NOT WORK!
   NAME <- tolower(NAME)
   if(UNIQUE) { NAME <- unique(NAME) }
   return(NAME)
 }
+
 
 # pull out a column with different possible names
 # consider alternative spellings of NAMES, but preserve order (preference) of NAMES
@@ -263,32 +349,32 @@ missing.class <- function(DATA,TYPE)
 }
 
 
-# merge two location classes with minimal levels
+# merge two location classes [NOT with minimal levels]
 merge.class <- function(class1,class2)
 {
   if(is.null(class2)) { return(class1) }
   if(is.null(class1)) { return(class2) }
 
-  LEVEL2 <- levels(class2)
-  N <- length(LEVEL2)
-  CLASS12 <- list()
-  for(i in 1:N) { CLASS12[[i]] <- unique( class1[ class2==LEVEL2[i] ] ) }
+  # LEVEL2 <- levels(class2)
+  # N <- length(LEVEL2)
+  # CLASS12 <- list()
+  # for(i in 1:N) { CLASS12[[i]] <- unique( class1[ class2==LEVEL2[i] ] ) }
+  #
+  # # do we need additional location classes
+  # OVER <- matrix(0,N,N)
+  # for(i in 1:N) { for(j in 1:N) { OVER[i,j] <- sum( length( intersect(CLASS12[[i]],CLASS12[[j]]) ) ) } }
+  # diag(OVER) <- 0 # don't count self similarity
+  # OVER <- sum(OVER)/2
 
-  # do we need additional location classes
-  OVER <- matrix(0,N,N)
-  for(i in 1:N) { for(j in 1:N) { OVER[i,j] <- sum( length( intersect(CLASS12[[i]],CLASS12[[j]]) ) ) } }
-  diag(OVER) <- 0 # don't count self similarity
-  OVER <- sum(OVER)/2
-
-  if(OVER)
-  {
-    class1 <- as.character(class1)
-    class2 <- as.character(class2)
-    class <- paste(class1,class2)
-    class <- as.factor(class)
-  }
-  else
-  { class <- class1 }
+  # if(OVER)
+  # {
+  class1 <- as.character(class1)
+  class2 <- as.character(class2)
+  class <- paste(class1,class2)
+  class <- as.factor(class)
+  # }
+  # else
+  # { class <- class1 }
 
   return(class)
 }
@@ -346,18 +432,18 @@ as.telemetry.data.frame <- function(object,timeformat="",timezone="UTC",projecti
                        'Acquisition.Start.Time','start.timestamp',
                        'Time.GMT','GMT.Time','time',"\u6642\u523B",
                        'Date.GMT','Date','Date.Local',"\u65E5\u4ED8",
-                       't','t_dat')
+                       't','t_dat','use_date')
   NAMES$id <- c("animal.ID","individual.local.identifier","local.identifier","individual.ID","Name","ID","ID.Names","Animal","Full.ID",
                 "tag.local.identifier","tag.ID","band.number","band.num","device.info.serial","Device.ID","collar.id","Logger","Logger.ID",
                 "Deployment","deployment.ID","track.ID")
-  NAMES$long <- c("location.long","Longitude","longitude.WGS84","long","lon","GPS.Longitude","\u7D4C\u5EA6")
-  NAMES$lat <- c("location.lat","Latitude","latitude.WGS84","latt","lat","GPS.Latitude","\u7DEF\u5EA6")
+  NAMES$long <- c("location.long","Longitude","longitude.WGS84","Longitude.deg","long","lon","lng","GPS.Longitude","\u7D4C\u5EA6")
+  NAMES$lat <- c("location.lat","Latitude","latitude.WGS84","Latitude.deg","latt","lat","GPS.Latitude","\u7DEF\u5EA6")
   NAMES$zone <- c("GPS.UTM.zone","UTM.zone","zone")
   NAMES$east <- c("GPS.UTM.Easting","GPS.UTM.East","GPS.UTM.x","UTM.Easting","UTM.East","UTM.E","UTM.x","Easting","East","x")
   NAMES$north <- c("GPS.UTM.Northing","GPS.UTM.North","GPS.UTM.y","UTM.Northing","UTM.North","UTM.N","UTM.y","Northing","North","y")
-  NAMES$HDOP <- c("eobs.horizontal.accuracy.estimate","eobs.horizontal.accuracy.estimate.m","horizontal.accuracy.estimate","horizontal.accuracy.estimate.m","error.m",
-                  "GPS.HDOP","HDOP","Horizontal.DOP","GPS.Horizontal.Dilution","Horizontal.Dilution","Hor.Dil","Hor.DOP","HPE",
-                  "\u8AA4\u5DEE","\u8AA4\u5DEE.m","\u8AA4\u5DEE\uFF08m\uFF09")
+  NAMES$HDOP <- c("eobs.horizontal.accuracy.estimate","eobs.horizontal.accuracy.estimate.m","horizontal.accuracy.estimate","horizontal.accuracy.estimate.m","error.m","3D.error.m",
+                  "\u8AA4\u5DEE","\u8AA4\u5DEE.m","\u8AA4\u5DEE\uFF08m\uFF09",
+                  "GPS.HDOP","HDOP","Horizontal.DOP","GPS.Horizontal.Dilution","Horizontal.Dilution","Hor.Dil","Hor.DOP","HPE")
   NAMES$DOP <- c("GPS.DOP","DOP","GPS.Dilution","Dilution","Dil")
   NAMES$PDOP <- c("GPS.PDOP","PDOP","Position.DOP","GPS.Position.Dilution","Position.Dilution","Pos.Dil","Pos.DOP")
   NAMES$GDOP <- c("GPS.GDOP","GDOP","Geometric.DOP","GPS.Geometric.Dilution","Geometric.Dilution","Geo.Dil","Geo.DOP")
@@ -368,6 +454,10 @@ as.telemetry.data.frame <- function(object,timeformat="",timezone="UTC",projecti
   NAMES$z <- c("height.above.ellipsoid","height.above.elipsoid","height.above.ellipsoid.m","height.above.elipsoid.m","height.above.msl","height.above.mean.sea.level","height.raw","height","height.m","barometric.height","altimeter","altimeter.m","Argos.altitude","GPS.Altitude","altitude","altitude.m","Alt","barometric.depth","depth","elevation","elevation.m","elev")
   NAMES$v <- c("ground.speed",'speed.over.ground','speed.over.ground.m.s',"speed","GPS.speed")
   NAMES$heading <- c("heading","heading.degree","heading.degrees","GPS.heading","Course","direction","direction.deg")
+
+  # get rid of tibble class # it does weird stuff
+  if(class(object)[1] %in% c("tbl_df","tbl"))
+  { object <- as.data.frame(object) }
 
   # UNIT CONVERSIONS
   COL <- c("speed.km.h")
@@ -543,7 +633,7 @@ as.telemetry.data.frame <- function(object,timeformat="",timezone="UTC",projecti
 
   # ARGOS error categories (older ARGOS data <2011)
   # converted to error ellipses from ...
-  COL <- c("Argos.location.class","Argos.lc")
+  COL <- c("Argos.location.class","Argos.lc","lc")
   COL <- pull.column(object,COL,as.factor)
   if(length(COL) && any(NAS)) # ARGOS location classes present, but no error ellipses
   {

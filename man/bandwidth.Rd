@@ -33,7 +33,7 @@ In this case, try setting \code{trace=TRUE} and decreasing \code{dt} until the i
 On the other hand, \strong{if the data contain some very tiny time intervals}, say 1 second among hourly sampled data, then the default \code{dt} setting will create an excessively high-resolution discretization of time, which will also cause slowdown. In this case \code{CTMM} should contain an error model and \code{dt} can likely be increased to a larger fraction of the median sampling interval.
 %With the sub-optimal \code{PC="IID"} preconditioner, \code{dt} can be relaxed to the median value, but the computational cost is then increased to \eqn{O(n^2 \log n)}.
 
-\code{fast=FALSE} uses exact times and has a computational cost as low as \eqn{O(n^2)}, including \eqn{O(n^2)} function evaluations. With \code{PC="direct"} this method will produce a result that is exact to within machine precision, but with a computational cost of \eqn{O(n^3)}. \strong{\code{fast=FALSE,PC='direct'} is often the fastest method with small datasets}, where \eqn{n \le O(1,000)}, but scales terribly with larger datasets.
+\code{fast=FALSE} uses exact times and has a computational cost as low as \eqn{O(n^2)}, including \eqn{O(n^2)} function evaluations. With \code{PC="direct"} this method will produce a result that is exact to within machine precision, but with a computational cost of \eqn{O(n^3)}. \strong{\code{fast=FALSE,PC='direct'} is often the fastest method with small datasets}, where \eqn{n \le O}(1,000), but scales terribly with larger datasets.
 }
 
 \value{Returns a bandwidth \code{matrix} object, which is to be the optimal covariance matrix of the individual kernels of the kernel density estimate.}
@@ -41,17 +41,17 @@ On the other hand, \strong{if the data contain some very tiny time intervals}, s
 \references{
 T. F. Chan,
 ``An Optimal Circulant Preconditioner for Toeplitz Systems'',
-SIAM Journal on Scientific and Statistical Computing, 9:4, 766-771 (1988).
+SIAM Journal on Scientific and Statistical Computing, 9:4, 766-771 (1988) \doi{10.1137/0909051}.
 
-D. Marcotte, ``Fast variogram computation with FFT'', {Computers and Geosciences} 22:10, 1175-1186 (1996).
+D. Marcotte, ``Fast variogram computation with FFT'', Computers and Geosciences 22:10, 1175-1186 (1996) \doi{10.1016/S0098-3004(96)00026-X}.
 
 C. H. Fleming, W. F. Fagan, T. Mueller, K. A. Olson, P. Leimgruber, J. M. Calabrese,
 ``Rigorous home-range estimation with movement data: A new autocorrelated kernel-density estimator'',
-\href{https://esajournals.onlinelibrary.wiley.com/doi/abs/10.1890/14-2010.1}{Ecology, 96:5, 1182-1188 (2015)}.
+Ecology, 96:5, 1182-1188 (2015) \doi{10.1890/14-2010.1}.
 
 C. H. Fleming, D. Sheldon, W. F. Fagan, P. Leimgruber, T. Mueller, D. Nandintsetseg, M. J. Noonan, K. A. Olson, E. Setyawan, A. Sianipar, J. M. Calabrese,
 ``Correcting for missing and irregular data in home-range estimation'',
-\href{https://esajournals.onlinelibrary.wiley.com/doi/abs/10.1002/eap.1704}{Ecological Applications, 28:4, 1003-1010 (2018)}.
+Ecological Applications, 28:4, 1003-1010 (2018) \doi{10.1002/eap.1704}.
 }
 
 \author{ C. H. Fleming. }

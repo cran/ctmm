@@ -1,3 +1,66 @@
+ctmm 0.6.0 (2021-01-08)
+================
+
+  * new function meta for meta-analysis of home-range areas
+  
+  * new function encounter for the conditional distribution of encounters (CDE)
+  
+  * new function distance to calculate square Bhattacharyya, Mahalanobis, and Euclidean distances
+  
+  * new function compass to plot a north-pointing compass
+  
+  * new argument 't' in function speed
+  
+  * new argument 'axes' in function outlie
+  
+  * as.telemetry now accepts most tibble objects
+
+  * akde() on multiple individuals is now more memory efficient
+  
+  * bugfix in ctmm.fit for IOU model
+  
+  * bugfix in occurrence with repeated timestamps
+  
+  * bugfix in summary.ctmm rowname droped for single parameter CIs
+  
+  * bugfix in outlie with list input
+  
+  * bugfixes in plot.outlie with zero error
+  
+  * bugfix in variogram with res>1 and CI="Gauss"
+  
+  * bugfix in ctmm.select if stepping OU->OUf->OUF
+  
+  * bugfix in as.telemetry for Move objects with empty idData slot
+  
+  * bugfix in as.telemetry/median when importing single location estimate
+  
+  * bugfix in plot.telemery with add=TRUE and non-SI units
+  
+  * bugfix in speed for ctmm objects (no data), where CIs were incorrect
+  
+  * bugfix in median with >=50% repeating observations
+  
+  * bugfix in summary() for periodic models with tau[velocity]==0
+  
+  * bugfix in occurrence() for PDclamp() error
+  
+  * bugfix in ctmm.select() giving incorrect model names when run indirectly
+  
+  * bugfix in occurrence() with IID autocorrelation model
+  
+  * workaround in export functions where sp objects change timezones
+  
+  * workaround in as.telemetry() when Move idData() names are dropped
+  
+  * workaround in plot.UD when image() has alpha overflow
+  
+  * improvements to akde/occurrence grid argument when incomplete
+  
+  * improvements to Wishart approximation in overlap bias correction
+  
+  * improvements to cleave()
+
 ctmm 0.5.10 (2020-05-04)
 ================
 

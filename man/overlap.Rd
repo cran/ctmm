@@ -16,18 +16,18 @@
 %  \item{CTMM}{A \code{list} of \code{ctmm} fit objects corresponding to \code{object} \code{telemetry} list.}
   \item{level}{The confidence level desired for the output.}
   \item{debias}{Approximate debiasing of the overlap.}
-  \item{...}{Additional arguments relevant for \code{\link{akde}}, such as \code{res} and \code{weights}.}
+  \item{...}{Not currently used.}
 }
 
 %\details{}
 
-\value{A table of confidence intervals on the overlap estimate. A value of \code{1} implies that the two distributions are identical, while a value of \code{0} implies that the two distributions share no area in common. Corresponding \code{ctmm} objects are necessary to provide confidence intervals and debiasing for the point esitmates.}
+\value{A table of confidence intervals on the overlap estimate. A value of \code{1} implies that the two distributions are identical, while a value of \code{0} implies that the two distributions share no area in common.}
 
 %% ~put references to the literature/web site here ~
 \references{
 K. Winner, M. J. Noonan, C. H. Fleming, K. Olson, T. Mueller, D. Sheldon, J. M. Calabrese.
 ``Statistical inference for home range overlap'',
-\href{https://besjournals.onlinelibrary.wiley.com/doi/10.1111/2041-210X.13027}{Methods in Ecology and Evolution, 9:7, 1679-1691 (2018)}.
+Methods in Ecology and Evolution, 9:7, 1679-1691 (2018) \doi{10.1111/2041-210X.13027}.
 }
 
 \author{C. H. Fleming and K. Winner}
@@ -38,7 +38,7 @@ Uncertainties in the model fits are propagated into the overlap estimate under t
 
 %% ~Make other sections like Warning with \section{Warning }{....} ~
 
-\seealso{ \code{\link{akde}}, \code{\link{ctmm.fit}} }
+\seealso{ \code{\link{akde}}, \code{\link{ctmm.fit}}, \code{\link{distance}}, \code{\link{encounter}} }
 
 \examples{\donttest{
 # Load package and data
@@ -47,6 +47,7 @@ data(buffalo)
 
 # fit models for first two buffalo
 GUESS <- lapply(buffalo[1:2], function(b) ctmm.guess(b,interactive=FALSE) )
+# using ctmm.fit here for speed, but you should almost always use ctmm.select
 FITS <- lapply(1:2, function(i) ctmm.fit(buffalo[[i]],GUESS[[i]]) )
 names(FITS) <- names(buffalo[1:2])
 

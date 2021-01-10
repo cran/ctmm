@@ -1,4 +1,4 @@
-encounter <- function(object,include=NULL,exclude=NULL,...)
+encounter <- function(object,include=NULL,exclude=NULL,debias=FALSE,...)
 {
   UD <- object
   check.projections(UD)
@@ -10,30 +10,58 @@ encounter <- function(object,include=NULL,exclude=NULL,...)
   axes <- UD[[1]]$axes
   AXES <- length(axes)
 
-  # Gaussian approximation
   CTMM <- lapply(UD,function(U){U@CTMM})
-  CTMM <- encounter.ctmm(CTMM,include=include,exclude=exclude)
+
+  # Gaussian approximation
+  STUFF <- encounter.ctmm(CTMM,include=include,exclude=exclude,debias=debias)
+  CTMM <- STUFF$CTMM
+  BIAS <- STUFF$BIAS # individual biases
+  bias <- STUFF$bias # pairwise biases
+
   DOF.area <- rep(DOF.area(CTMM),AXES)
   names(DOF.area) <- axes
 
-  DIM <- dim(UD[[1]]$PDF)
-  PDF <- matrix(0,DIM[1],DIM[2])
+  # bias correction (precision)
+  for(i in 1:length(object))
+  {
+    UD[[i]]$PMF <- UD[[i]]$PDF * prod(UD[[i]]$dr)
+    if(debias) { UD[[i]]$PMF <- debias.volume(UD[[i]]$PMF,BIAS[i])$PMF }
+  }
+
+  GRID <- grid.union(object) # r,dr of grid union
+  DIM <- c(length(GRID$r$x),length(GRID$r$y))
+  PMF <- matrix(0,DIM[1],DIM[2]) # initialize CDE PMF
+
   for(i in 1:(length(UD)-1))
   {
     for(j in (i+1):length(UD))
-    { PDF <- PDF + include[i,j] * UD[[i]]$PDF * UD[[j]]$PDF }
+    {
+      # compute overlapping grid subset
+      SUB <- grid.intersection(list(GRID,UD[[i]],UD[[j]]))
+
+      if(length(SUB[[1]]$x) && length(SUB[[1]]$y))
+      {
+        PROD <- UD[[i]]$PMF[SUB[[2]]$x,SUB[[2]]$y] * UD[[j]]$PMF[SUB[[3]]$x,SUB[[3]]$y]
+        if(debias) # bias correction (variance)
+        {
+          gamma <- sum(PROD) # don't muck with weights
+          PROD <- PROD / gamma
+          PROD <- debias.volume(PROD,bias[i,j])$PMF
+          PROD <- PROD * gamma # don't muck with weights
+        }
+        PMF[SUB[[1]]$x,SUB[[1]]$y] <- PMF[SUB[[1]]$x,SUB[[1]]$y] + include[i,j] * PROD
+      }
+    }
   }
 
   dV <- prod(UD[[1]]$dr)
-  GAMMA <- sum(PDF) * dV # useful for relative encounter rates!
-  PDF <- PDF / GAMMA
+  GAMMA <- sum(PMF) # useful for relative encounter rates
+  PMF <- PMF / GAMMA
 
-  object <- list()
-  object$PDF <- PDF
-  object$CDF <- pmf2cdf( PDF * dV )
+  object <- GRID
+  object$PDF <- PMF / dV
+  object$CDF <- pmf2cdf(PMF)
   object$axes <- axes
-  object$r <- UD[[1]]$r
-  object$dr <- UD[[1]]$dr
 
   # resolution (add up like covariance?)
   IN <- 0
@@ -60,14 +88,48 @@ encounter <- function(object,include=NULL,exclude=NULL,...)
 
 ################
 # Gaussian encounters
-encounter.ctmm <- function(CTMM,include=NULL,exclude=NULL,...)
+encounter.ctmm <- function(CTMM,include=NULL,exclude=NULL,debias=FALSE,...)
 {
-  #check.projections(CTMM)
+  # check.projections(CTMM)
 
   # Gaussian / cumulants
   axes <- CTMM[[1]]$axes
   AXES <- length(axes)
-  isotropic <- all(sapply(CTMM,function(C){C$isotropic}))
+  isotropic <- sapply(CTMM,function(C){C$isotropic})
+  DIM <- ifelse(isotropic,1,AXES)
+  WC <- 1 + DIM # inverse-Wishart/chi^2 constant (DOF threshold)
+  MULT <- ifelse(isotropic,AXES,1) # DOF multiplier
+  WC <- WC/MULT
+
+  CLAMP <- 1 # DOF minimum
+
+  # Wishart DOFs - DOF.wishart() is flaky
+  DOF <- sapply(CTMM,DOF.area)
+  BIAS <- 1/(1+WC/clamp(DOF,CLAMP,Inf)) # asymptotic
+
+  # finished with this
+  isotropic <- all(isotropic)
+
+  # precision matrices
+  P <- lapply(CTMM,function(M){PDsolve(M$sigma)})
+
+  # pairwise DOFs (asymptotic)
+  dof <- matrix(0,length(DOF),length(DOF))
+  # pairwise bias - asymptotic
+  bias <- matrix(1,length(DOF),length(DOF))
+
+  for(i in 1:length(DOF))
+  {
+    for(j in 1:length(DOF))
+    {
+      Pi <- tr(P[[i]])
+      Pj <- tr(P[[j]])
+      Pij <- Pi + Pj
+      dof[i,j] <- Pij^2 / ( Pi^2/DOF[i] + Pj^2/DOF[j] )
+      wc <- (Pi/Pij)*WC[i] + (Pj/Pij)*WC[j] # placeholder interpolation
+      bias[i,j] <- 1 + wc/clamp(dof[i,j],2*CLAMP,Inf)
+    }
+  }
 
   fn <- function(CTMM)
   {
@@ -75,20 +137,31 @@ encounter.ctmm <- function(CTMM,include=NULL,exclude=NULL,...)
     M1 <- array(0,AXES)
     M2 <- matrix(0,AXES,AXES)
 
+    # precision matrices # have to recalculate these for gradients
+    P <- lapply(CTMM,function(M){PDsolve(M$sigma)})
+
     for(i in 1:(length(CTMM)-1))
     {
       for(j in (i+1):length(CTMM))
       {
-        Pi <- PDsolve(CTMM[[i]]$sigma)
-        Pj <- PDsolve(CTMM[[j]]$sigma)
-        prec <- Pi + Pj
-        sigma <- PDsolve(prec)
+        Pi <- P[[i]]
+        Pj <- P[[j]]
+        if(debias) # bias correction (precision)
+        {
+          Pi <- Pi * BIAS[i]
+          Pj <- Pj * BIAS[j]
+        }
+        Pij <- Pi + Pj
+        sigma <- PDsolve(Pij)
 
         mu <- sigma %*% (Pi %*% CTMM[[i]]$mu[1,] + Pj %*% CTMM[[j]]$mu[1,])
         mu <- c(mu)
 
         # intrinsic weight from multiplying two densities and renormalizing
-        include[i,j] <- include[i,j] / sqrt( det(CTMM[[i]]$sigma) * det(CTMM[[j]]$sigma) * det(prec) )
+        include[i,j] <- include[i,j] / sqrt( det(CTMM[[i]]$sigma) * det(CTMM[[j]]$sigma) * det(Pij) )
+
+        # the interplay between the bias correction steps and weighting has to be the same here as for the AKDEs
+        if(debias) { sigma <- sigma / bias[i,j] } # bias correction (variance)
 
         IN <- IN + include[i,j]
         M1 <- M1 + include[i,j] * mu
@@ -125,5 +198,5 @@ encounter.ctmm <- function(CTMM,include=NULL,exclude=NULL,...)
   info <- mean.info(CTMM)
 
   CTMM <- ctmm(mu=mu,sigma=sigma,COV.mu=COV.mu,COV=COV,axes=axes,isotropic=isotropic,info=info)
-  return(CTMM)
+  return(list(CTMM=CTMM,BIAS=BIAS,bias=bias))
 }

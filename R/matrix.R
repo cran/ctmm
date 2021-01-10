@@ -1,3 +1,5 @@
+tr <- function(x) { sum(diag(x)) }
+
 # 2D rotation matrix
 rotate <- function(theta)
 {
@@ -129,22 +131,19 @@ PDfunc <-function(M,func=function(m){1/m},force=FALSE,pseudo=FALSE,tol=.Machine$
   {
     TR <- (M[1,1] + M[2,2])/2 # half trace
     BIGNUM <- TR^2 > .Machine$double.xmax * .Machine$double.eps
+
     if(BIGNUM)
     {
       DET <- (M[1,1]/TR)*(M[2,2]/TR) - (M[1,2]/TR)*(M[2,1]/TR)
-      DET <- 1 - DET
+      DET <- 1 - DET # (tr^2 - det)/tr^2
     }
     else
     {
       DET <- M[1,1]*M[2,2] - M[1,2]*M[2,1]
-      DET <- TR^2 - DET
+      DET <- TR^2 - DET # tr^2 - det
     }
-    if(DET<0) # this shouldn't ever happen with Hermitian matrices
-    {
-      if(!force && !pseudo) { stop("Matrix not positive definite.") }
-      else { DET <- 0 }
-    }
-    else if(M[1,2]==0) # DET==0 ++
+
+    if(DET<=0) # det is too close to tr^2
     {
       M <- diag(M)
       V <- array(0,c(2,2,2))
@@ -274,9 +273,12 @@ PDsolve <- function(M,force=FALSE,pseudo=FALSE,tol=.Machine$double.eps)
 }
 
 
-# sqrtm fails on 1x1 matrix
-# it also gives annoying notes if I don't cast it right
-# also, my matrices are PSD
+isqrtm <- function(M,force=FALSE,pseudo=FALSE)
+{
+  # TODO
+}
+
+# only for PSD matrices
 sqrtm <- function(M,force=FALSE,pseudo=FALSE)
 {
   if(class(M)[1]=="covm")
@@ -322,11 +324,7 @@ sqrtm <- function(M,force=FALSE,pseudo=FALSE)
   else
   {
     if(all(diag(M)>=-TOL))
-    {
-      # R <- Matrix::Matrix(M,sparse=FALSE,doDiag=FALSE) # complains still.... ???
-      # R <- as(R,"dpoMatrix")
-      R <- expm::sqrtm(M) # reduces back to class "matrix" ?
-    }
+    { R <- expm::sqrtm(M) }
     else
     { R <- diag(-1,nrow=DIM) }
 

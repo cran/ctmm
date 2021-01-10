@@ -15,6 +15,12 @@ extent.list <- function(x,...)
 {
   # list of element ranges
   RANGE <- lapply(x,function(y){extent(y,...)})
+
+  # shared columns
+  COLS <- lapply(RANGE,colnames)
+  COLS <- Reduce(intersect,COLS)
+  RANGE <- lapply(RANGE,function(R){R[,COLS]})
+
   # concatenate ranges
   RANGE <- Reduce(rbind,RANGE)
   # final range x & y
@@ -28,17 +34,16 @@ setMethod('extent', signature(x='list'), extent.list)
 # extent of telemetry data
 extent.telemetry <- function(x,level=1,...)
 {
-  if(is.null(colnames(x)))
+  alpha <- (1-level)/2
+  RANGE <- data.frame(row.names=c('min','max'))
+
+  COLS <- c('x','y','z','t','longitude','latitude')
+  for(COL in COLS)
   {
-    if(ncol(x)==2) { colnames(x) <- c('x','y') }
-    else { stop('Ambiguous extent: ',x) }
+    if(COL %in% colnames(x))
+    { RANGE[[COL]] <- stats::quantile(x[[COL]],probs=c(alpha,1-alpha),na.rm=TRUE) }
   }
 
-  alpha <- (1-level)/2
-  X <- stats::quantile(x$x,probs=c(alpha,1-alpha),na.rm=TRUE)
-  Y <- stats::quantile(x$y,probs=c(alpha,1-alpha),na.rm=TRUE)
-  RANGE <- data.frame(x=X,y=Y)
-  row.names(RANGE) <- c("min","max")
   return(RANGE)
 }
 setMethod('extent', signature(x='telemetry'), extent.telemetry)
@@ -91,8 +96,10 @@ setMethod('extent', signature(x='ctmm'), extent.ctmm)
 
 
 # range of UD contours
-extent.UD <- function(x,level=0.95,level.UD=0.95,...)
+extent.UD <- function(x,level=0.95,level.UD=0.95,complete=FALSE,...)
 {
+  PROJ <- attr(x,"info")$projection
+
   if(level.UD==1 || (!is.na(level) && level==1 && !is.null(x$DOF.area)))
   {
     RANGE <- data.frame(x=c(-1,1),y=c(-1,1))*Inf
@@ -109,26 +116,48 @@ extent.UD <- function(x,level=0.95,level.UD=0.95,...)
   # too coarse fix
   P <- max(P,min(x$CDF))
 
-  # do we extend this far?
-  MAT <- (x$CDF <= P)
-  X <- apply(MAT,1,any)
-  Y <- apply(MAT,2,any)
-  rm(MAT)
+  if(complete)
+  {
+    # list of contours (multiple if multiple regions/modes)
+    R <- grDevices::contourLines(x=x$r$x,y=x$r$y,z=x$CDF,levels=P)
+    R <- lapply(R,function(L){cbind(L$x,L$y)})
+    R <- do.call(rbind,R)
 
-  # now indices
-  X <- which(X)
-  Y <- which(Y)
+    X <- range(R[,1])
+    Y <- range(R[,2])
 
-  # range indices
-  X <- c(X[1],last(X))
-  Y <- c(Y[1],last(Y))
+    RANGE <- data.frame(x=X,y=Y)
+    row.names(RANGE) <- c("min","max")
 
-  # location ranges
-  X <- x$r$x[X]
-  Y <- x$r$y[Y]
+    R <- project(R,from=PROJ)
+    RANGE$longitude <- range(R[,1])
+    RANGE$latitude <- range(R[,2])
+  }
+  else # faster code
+  {
+    # do we extend this far?
+    MAT <- (x$CDF <= P)
 
-  RANGE <- data.frame(x=X,y=Y)
-  row.names(RANGE) <- c("min","max")
+    X <- apply(MAT,1,any)
+    Y <- apply(MAT,2,any)
+    rm(MAT)
+
+    # now indices
+    X <- which(X)
+    Y <- which(Y)
+
+    # range indices
+    X <- c(X[1],last(X))
+    Y <- c(Y[1],last(Y))
+
+    # location ranges
+    X <- x$r$x[X]
+    Y <- x$r$y[Y]
+
+    RANGE <- data.frame(x=X,y=Y)
+    row.names(RANGE) <- c("min","max")
+  }
+
   return(RANGE)
 }
 setMethod('extent', signature(x='UD'), extent.UD)

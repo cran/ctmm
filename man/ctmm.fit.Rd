@@ -26,7 +26,7 @@ ctmm.select(data,CTMM,verbose=FALSE,level=1,IC="AICc",MSPE="position",trace=FALS
   \item{omega}{Frequency (\eqn{2\pi/period}) of oscillatory range crossings.}
   \item{isotropic}{A Boolean denoting whether or not the animal's covariance is circular or elliptical.}
   \item{range}{A Boolean denoting whether or not the movement model has a finite range.}
-  \item{circle}{The period it takes the animal to stochastically circle its mean location.}
+  \item{circle}{(\eqn{2\pi} divided by) the period it takes the animal to stochastically circle its mean location.}
   \item{error}{A Boolean denoting whether or not to use annotated telemetry error estimates or an estimate of the error's standard deviation if the data are not annotated with error estimates or when \eqn{HDOP=1}.}
   \item{axes}{Spatial dimensions of the movement model.}
   \item{data}{ Timeseries data represented as a \code{telemetry} object. }
@@ -104,19 +104,19 @@ Springer, 2nd edition (2003).
 
 C. H. Fleming, J. M. Calabrese, T. Mueller, K.A. Olson, P. Leimgruber, W. F. Fagan,
 ``From fine-scale foraging to home ranges: A semi-variance approach to identifying movement modes across spatiotemporal scales'',
-\href{http://www.jstor.org/stable/info/10.1086/675504}{The American Naturalist, 183:5, E154-E167 (2014)}.
+The American Naturalist, 183:5, E154-E167 (2014) \doi{10.1086/675504}.
 
-C. H. Fleming, Y. Subasi, J. M. Calabrese,
+C. H. Fleming, Y. Subaşı, J. M. Calabrese,
 ``A maximum-entropy description of animal movement'',
-\href{http://journals.aps.org/pre/abstract/10.1103/PhysRevE.91.032107}{Physical Review E, 91, 032107 (2015)}.
+Physical Review E, 91, 032107 (2015) \doi{10.1103/PhysRevE.91.032107}.
 
 C. H. Fleming, D. Sheldon, E. Gurarie, W. F. Fagan, S. LaPoint, J. M. Calabrese,
 ``Kálmán filters for continuous-time movement models'',
-\href{http://www.sciencedirect.com/science/article/pii/S1574954117301115}{Ecological Informatics, 40, 8-21 (2017)}.
+Ecological Informatics, 40, 8-21 (2017) \doi{10.1016/j.ecoinf.2017.04.008}.
 
 C. H. Fleming, M. J. Noonan, E. P. Medici, J. M. Calabrese,
 ``Overcoming the challenge of small effective sample sizes in home-range estimation'',
-\href{https://besjournals.onlinelibrary.wiley.com/doi/10.1111/2041-210X.13270}{Methods in Ecology and Evolution 10:10, 1679-1689 (2019)}.
+Methods in Ecology and Evolution 10:10, 1679-1689 (2019) \doi{10.1111/2041-210X.13270}.
 }
 
 

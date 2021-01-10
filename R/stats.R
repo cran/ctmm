@@ -1,4 +1,4 @@
-# iterpolate vector by continuous index
+# interpolate vector by continuous index
 # vec is a vector, ind is a continuous index
 vint <- function(vec,ind,return.ind=FALSE)
 {
@@ -28,6 +28,7 @@ vint <- function(vec,ind,return.ind=FALSE)
 
   return(vec)
 }
+
 # same thing as above but with a block-vector
 mint <- function(mat,ind)
 {
@@ -36,6 +37,27 @@ mint <- function(mat,ind)
   return(mat)
 }
 
+# bi-linear interpolation
+bint <- function(X,ind)
+{
+  # subset to 4x4 inclusion square
+  IND <- vint(X[,1],ind[1],return.ind=TRUE)
+  X <- X[IND[1],]
+  IND[2] <- vint(X[1,],ind[2],return.ind=TRUE)
+  X <- X[,IND[2]]
+
+  X <- X[1,] + (X[1,2]-X[1,1])*(ind[1]-IND[1])
+  X <- X[1] + (X[2]-X[1])*(ind[2]-IND[2])
+
+  return(X)
+}
+
+
+# tri-linear interpolation
+tint <- function(X,ind)
+{
+  # TODO
+}
 
 # confidence interval functions
 CI.upper <- Vectorize(function(k,Alpha){stats::qchisq(Alpha/2,k,lower.tail=FALSE)/k})
@@ -43,7 +65,7 @@ CI.lower <- Vectorize(function(k,Alpha){stats::qchisq(Alpha/2,k,lower.tail=TRUE)
 
 
 # calculate chi^2 confidence intervals from MLE and COV estimates
-chisq.ci <- function(MLE,COV=NULL,level=0.95,alpha=1-level,DOF=2*MLE^2/COV,robust=FALSE,HDR=FALSE)
+chisq.ci <- function(MLE,VAR=NULL,level=0.95,alpha=1-level,DOF=2*MLE^2/VAR,robust=FALSE,HDR=FALSE)
 {
   #DEBUG <<- list(MLE=MLE,COV=COV,level=level,alpha=alpha,DOF=DOF,robust=robust,HDR=HDR)
   # try to do something reasonable on failure cases
@@ -58,17 +80,17 @@ chisq.ci <- function(MLE,COV=NULL,level=0.95,alpha=1-level,DOF=2*MLE^2/COV,robus
   { CI <- c(0,0,0) }
   else if(MLE==Inf)
   { CI <- c(Inf,Inf,Inf) }
-  else if(!is.null(COV) && COV<0) # try an exponential distribution?
+  else if(!is.null(VAR) && VAR<0) # try an exponential distribution?
   {
-    warning("VAR[Area] = ",COV," < 0")
+    warning("VAR[Area] = ",VAR," < 0")
     if(!HDR)
     {
       CI <- c(1,1,1)*MLE
-      CI[1] <- stats::qexp(alpha/2,rate=1/min(sqrt(-COV),MLE))
-      CI[3] <- stats::qexp(1-alpha/2,rate=1/max(sqrt(-COV),MLE))
+      CI[1] <- stats::qexp(alpha/2,rate=1/min(sqrt(-VAR),MLE))
+      CI[3] <- stats::qexp(1-alpha/2,rate=1/max(sqrt(-VAR),MLE))
     }
     else
-    { CI <- c(0,0,MLE) * stats::qexp(1-alpha,rate=1/min(sqrt(-COV),MLE)) }
+    { CI <- c(0,0,MLE) * stats::qexp(1-alpha,rate=1/min(sqrt(-VAR),MLE)) }
   }
   else     # regular estimate
   {
@@ -80,8 +102,8 @@ chisq.ci <- function(MLE,COV=NULL,level=0.95,alpha=1-level,DOF=2*MLE^2/COV,robus
     { CI <- MLE * c(CI.lower(DOF,alpha),1,CI.upper(DOF,alpha)) }
 
     # Normal backup for upper.tail
-    if(is.null(COV)) { COV <- 2*MLE^2/DOF }
-    UPPER <- norm.ci(CI[2],COV,alpha=alpha)[3]
+    if(is.null(VAR)) { VAR <- 2*MLE^2/DOF }
+    UPPER <- norm.ci(CI[2],VAR,alpha=alpha)[3]
     # qchisq upper.tail is too small when DOF<<1
     # qchisq bug that no regular use of chi-square/gamma would come across
     if(is.nan(CI[3]) || CI[3]<UPPER) { CI[3] <- UPPER }
@@ -148,7 +170,7 @@ idchisq <- function(p,df)
 
 
 # normal confidence intervals
-norm.ci <- function(MLE,COV,alpha=0.05)
+norm.ci <- function(MLE,COV,level=0.95,alpha=1-level)
 {
   # z-values for low, ML, high estimates
   z <- stats::qnorm(1-alpha/2)*c(-1,0,1)
@@ -161,7 +183,7 @@ norm.ci <- function(MLE,COV,alpha=0.05)
 }
 
 # calculate log-normal confidence intervals from MLE and COV estimates
-lognorm.ci <- function(MLE,COV,alpha=0.05)
+lognorm.ci <- function(MLE,COV,level=0.95,alpha=1-level)
 {
   # log transform of variance
   COV <- COV/MLE^2
@@ -175,6 +197,68 @@ lognorm.ci <- function(MLE,COV,alpha=0.05)
 
   return(CI)
 }
+
+
+# beta distributed CI given mean and variance estimates
+beta.ci <- function(MLE,VAR,level=0.95,alpha=1-level)
+{
+  n <- MLE*(1-MLE)/VAR - 1
+  if(n<=0)
+  { CI <- c(0,MLE,1) }
+  else
+  {
+    a <- n * MLE
+    b <- n * (1-MLE)
+    CI <- stats::qbeta(c(alpha/2,0.5,1-alpha/2),a,b)
+    CI[2] <- MLE # replace median with mean
+  }
+  names(CI) <- NAMES.CI
+  return(CI)
+}
+
+
+# Binomial CDF defined for effective size (n) and outcome fraction (q)
+pfbinom <- function(q,size,prob,lower.tail=TRUE,log.p=FALSE)
+{
+  x <- (1-prob)/prob * (q+1/size)/(1-q)
+  df1 <- 2*size*(1-q)
+  df2 <- 2*size*(q+1/size)
+  stats::pf(x,df1,df2,lower.tail=lower.tail,log.p=log.p)
+}
+
+
+# Binomial quantile function defined for effective size (n) and outcome fraction (q)
+qfbinom <- function(p,size,prob)
+{
+  parscale <- c(p,1-p,prob,1-prob)
+  parscale <- min(parscale[parscale>0])
+
+  # solve p==pfbinom(q)
+  TEST <- pfbinom(1/2,size,prob) # median quantile
+  ## prevent underflow... not sure if this is necessary
+  if(p<=TEST) # below median -- lower-tail probability optimization
+  {
+    lower.tail <- TRUE
+    par <- 1/4
+    lower <- 0
+    upper <- 1/2
+  }
+  else # above median -- upper-tail probability optimization
+  {
+    lower.tail <- FALSE
+    p <- 1-p # upper-tail probability
+    par <- 3/4
+    lower <- 1/2
+    upper <- 1
+  }
+  cost <- function(q) { (p-pfbinom(q,size,prob,lower.tail=lower.tail))^2 }
+  FIT <- optimizer(par,cost,lower=lower,upper=upper,control=list(parscale=parscale))
+  q <- FIT$par
+
+  return(q)
+}
+
+
 
 # robust central tendency & dispersal estimates with high breakdown threshold
 # nstart should probably be increased from default of 1
@@ -239,7 +323,7 @@ mtmean <- function(x,lower=-Inf,upper=Inf,func=mean)
 
 
 # degrees-of-freedom of (proportionally) chi distribution with specified moments
-chi.dof <- function(M1,M2,error=1/2)
+chi.dof <- function(M1,M2,precision=1/2)
 {
   # solve for chi^2 DOF consistent with M1 & M2
   R <- M1^2/M2 # == 2*pi/DOF / Beta(DOF/2,1/2)^2 # 0 <= R <= 1
@@ -247,7 +331,7 @@ chi.dof <- function(M1,M2,error=1/2)
   if(R<=0) { return(0) }
 
   DOF <- M1^2/(M2-M1^2)/2 # initial guess - asymptotic limit
-  error <- .Machine$double.eps^error
+  error <- .Machine$double.eps^precision
   ERROR <- Inf
   while(ERROR>=error)
   {
@@ -269,6 +353,35 @@ chi.dof <- function(M1,M2,error=1/2)
 }
 
 
+# (scaled) chi^2 degrees-of-freedom from median and interquartile range
+chisq.dof <- function(MED,IQR,alpha=0.25)
+{
+  if(IQR==0) { return(Inf) }
+  if(IQR==Inf) { return(0) }
+  if(MED==0) { return(0) }
+
+  cost <- function(nu,zero=0)
+  {
+    if(nu==0) { return(Inf) }
+    if(nu==Inf) { return(Inf) }
+
+    Q1 <- stats::qchisq(1/4,df=nu)/nu # Q1/mean
+    M <- stats::qchisq(1/2,df=nu)/nu # median/mean
+    Q2 <- stats::qchisq(3/4,df=nu)/nu # Q2/mean
+    R <- M/(Q2-Q1) # IQR/MED from nu
+    r <- MED/IQR # IQR/MED from data
+
+    return((R-r)^2)
+  }
+
+  # initial guess (asymptotic relation)
+  nu <- (MED/IQR)^2 / 0.2747632133101263
+  R <- optimizer(nu,cost,lower=0,upper=Inf,control=list(parscale=1))
+
+  return(R$par)
+}
+
+
 # highest density region of truncated normal distribution
 # mu is mode
 # lower <= mu <= upper
@@ -276,7 +389,7 @@ tnorm.hdr <- function(mu=0,VAR=1,lower=0,upper=Inf,level=0.95)
 {
   sd <- sqrt(VAR)
   MASS <- stats::pnorm(upper,mean=mu,sd=sd) - stats::pnorm(lower,mean=mu,sd=sd)
-  CDF <- function(a,b) { ( stats::pnorm(b,mean=mu,sd=sd) - stats::pnorm(a,mean=mu,sd=sd) )/MASS }
+  CDF <- function(a,b) { nant( (stats::pnorm(b,mean=mu,sd=sd)-stats::pnorm(a,mean=mu,sd=sd))/MASS ,1) }
 
   CI <- c(lower,mu,upper)
   DIFF <- diff(CI)
@@ -302,5 +415,68 @@ tnorm.hdr <- function(mu=0,VAR=1,lower=0,upper=Inf,level=0.95)
   }
 
   names(CI) <- NAMES.CI
+  return(CI)
+}
+
+
+# inverse Gaussian CIs
+IG.CI <- function(mu,VAR,k=VAR/mu^3,level=0.95,precision=1/2)
+{
+  if(k==Inf)
+  { CI <- c(0,mu,Inf) }
+  else if(k>0)
+  {
+    tol <- .Machine$double.eps^precision
+    p <- (1-level)/2
+    p <- c(p,1-p)
+
+    CI <- rep(NA_real_,3)
+    CI[2] <- mu # mean
+    CI[c(1,3)] <- statmod::qinvgauss(p,mean=mu,shape=1/k,tol=min(tol,1E-14),maxit=.Machine$integer.max)
+  }
+  else
+  { CI <- c(mu,mu,mu) }
+  names(CI) <- NAMES.CI
+  return(CI)
+}
+
+
+# generalized inverse Gaussian CIs
+# GIG.CI <- function(mu,k,rho,level=0.95,precision=1/2)
+# {
+#   tol <- .Machine$double.eps^precision
+#   p <- (1-level)/2
+#   p <- c(p,1-p)
+#
+#   chi <- theta*eta
+#   psi <- theta/eta
+#   lambda <- -rho/2
+#
+#   CI <- rep(NA_real_,3)
+#   CI[2] <- eta*(besselK(theta,1-rho/2,expon.scaled=TRUE)/besselK(theta,-rho/2,expon.scaled=TRUE))
+#   CI[c(1,3)] <- GeneralizedHyperbolic::qgig(p,chi=chi,psi=psi,lambda=lambda,method="integrate",ibfTol=min(tol,.Machine$double.eps^.85),uniTol=min(tol,1E-7))
+#   names(CI) <- NAMES.CI
+#   return(CI)
+# }
+
+
+# F-distribution CIs with exact means and variances for the ratio, numerator, and denominator
+# E1 == E[numerator]
+# VAR1 == VAR[numerator]
+# E2 == E[1/denominator]
+# VAR2 == VAR[1/denominator]
+F.CI <- function(E1,VAR1,E2,VAR2,level=0.95)
+{
+  EST <- E1*E2
+  N1 <- 2*E1^2/VAR1 # chi^2 DOF
+  N2 <- 2*E2^2/VAR2 + 4 # inverse-chi^2 DOF
+  BIAS <- N2/(N2-2) # F-distribution mean bias factor
+
+  alpha <- (1-level)/2
+  CI <- stats::qf(c(alpha,1-alpha),N1,N2)
+  CI <- CI / BIAS # debiased ratio corresponding to EST=1
+  CI <- c(CI[1],1,CI[2]) * EST
+  names(CI) <- NAMES.CI
+
   return(CI)
 }

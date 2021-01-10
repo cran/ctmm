@@ -20,6 +20,7 @@ new.plot <- function(data=NULL,CTMM=NULL,UD=NULL,level.UD=0.95,level=0.95,units=
   dist <- list()
   dist$name <- "meters"
   dist$scale <- 1
+  axes <- c("x","y")
 
   if(!is.null(ext))
   {
@@ -33,15 +34,15 @@ new.plot <- function(data=NULL,CTMM=NULL,UD=NULL,level.UD=0.95,level=0.95,units=
 
     # bounding locations from data
     if(!is.null(data))
-    { ext <- rbind(ext,extent(data)) }
+    { ext <- rbind(ext,extent(data)[,axes]) }
 
     # bounding locations from UDs
     if(!is.null(UD))
-    { ext <- rbind(ext,extent(UD,level=level,level.UD=level.UD)) }
+    { ext <- rbind(ext,extent(UD,level=level,level.UD=level.UD)[,axes]) }
 
     # bounding locations from Gaussian CTMM
     if(!is.null(CTMM) & !any(is.na(level.UD)))
-    { ext <- rbind(ext,extent(CTMM,level=level,level.UD=level.UD)) }
+    { ext <- rbind(ext,extent(CTMM,level=level,level.UD=level.UD)[,axes]) }
 
     # # bounding locations from standard normal quantiles
     # if(RESIDUALS && !any(is.na(level.UD)))
@@ -102,10 +103,23 @@ new.plot <- function(data=NULL,CTMM=NULL,UD=NULL,level.UD=0.95,level=0.95,units=
     # dimensional type
     assign("x.dim","length",pos=plot.env)
     assign("y.dim","length",pos=plot.env)
+    # unit name
+    assign("x.units",dist$name,pos=plot.env)
+    assign("y.units",dist$name,pos=plot.env)
     # unit conversion
     assign("x.scale",dist$scale,pos=plot.env)
     assign("y.scale",dist$scale,pos=plot.env)
   } # end !add
+  else # get distance information from environment
+  {
+    name <- unique( c( get0('x.units',plot.env), get0('y.units',plot.env) ) )
+    scale <- unique( c( get0('x.scale',plot.env), get0('y.scale',plot.env) ) )
+    if(length(name)==1 && length(scale)==1)
+    {
+      dist$name <- name
+      dist$scale <- scale
+    }
+  }
 
   return(dist)
 }
@@ -184,7 +198,7 @@ plot.telemetry <- function(x,CTMM=NULL,UD=NULL,level.UD=0.95,level=0.95,DF="CDF"
   # PLOT KDE CONTOURS... AND DENSITY
   if(!is.null(UD))
   {
-    UD <- lapply(UD,function(ud){ unit.UD(ud,length=dist$scale) })
+    # UD <- lapply(UD,function(ud){ unit.UD(ud,length=dist$scale) }) # now done in plot.UD
     plot.UD(UD,level.UD=level.UD,level=level,DF=DF,col.level=col.level,col.DF=col.DF,col.grid=col.grid,labels=labels,fraction=fraction,add=TRUE,xlim=xlim,ylim=ylim,ext=ext,cex=cex,lwd=lwd.level,...)
   }
 
@@ -475,7 +489,10 @@ plot.UD <- function(x,level.UD=0.95,level=0.95,DF="CDF",units=TRUE,col.level="bl
 # plot PDF stored as KDE object
 plot.df <- function(kde,DF="CDF",col="blue",...)
 {
-  col <- malpha(col,(0:255)/255)
+  alpha <- grDevices::col2rgb(col,alpha=TRUE)[4,]
+  alpha <- max(alpha)
+  alpha <- min(alpha,254) # overflow bug otherwise
+  col <- malpha(col,(0:alpha)/255)
 
   if(DF=="PDF")
   {

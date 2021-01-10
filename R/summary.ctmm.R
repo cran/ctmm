@@ -217,7 +217,7 @@ summary.ctmm.single <- function(object, level=0.95, level.UD=0.95, units=TRUE, .
 
     # root mean square velocity
     # pretty units
-    rms <- sqrt(chisq.ci(ms,COV=var.ms,alpha=alpha))
+    rms <- sqrt(chisq.ci(ms,VAR=var.ms,alpha=alpha))
     unit.list <- unit.par(rms,"speed",SI=!units)
     name <- c(name,unit.list$name)
     scale <- c(scale,unit.list$scale)
@@ -237,7 +237,7 @@ summary.ctmm.single <- function(object, level=0.95, level.UD=0.95, units=TRUE, .
     VAR <- (2*error)^2 * VAR
     error <- error^2
     # CIs
-    error <- chisq.ci(error,COV=VAR,alpha=alpha)
+    error <- chisq.ci(error,VAR=VAR,alpha=alpha)
     # back to meters/distance
     error <- sqrt(error)
     unit.list <- unit.par(error,"length",SI=!units)
@@ -254,7 +254,7 @@ summary.ctmm.single <- function(object, level=0.95, level.UD=0.95, units=TRUE, .
   # affix units
   rownames(par) <- paste(rownames(par)," (",name,")",sep="")
 
-  if(!range) { par <- par[-1,] } # delete off "area" (really diffusion)
+  if(!range) { par <- par[-1,,drop=FALSE] } # delete off "area" (really diffusion)... stop R drop :(
 
   # anything else interesting from the mean function
   par <- rbind(drift@summary(object,level,level.UD),par)
@@ -298,6 +298,17 @@ DOF.area <- function(CTMM)
   return(DOF)
 }
 
+
+# DOF of trace variance
+DOF.var <- function(CTMM)
+{
+  MSD <- var.covm(CTMM$sigma,ave=FALSE)
+  COV.RAN <- axes2var(CTMM,MEAN=FALSE)
+
+  2*MSD^2/COV.RAN
+}
+
+
 #########
 DOF.mean <- function(CTMM)
 {
@@ -315,6 +326,7 @@ DOF.mean <- function(CTMM)
 
   return(DOF)
 }
+
 
 #######
 DOF.speed <- function(CTMM) { return( summary(CTMM)$DOF['speed'] ) }

@@ -26,7 +26,7 @@ akde(data,CTMM,VMM=NULL,debias=TRUE,weights=FALSE,smooth=TRUE,error=0.001,res=10
   \item{...}{Arguments passed to all instances of \code{\link{bandwidth}}.}
 }
 
-\details{For weighted AKDE, please note additional \code{...} arguments passed to \code{\link{bandwidth}}.
+\details{For weighted AKDE, please note additional \code{...} arguments passed to \code{\link{bandwidth}}, which can have a large impact on computation time in certain cases.
 
 When feeding in lists of \code{telemetry} and \code{ctmm} objects, all UDs will be calculated on the same grid. These UDs can be averaged with the \code{\link{mean.UD}} command.
 
@@ -45,15 +45,15 @@ If a \code{UD} or \code{raster} object is supplied in the \code{grid} argument, 
 \references{
 C. H. Fleming, W. F. Fagan, T. Mueller, K. A. Olson, P. Leimgruber, J. M. Calabrese,
 ``Rigorous home-range estimation with movement data: A new autocorrelated kernel-density estimator'',
-\href{https://esajournals.onlinelibrary.wiley.com/doi/abs/10.1890/14-2010.1}{Ecology, 96:5, 1182-1188 (2015)}.
+Ecology, 96:5, 1182-1188 (2015) \doi{10.1890/14-2010.1}.
 
 C. H. Fleming, J. M. Calabrese,
 ``A new kernel-density estimator for accurate home-range and species-range area estimation'',
-\href{http://onlinelibrary.wiley.com/wol1/doi/10.1111/2041-210X.12673/abstract}{Methods in Ecology and Evolution, 8:5, 571-579 (2017)}.
+Methods in Ecology and Evolution, 8:5, 571-579 (2017) \doi{10.1111/2041-210X.12673}.
 
 C. H. Fleming, D. Sheldon, W. F. Fagan, P. Leimgruber, T. Mueller, D. Nandintsetseg, M. J. Noonan, K. A. Olson, E. Setyawan, A. Sianipar, J. M. Calabrese,
 ``Correcting for missing and irregular data in home-range estimation'',
-\href{https://esajournals.onlinelibrary.wiley.com/doi/abs/10.1002/eap.1704}{Ecological Applications, 28:4, 1003-1010 (2018)}.
+Ecological Applications, 28:4, 1003-1010 (2018) \doi{10.1002/eap.1704}.
 
 %D. Marcotte. (1996). Fast variogram computation with FFT. \emph{Computers and Geosciences} 22(10), 1175-1186.
 }
@@ -82,7 +82,9 @@ library(ctmm)
 data(buffalo)
 Cilla <- buffalo$Cilla
 
+# calculate fit guess object
 GUESS <- ctmm.guess(Cilla,interactive=FALSE)
+# in general, you should be running ctmm.select here instead of ctmm.fit
 FIT <- ctmm.fit(Cilla,GUESS)
 
 # Compute akde object

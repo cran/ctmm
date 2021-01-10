@@ -8,20 +8,21 @@
 \description{Produces a \code{data.frame} of speed and distance estimates to analyze, as well as a plot highlighting potential speed and distance outliers in \code{telemetry} data.
 }
 \usage{
-outlie(data,UERE=10,standardize=FALSE,plot=TRUE,...)
+outlie(data,UERE=10,plot=TRUE,by='d',...)
 
-\S3method{plot}{outlie}(x,level=0.95,units=TRUE,...)
+\S3method{plot}{outlie}(x,level=0.95,units=TRUE,axes=c('d','v'),...)
 }
 %- maybe also 'usage' for other objects documented here.
 \arguments{
   \item{data}{\code{telemetry} object.}
   \item{UERE}{Device-dependent telemetry error in meters (RMS UERE). Only necessary for uncalibrated data.}
-  \item{standardize}{Standardize speed and distance output by their median absolute deviation (MAD).}
   \item{plot}{Output a plot highlighting high speeds (blue) and distant locations (red).}
+  \item{by}{Color and size side-effect plot points by \code{'d'}, \code{'v'}, \code{'dz'}, \code{'vz'}, for distance from center, minimum speed, vertical distance from center, and minimum vertical speed.}
   \item{...}{Arguments passed to \code{plot}.}
   \item{x}{\code{outlie} object to plot.}
   \item{level}{Confidence level for error bars.}
   \item{units}{Convert axes to natural units.}
+  \item{axes}{\eqn{x}-\eqn{y} axes to plot. Can be any of \code{'d'}, \code{'v'}, \code{'dz'}, \code{'vz'}, for time, distance from center, minimum speed, vertical distance from center, and minimum vertical speed.}
 }
 
 \details{If \code{plot=TRUE} in \code{outlie()}, intervals of high speed are highlighted with blue segments, while distant locations are highlighted with red points.
@@ -33,11 +34,13 @@ The output \code{outlie} object contains the above noted speed and distance esti
 
 \value{Returns a \code{data.frame} of distances and speeds. Can also produce a plot as a side effect.}
 
-%\references{}
+\references{
+C. H. Fleming et al, ``A comprehensive framework for handling location error in animal tracking data'', bioRxiv 2020.06.12.130195 (2020) \doi{10.1101/2020.06.12.130195}.
+}
 
 \author{C. H. Fleming.}
 
-\note{The speed estimates here are tailored for outlier detection and have poor statistical efficiency. The \code{\link{predict}} and \code{\link{speed}} methods are appropriate for estimating speed (after outliers have been removed and a movement model has been selected). }
+\note{The speed estimates here are tailored for outlier detection and have poor statistical efficiency. The \code{\link{predict}} and \code{\link{speed}} methods are appropriate for estimating speed (after outliers have been removed and a movement model has been selected).}
 
 %% ~Make other sections like Warning with \section{Warning }{....} ~
 

@@ -1,4 +1,5 @@
 \name{residuals.ctmm}
+\alias{residuals}
 \alias{residuals.ctmm}
 \alias{residuals.telemetry}
 \alias{correlogram}
@@ -13,7 +14,7 @@ A correlogram method is also provided to assess autocorrelation.
 This function is analogous to \code{acf}, but can handle missing data and multiple dimensions.
 Finally, \code{mag} calculates residual magnitudes, which is useful for comparing against potential covariates.
 }
-\usage{
+\usage{%residuals(object,...)
 \S3method{residuals}{ctmm}(object,data,...)
 
 \S3method{residuals}{telemetry}(object,CTMM=NULL,...)
@@ -48,7 +49,7 @@ When calculating correlograms, minimizing bias is more important than producing 
 \references{
 C. H. Fleming, D. Sheldon, E. Gurarie, W. F. Fagan, S. LaPoint, J. M. Calabrese,
 ``Kálmán filters for continuous-time movement models'',
-\href{http://www.sciencedirect.com/science/article/pii/S1574954117301115}{Ecological Informatics, 40, 8-21 (2017)}.
+Ecological Informatics, 40, 8-21 (2017) \doi{10.1016/j.ecoinf.2017.04.008}.
 }
 
 \author{ C. H. Fleming}
