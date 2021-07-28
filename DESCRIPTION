@@ -1,7 +1,7 @@
 Encoding: UTF-8
 Package: ctmm
-Version: 0.6.0
-Date: 2021-01-08
+Version: 0.6.1
+Date: 2021-07-26
 Title: Continuous-Time Movement Modeling
 Authors@R: c(person(c("Christen","H."),"Fleming",email="flemingc@si.edu",role=c("aut","cre")),
              person(c("Justin","M."),"Calabrese",email="calabresej@si.edu",role="aut"),
@@ -25,7 +25,8 @@ Depends: R (>= 3.5.0)
 Imports: Bessel, data.table, digest, expm, fasttime, Gmedian, graphics,
         grDevices, gsl, manipulate, MASS, methods, numDeriv, pbivnorm,
         pracma, raster, rgdal, shape, sp, statmod, stats, utils
-Suggests: bit64, fftw, knitr, move, parallel, rmarkdown, suncalc
+Suggests: animation, bit64, fftw, knitr, move, parallel, parsedate,
+        rmarkdown, sf, suncalc
 Description: Functions for identifying, fitting, and applying continuous-space, continuous-time stochastic movement models to animal tracking data.
   The package is described in Calabrese et al (2016) <doi:10.1111/2041-210X.12559>, with models and methods based on those introduced in
   Fleming & Calabrese et al (2014) <doi:10.1086/675504>,
@@ -43,12 +44,12 @@ Description: Functions for identifying, fitting, and applying continuous-space, 
   Noonan & Fleming et al (2019) <doi:10.1186/s40462-019-0177-1>,
   Fleming et al (2020) <doi:10.1101/2020.06.12.130195>,
   and
-  Noonan et al (2020) <doi:10.1101/2020.08.24.261628>.
+  Noonan et al (2021) <doi:10.1111/2041-210X.13597>.
 License: GPL-3
 VignetteBuilder: knitr
 NeedsCompilation: no
 RoxygenNote: 6.1.1
-Packaged: 2021-01-10 05:42:47 UTC; Christen
+Packaged: 2021-07-27 09:26:33 UTC; Christen
 Author: Christen H. Fleming [aut, cre],
   Justin M. Calabrese [aut],
   Xianghui Dong [ctb],
@@ -67,4 +68,4 @@ Author: Christen H. Fleming [aut, cre],
   Ronaldo G. Morato [dtc]
 Maintainer: Christen H. Fleming <flemingc@si.edu>
 Repository: CRAN
-Date/Publication: 2021-01-10 17:10:25 UTC
+Date/Publication: 2021-07-28 10:10:16 UTC

@@ -36,38 +36,6 @@ meta.chisq <- function(s,dof,level=0.95,level.pop=0.95,IC="AICc",method='mle',bo
   # % chi^2 versus IG in sampling distribution of mu (very approximate)
   DRATIO <- 0 # (0,1) -> (chi^2,IG)
 
-  # par = (mu,k=1/lambda)
-  # VAR = VAR[mu]
-  update.DRATIO <- function(par,VAR)
-  {
-    mu <- par[1]
-    # population moments
-    theta <- 1/prod(par[1:2]); rho <- 1
-    M.pop <- mu * (besselK(theta,rho/2-1,expon.scaled=TRUE)/besselK(theta,rho/2,expon.scaled=TRUE))
-    VAR.pop <- mu^2 * (besselK(theta,rho/2-2,expon.scaled=TRUE)/besselK(theta,rho/2,expon.scaled=TRUE)) - M.pop^2
-    # chi^2 VAR.pop==0
-    # IG when VAR==VAR.pop/n
-    DRATIO <<- VAR.pop/VAR # (0,n) : (chi^2,IG)
-    DRATIO <<- clamp(DRATIO,0,n) / n # (0,1) : (chi^2,IG)
-  }
-
-  # CI that are chi^2 when VAR[M]>>VAR.pop
-  ci.chisq.GIG <- function(M,VAR,w=DRATIO)
-  {
-    w <- c(1-w,w)
-
-    # approximation that bridges the two with correct mean and variance
-    CI.1 <- chisq.ci(M,VAR=VAR,level=level)
-    CI.2 <- IG.CI(M,VAR=VAR,level=level,precision=precision)
-
-    CI <- w[1]*CI.1 + w[2]*CI.2
-
-    # TODO make the second term some kind of GIG?
-    CI[3] <- nant(CI[3],Inf)
-
-    return(CI)
-  }
-
   # kappa for debiased standard deviation for CIs
   k.std <- function(par)
   {
@@ -178,7 +146,7 @@ meta.chisq <- function(s,dof,level=0.95,level.pop=0.95,IC="AICc",method='mle',bo
       nu <- c(0,1,2)[1:length(LL)] # variance parameters
       K <- k + nu # total parameters
       dIC[,"AIC"]  <- 2*K - 2*LL
-      dIC[,"AICc"] <- 2*K*ifelse(debias,n-k,n)/pmax(n-K-nu,0) - 2*LL
+      dIC[,"AICc"] <- 2*K*nant(ifelse(debias,n-k,n)/pmax(n-K-nu,0),1) - 2*LL
       dIC[,"BIC"]  <- log(n)*K - 2*LL
 
       dIC <- cbind(dIC[,IC])
@@ -239,9 +207,9 @@ meta.chisq <- function(s,dof,level=0.95,level.pop=0.95,IC="AICc",method='mle',bo
       CI.VAR <- COV[1,1]
 
       # approximate ratio of chi^2 to IG behavior
-      update.DRATIO(par,CI.VAR[1])
+      DRATIO <<- DD.IG.ratio(par,CI.VAR[1],n=n)
 
-      CI[1,] <- ci.chisq.GIG(par[1],VAR=CI.VAR[1])
+      CI[1,] <- chisq.IG.ci(par[1],VAR=CI.VAR[1],w=DRATIO,level=level,precision=precision)
 
       # mean inverse area of IG random variable # IG bias corrected
       CI[2,] <- 1/CI[1,] # these numbers aren't really used
@@ -369,9 +337,9 @@ meta.chisq <- function(s,dof,level=0.95,level.pop=0.95,IC="AICc",method='mle',bo
       CI.VAR <- COV[1,1]
 
       # approximate ratio of chi^2 to IG behavior
-      update.DRATIO(par,CI.VAR[1])
+      DRATIO <<- DD.IG.ratio(par,CI.VAR[1],n=n)
 
-      CI[1,] <- ci.chisq.GIG(par[1],CI.VAR[1])
+      CI[1,] <- chisq.IG.ci(par[1],CI.VAR[1],w=DRATIO,level=level,precision=precision)
 
       CI[2,] <- 1/CI[1,] # numbers not used
       Vm2 <- c(BFIT$COV.mu)/mu^2 # keep fixed
@@ -507,12 +475,12 @@ shrink.chisq <- function(s,dof,S,DOF,...)
 }
 
 
-meta <- function(x,level=0.95,level.UD=0.95,method="MLE",IC="AICc",boot=FALSE,error=0.01,debias=TRUE,units=TRUE,plot=TRUE,sort=FALSE,mean=TRUE,col="black",...)
+meta <- function(x,level=0.95,level.UD=0.95,method="MLE",IC="AICc",boot=FALSE,error=0.01,debias=TRUE,verbose=FALSE,units=TRUE,plot=TRUE,sort=FALSE,mean=TRUE,col="black",...)
 {
   method <- tolower(method)
   method <- match.arg(method,c("mle","blue"))
 
-  meta.area(x=x,level=level,level.UD=level.UD,IC=IC,boot=boot,error=error,debias=debias,method=method,units=units,plot=plot,sort=sort,mean=mean,col=col,...)
+  meta.area(x=x,level=level,level.UD=level.UD,IC=IC,boot=boot,error=error,debias=debias,method=method,verbose=verbose,units=units,plot=plot,sort=sort,mean=mean,col=col,...)
 }
 
 
@@ -562,7 +530,7 @@ import.area <- function(x,level.UD=0.95)
 
 # wrapper: meta-analysis of CTMM areas
 # TODO range=FALSE ???
-meta.area <- function(x,level=0.95,level.UD=0.95,level.pop=0.95,method="MLE",IC="AICc",boot=FALSE,error=0.01,debias=TRUE,units=TRUE,plot=TRUE,sort=FALSE,mean=TRUE,col="black",...)
+meta.area <- function(x,level=0.95,level.UD=0.95,level.pop=0.95,method="MLE",IC="AICc",boot=FALSE,error=0.01,debias=TRUE,verbose=FALSE,units=TRUE,plot=TRUE,sort=FALSE,mean=TRUE,col="black",...)
 {
   N <- length(x)
 
@@ -582,10 +550,11 @@ meta.area <- function(x,level=0.95,level.UD=0.95,level.pop=0.95,method="MLE",IC=
       DOF[[i]] <- STUFF$DOF
 
       message(paste("* Sub-population",ID[i]))
-      RESULTS[[i]] <- meta.chisq(AREA[[i]],DOF[[i]],level=level,level.pop=level.pop,IC=IC,boot=boot,error=error,debias=debias,method=method,verbose=TRUE)
+      RESULTS[[i]] <- meta.chisq(AREA[[i]],DOF[[i]],level=level,level.pop=level.pop,IC=IC,boot=boot,error=error,debias=debias,method=method,verbose=TRUE,units=FALSE)
     }
     message("* Joint population")
-    RESULTS[[N+1]] <- meta.chisq(unlist(AREA),unlist(DOF),level=level,level.pop=level.pop,IC=IC,boot=boot,error=error,debias=debias,method=method,verbose=TRUE)
+    RESULTS[[N+1]] <- meta.chisq(unlist(AREA),unlist(DOF),level=level,level.pop=level.pop,IC=IC,boot=boot,error=error,debias=debias,method=method,verbose=TRUE,units=FALSE)
+    names(RESULTS) <- ID
 
     message("* Joint population versus sub-populations (best models)")
     dIC <- sum( sapply(RESULTS[1:N],function(R){R$dIC[1,]}) )
@@ -598,7 +567,7 @@ meta.area <- function(x,level=0.95,level.UD=0.95,level.pop=0.95,method="MLE",IC=
     print(dIC - min(dIC))
 
     # forest plot object
-    PLOT <- sapply(RESULTS,function(R){R$CI[2,1:3]}) # [3,N+1]
+    PLOT <- sapply(RESULTS,function(R){R$CI[1,1:3]}) # [3,N+1]
   }
   else
   {
@@ -656,6 +625,7 @@ meta.area <- function(x,level=0.95,level.UD=0.95,level.pop=0.95,method="MLE",IC=
       SORT <- sort(PLOT[2,1:N],decreasing=sort,index.return=TRUE)$ix
       ID[1:N] <- ID[SORT]
       PLOT[,1:N] <- PLOT[,SORT]
+      if(length(col)>1) { col[1:N] <- col[SORT] }
     }
 
     # colored axes
@@ -690,6 +660,24 @@ meta.area <- function(x,level=0.95,level.UD=0.95,level.pop=0.95,method="MLE",IC=
     {
       for(j in (1:N)[-i]) # diagonal == 1/1
       { CI[i,j,] <- F.CI(NUM[i],NVAR[i],DEN[j],DVAR[j],level=level) }
+    }
+
+    if(verbose)
+    {
+      UNITS <- sapply(RESULTS,function(R){R$CI[1,]})
+      UNITS <- unit(UNITS,"area",SI=!units,concise=TRUE)
+
+      for(i in 1:N)
+      {
+        RESULTS[[i]] <- RESULTS[[i]]$CI[c(1,3,4),]
+        RESULTS[[i]][1,] <- RESULTS[[i]][1,]/UNITS$scale
+        rownames(RESULTS[[i]])[1] <- paste0(rownames(RESULTS[[i]])[1]," (",UNITS$name,")")
+      }
+
+      RESULTS[[N+1]] <- CI
+      names(RESULTS)[N+1] <- "mean ratio"
+
+      CI <- RESULTS
     }
   }
   else # population levels CIs

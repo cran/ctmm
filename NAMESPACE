@@ -13,8 +13,7 @@ export(plot,simulate,predict,median,head,tail)
 #export(modes,ridges)
 export(extent,raster,writeRaster,zoom)
 export(projection,"projection<-")
-export(compass)
-export(emulate,meta,speed,speeds,writeShapefile)
+export(as.sf,cluster,compass,emulate,meta,speed,speeds,video,writeShapefile)
 #export(SpatialPoints,SpatialPolygonsDataFrame)
 #S3method(SpatialPoints,matrix)
 #S3method(SpatialPoints,data.frame)
@@ -50,7 +49,7 @@ export("%#%",mag,optimizer)
 #S3method(`projection<-`,telemetry)
 
 #TELEMETRY FUNCTIONS
-export(as.telemetry,SpatialPoints.telemetry,SpatialPointsDataFrame.telemetry,SpatialPolygonsDataFrame.telemetry)
+export(as.telemetry,SpatialPoints.telemetry,SpatialPointsDataFrame.telemetry,SpatialPolygonsDataFrame.telemetry,tbind)
 S3method(as.telemetry,character)
 S3method(as.telemetry,data.frame)
 S3method(as.telemetry,Move)
@@ -112,6 +111,7 @@ S3method(speeds,telemetry)
 
 #UERE FUNCTIONS
 export(uere,"uere<-",uere.fit,outlie)
+S3method(str,UERE)
 S3method(summary,UERE)
 S3method(plot,outlie)
 

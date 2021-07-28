@@ -477,8 +477,8 @@ mc.optim <- function(par,fn,...,lower=-Inf,upper=Inf,period=FALSE,reset=identity
     if(PMAP) { par <- pmap(par,theta,inverse=TRUE) }
 
     # this objective function has the ability to approximately zero its objective value
-    if(ZERO) { FN <- try(fn(par*parscale,zero=zero*fnscale,...)) }
-    else { FN <- try(fn(par*parscale,...)) }
+    if(ZERO) { FN <- try(fn(par*parscale,zero=zero*fnscale,...),silent=!DEBUG) }
+    else { FN <- try(fn(par*parscale,...),silent=!DEBUG) }
     # ordinary objective function
 
     if(class(FN)[1]=="numeric" && !is.nan(FN)) { FN <- FN/fnscale }
@@ -490,8 +490,8 @@ mc.optim <- function(par,fn,...,lower=-Inf,upper=Inf,period=FALSE,reset=identity
       {
         debug(ctmm.loglike)
         # try again with debugging
-        if(ZERO) { FN <- try(fn(par*parscale,zero=zero*fnscale,...)) }
-        else { FN <- try(fn(par*parscale,...)) }
+        if(ZERO) { FN <- try(fn(par*parscale,zero=zero*fnscale,...),silent=!DEBUG) }
+        else { FN <- try(fn(par*parscale,...),silent=!DEBUG) }
         undebug(ctmm.loglike)
       }
       FN <- Inf
@@ -526,7 +526,7 @@ mc.optim <- function(par,fn,...,lower=-Inf,upper=Inf,period=FALSE,reset=identity
   {
     SCL <- pmax(abs(p0),1)
     # relative step sizes
-    dp <- sqrt(abs(c((ps[,2]-ps[,1])^2 %*% SCL^2))) # formula explained in numderiv.diff()
+    dp <- sqrt(abs(c((ps[,2]-ps[,1])^2 %*% (1/SCL^2)))) # formula explained in numderiv.diff()
     return(dp <= tol)
   }
 
@@ -563,6 +563,7 @@ mc.optim <- function(par,fn,...,lower=-Inf,upper=Inf,period=FALSE,reset=identity
   # distance to next boundary
   m.box <- function(M=1)
   {
+    # STUFF <<- list(M=M,lower=lower,upper=upper,par=par,DIR.STEP=DIR.STEP)
     MB <- c(((upper-par)/(M*DIR.STEP))[M*DIR.STEP>0],((lower-par)/(M*DIR.STEP))[M*DIR.STEP<0])
     MB <- nant(MB,0)
     if(!length(MB)) { MB <- 0 }
@@ -757,7 +758,7 @@ mc.optim <- function(par,fn,...,lower=-Inf,upper=Inf,period=FALSE,reset=identity
       # search direction
       DIR.STEP <- par-par.old
       M <- sqrt(sum(DIR.STEP^2))
-      DIR.STEP <- nant(DIR.STEP/M,0)
+      DIR.STEP <- nant(DIR.STEP/M,sign(DIR.STEP))
 
       # hessian along line between centers where derivatives were calculated
       gradient.LINE <- gradient-gradient.old # canonical coordinates
@@ -871,7 +872,7 @@ mc.optim <- function(par,fn,...,lower=-Inf,upper=Inf,period=FALSE,reset=identity
     # predicted search step size
     M <- sqrt(sum(par.diff^2))
     # new search direction
-    DIR.STEP <- par.diff / M
+    DIR.STEP <- nant(par.diff/M,sign(par.diff))
 
     # distance to boundary
     M.BOX <- m.box()
@@ -890,12 +891,18 @@ mc.optim <- function(par,fn,...,lower=-Inf,upper=Inf,period=FALSE,reset=identity
 
     hessian.LINE <- c(DIR.STEP %*% hessian %*% DIR.STEP)
     gradient.LINE <- c(DIR.STEP %*% gradient)
+
     # generate a linear sequence of points from par to the other side of par.target
     P2 <- line.boxer(1.5*par.diff,p0=par,lower=lower,upper=upper,period=period)
     P1 <- line.boxer(1.0*par.diff,p0=par,lower=lower,upper=upper,period=period)
+
     M <- sqrt(sum((P1-par)^2)) # M is unsigned!
     M1 <- min(1,M/2) # 1 in case hessian is bad
     M2 <- sqrt(sum((P2-par)^2))
+
+    M <- sort(c(M1,M,M2)) # just in case
+    M1 <- M[1]; M2 <- M[3]; M <- M[2]
+
     # sample to target or boundary
     if(abs(M)<=M.BOX) # sample P1/2 to P1 to P2
     {
@@ -906,13 +913,15 @@ mc.optim <- function(par,fn,...,lower=-Inf,upper=Inf,period=FALSE,reset=identity
       n <- n-1 # remaining points
 
       # under-estimates -- proportional-ish to M-M1
-      n1 <- (M-M1)/(M2-M1)*(n+2) - 1
+      n1 <- nant((M-M1)/(M2-M1),1)*(n+2) - 1
       n1 <- clamp(n1,0+(M-M1>=STEP[STAGE]),n-(M2-M>=STEP[STAGE]))
       n1 <- round(n1)
       # over-estimates -- proportional-ish to M2-M
       n2 <- n-n1
 
-      SEQ <- c( seq(M1,M,length.out=n1+1), seq(M,M2,length.out=n2+1)[-1] )
+      n1 <- max(0,n1+1)
+      n2 <- max(0,n2+1)
+      SEQ <- c( seq(M1,M,length.out=n1), seq(M,M2,length.out=n2)[-1] )
     }
     else # sample only P2/2 to P2 to fit search within boundary
     {
@@ -1070,12 +1079,14 @@ mc.optim <- function(par,fn,...,lower=-Inf,upper=Inf,period=FALSE,reset=identity
             n <- n-1
             SEQ <- M
 
-            n1 <- (M-M1)/(M2-M1)*(n+2) - 1
+            n1 <- nant((M-M1)/(M2-M1),1)*(n+2) - 1
             n1 <- clamp(n1,0,n)
             n1 <- round(n1)
             n2 <- n-n1
 
-            SEQ <- c( seq(M1,M,length.out=n1+1)[-(n1+1)] , seq(M,M2,length.out=n2+1) )
+            n1 <- max(0,n1+1)
+            n2 <- max(0,n2+1)
+            SEQ <- c( seq(M1,M,length.out=n1)[-n1] , seq(M,M2,length.out=n2) )
           }
           else
           {
@@ -1107,7 +1118,7 @@ mc.optim <- function(par,fn,...,lower=-Inf,upper=Inf,period=FALSE,reset=identity
 
           if(n)
           {
-            n1 <- (M1)/(M2)*(n+2) - 1
+            n1 <- nant(M1/M2,1)*(n+2) - 1
             n1 <- clamp(n1,0,n)
             n1 <- round(n1)
             n2 <- n-n1
@@ -1174,7 +1185,7 @@ mc.optim <- function(par,fn,...,lower=-Inf,upper=Inf,period=FALSE,reset=identity
           M1 <- sqrt(sum((par-par.all[,MIN-1])^2))
           M2 <- sqrt(sum((par-par.all[,MIN+1])^2))
 
-          n1 <- M1/(M1+M2)*(n+2) - 1
+          n1 <- nant(M1/(M1+M2),1/2)*(n+2) - 1
           n1 <- clamp(n1,1,n-1)
           n1 <- round(n1)
           n2 <- n-n1

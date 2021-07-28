@@ -16,10 +16,23 @@ extent.list <- function(x,...)
   # list of element ranges
   RANGE <- lapply(x,function(y){extent(y,...)})
 
-  # shared columns
+  # # shared columns only
+  # COLS <- lapply(RANGE,colnames)
+  # COLS <- Reduce(intersect,COLS)
+  # RANGE <- lapply(RANGE,function(R){R[,COLS]})
+
+  # all columns
   COLS <- lapply(RANGE,colnames)
-  COLS <- Reduce(intersect,COLS)
-  RANGE <- lapply(RANGE,function(R){R[,COLS]})
+  COLS <- unlist(COLS)
+  COLS <- unique(COLS)
+  for(i in 1:length(x))
+  {
+    # fill missing columns with NAs
+    NIN <- COLS %nin% colnames(RANGE[[i]])
+    if(any(NIN)) { RANGE[[i]][,COLS[NIN]] <- NA }
+    # sort columns
+    RANGE[[i]] <- RANGE[[i]][,COLS]
+  }
 
   # concatenate ranges
   RANGE <- Reduce(rbind,RANGE)
@@ -34,14 +47,22 @@ setMethod('extent', signature(x='list'), extent.list)
 # extent of telemetry data
 extent.telemetry <- function(x,level=1,...)
 {
+  level <- max(level)
+
   alpha <- (1-level)/2
+  probs <- c(alpha,1-alpha)
   RANGE <- data.frame(row.names=c('min','max'))
 
-  COLS <- c('x','y','z','t','longitude','latitude')
+  COLS <- c('x','y','z','t','longitude','latitude','timestamp')
   for(COL in COLS)
   {
     if(COL %in% colnames(x))
-    { RANGE[[COL]] <- stats::quantile(x[[COL]],probs=c(alpha,1-alpha),na.rm=TRUE) }
+    {
+      if(COL=="longitude") # use circular statistics
+      { RANGE[[COL]] <- quantile.longitude(x[[COL]],probs=probs,na.rm=TRUE) }
+      else
+      { RANGE[[COL]] <- stats::quantile(x[[COL]],probs=probs,na.rm=TRUE) }
+    }
   }
 
   return(RANGE)
@@ -53,6 +74,8 @@ setMethod('extent', signature(x='data.frame'), extent.telemetry)
 # extent of matrix/extent
 extent.matrix <- function(x,level=1,...)
 {
+  level <- max(level)
+
   NAMES <- colnames(x)
   x <- data.frame(x)
   colnames(x) <- NAMES # preserve NULL
@@ -64,6 +87,9 @@ setMethod('extent', signature(x='matrix'), extent.matrix)
 # range of Gaussian contours
 extent.ctmm <- function(x,level=0.95,level.UD=0.95,...)
 {
+  level <- max(level)
+  level.UD <- max(level.UD)
+
   if(is.null(x$mu)) { stop("This model has no mean location. Try ctmm.guess.") }
 
   alpha <- 1 - level
@@ -98,6 +124,9 @@ setMethod('extent', signature(x='ctmm'), extent.ctmm)
 # range of UD contours
 extent.UD <- function(x,level=0.95,level.UD=0.95,complete=FALSE,...)
 {
+  level <- max(level)
+  level.UD <- max(level.UD)
+
   PROJ <- attr(x,"info")$projection
 
   if(level.UD==1 || (!is.na(level) && level==1 && !is.null(x$DOF.area)))
@@ -130,7 +159,7 @@ extent.UD <- function(x,level=0.95,level.UD=0.95,complete=FALSE,...)
     row.names(RANGE) <- c("min","max")
 
     R <- project(R,from=PROJ)
-    RANGE$longitude <- range(R[,1])
+    RANGE$longitude <- quantile.longitude(R[,1],probs=c(0,1)) # circular extent
     RANGE$latitude <- range(R[,2])
   }
   else # faster code
@@ -166,6 +195,8 @@ setMethod('extent', signature(x='UD'), extent.UD)
 # extent of a variogram object
 extent.variogram <- function(x,level=0.95,threshold=2,...)
 {
+  level <- max(level)
+
   alpha <- 1-level
   max.lag <- last(x$lag)
   ACF <- !is.null(attr(x,"info")$ACF)

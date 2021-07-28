@@ -1,4 +1,4 @@
-# interpolate vector by continuous index
+# interpolate vector by continuous index (vectorized by index)
 # vec is a vector, ind is a continuous index
 vint <- function(vec,ind,return.ind=FALSE)
 {
@@ -8,48 +8,51 @@ vint <- function(vec,ind,return.ind=FALSE)
   hi <- ceiling(ind)
 
   # extrapolate
-  lo <- max(1,lo)
-  hi <- max(2,hi)
+  lo <- pmax(1,lo)
+  hi <- pmax(2,hi)
   # extrapolate
-  lo <- min(n-1,lo)
-  hi <- min(n,hi)
+  lo <- pmin(n-1,lo)
+  hi <- pmin(n,hi)
 
-  if(return.ind) { return(c(lo,hi)) }
+  if(return.ind) { return(rbind(lo,hi)) }
 
-  IND <- abs(vec[c(lo,hi)])
-  if(any(IND==Inf))
-  {
-    IND <- which.max(IND)
-    return(vec[c(lo,hi)[IND]])
-  }
+  # IND <- abs(vec[c(lo,hi)])
+  # if(any(IND==Inf))
+  # {
+  #   IND <- which.max(IND)
+  #   return(vec[c(lo,hi)[IND]])
+  # }
 
   # linear interpolation
   vec <- vec[lo] + (vec[hi]-vec[lo])*(ind-lo)
 
+  # fix NaNs (should be +/- Inf)
+  INF <- abs(lo)==Inf
+  if(any(INF)) { vec[INF] <- lo[INF] }
+  INF <- abs(hi)==Inf
+  if(any(INF)) { vec[INF] <- hi[INF] }
+
   return(vec)
 }
 
-# same thing as above but with a block-vector
+# same thing as above but with a block-vector mat
 mint <- function(mat,ind)
 {
   IND <- vint(mat[1,],ind,return.ind=TRUE)
-  mat <- mat[,IND[1]] + (mat[,IND[2]]-mat[,IND[1]])*(ind-IND[1])
+  mat <- mat[,IND[1,]] + (mat[,IND[2,]]-mat[,IND[1,]])*(ind-IND[1,])
   return(mat)
 }
 
 # bi-linear interpolation
 bint <- function(X,ind)
 {
-  # subset to 4x4 inclusion square
-  IND <- vint(X[,1],ind[1],return.ind=TRUE)
-  X <- X[IND[1],]
-  IND[2] <- vint(X[1,],ind[2],return.ind=TRUE)
-  X <- X[,IND[2]]
+  ind <- cbind(ind) # vectorize
 
-  X <- X[1,] + (X[1,2]-X[1,1])*(ind[1]-IND[1])
-  X <- X[1] + (X[2]-X[1])*(ind[2]-IND[2])
-
-  return(X)
+  # interpolate first index
+  IND <- vint(X[,1],ind[1,],return.ind=TRUE)
+  X <- X[IND[1,],] + (X[IND[2,],]-X[IND[1,],])*(ind[1,]-IND[1,])
+  # first index collapsed
+  vint(X,ind[2,])
 }
 
 
@@ -420,7 +423,7 @@ tnorm.hdr <- function(mu=0,VAR=1,lower=0,upper=Inf,level=0.95)
 
 
 # inverse Gaussian CIs
-IG.CI <- function(mu,VAR,k=VAR/mu^3,level=0.95,precision=1/2)
+IG.ci <- function(mu,VAR,k=VAR/mu^3,level=0.95,precision=1/2)
 {
   if(k==Inf)
   { CI <- c(0,mu,Inf) }
@@ -438,6 +441,41 @@ IG.CI <- function(mu,VAR,k=VAR/mu^3,level=0.95,precision=1/2)
   { CI <- c(mu,mu,mu) }
   names(CI) <- NAMES.CI
   return(CI)
+}
+
+
+# CI that are chi^2 when VAR[M]>>VAR.pop
+chisq.IG.ci <- function(M,VAR,w,level=0.95,precision=1/2)
+{
+  w <- c(1-w,w)
+
+  # approximation that bridges the two with correct mean and variance
+  CI.1 <- chisq.ci(M,VAR=VAR,level=level)
+  CI.2 <- IG.ci(M,VAR=VAR,level=level,precision=precision)
+
+  CI <- w[1]*CI.1 + w[2]*CI.2
+
+  # TODO make the second term some kind of GIG?
+  CI[3] <- nant(CI[3],Inf)
+
+  return(CI)
+}
+
+# Dirac-delta to inverse-Gaussian ratio in sampling distribution
+# par = (mu,k=1/lambda)
+# VAR = VAR[mu]
+DD.IG.ratio <- function(par,VAR,n)
+{
+  mu <- par[1]
+  # population moments
+  theta <- 1/prod(par[1:2]); rho <- 1
+  M.pop <- mu * (besselK(theta,rho/2-1,expon.scaled=TRUE)/besselK(theta,rho/2,expon.scaled=TRUE))
+  VAR.pop <- mu^2 * (besselK(theta,rho/2-2,expon.scaled=TRUE)/besselK(theta,rho/2,expon.scaled=TRUE)) - M.pop^2
+  # chi^2 VAR.pop==0
+  # IG when VAR==VAR.pop/n
+  DRATIO <- VAR.pop/VAR # (0,n) : (chi^2,IG)
+  DRATIO <- clamp(DRATIO,0,n) / n # (0,1) : (chi^2,IG)
+  DRATIO
 }
 
 
@@ -479,4 +517,14 @@ F.CI <- function(E1,VAR1,E2,VAR2,level=0.95)
   names(CI) <- NAMES.CI
 
   return(CI)
+}
+
+
+# reduced chi^2 log likelihood for s=1
+loglike.chisq <- function(sigma,dof,constant=FALSE)
+{
+  df2 <- dof/2
+  R <- - df2*(log(sigma)+1/sigma)
+  if(constant) { R <- R + df2*log(df2) - lgamma(df2) }
+  return(R)
 }

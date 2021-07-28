@@ -3,13 +3,13 @@
 ################################
 # Return hidden state estimates or simulations
 ################################
-smoother <- function(DATA,CTMM,precompute=FALSE,sample=FALSE,residual=FALSE,...)
+smoother <- function(data,CTMM,precompute=FALSE,sample=FALSE,residual=FALSE,...)
 {
-  if(is.null(CTMM$error.mat)) { CTMM <- ctmm.prepare(DATA,CTMM) }
-  if(is.null(DATA$record)) { DATA$record <- TRUE } # real recorded data or blank/empty timestamps from fill-data
+  if(is.null(CTMM$error.mat)) { CTMM <- ctmm.prepare(data,CTMM) }
+  if(is.null(data$record)) { data$record <- TRUE } # real recorded data or blank/empty timestamps from fill-data
   AXES <- length(CTMM$axes)
 
-  t <- DATA$t
+  t <- data$t
 
   dt <- c(Inf,diff(t))
   n <- length(t)
@@ -29,20 +29,40 @@ smoother <- function(DATA,CTMM,precompute=FALSE,sample=FALSE,residual=FALSE,...)
 
   ####################################
   # PRECOMPUTE AVOIDS WASTEFUL ROTATIONS & TRANSFORMATIONS
-  STUFF <- c("z","ROTATE","SQUEEZE","error","UERE","DIM","R")
+  STUFF <- c("z","ROTATE","SQUEEZE","error","DIM","R")
   if(precompute>=0) # calculate new
   {
     # get the error information
     error <- CTMM$error.mat # note for fitted errors, this is error matrix @ UERE=1 (CTMM$error)
-    UERE <- attr(error,"flag")
-    # are we fitting the error, then the above is not yet normalized.
-    if(UERE && UERE<3) { error <- error * CTMM$error } # set UERE value if necessary
+    class <- CTMM$class.mat
+    ELLIPSE <- attr(error,"ellipse") # do we need error ellipses?
+    TYPE <- DOP.match(CTMM$axes)
+    UERE.DOF <- attr(data,"UERE")$DOF[,TYPE]
+    names(UERE.DOF) <- rownames(attr(data,"UERE")$DOF)
+    UERE.FIT <- CTMM$error>0 & !is.na(UERE.DOF) & UERE.DOF<Inf # will we be fitting any error parameters?
 
-    if(UERE>=4 || (!isotropic && circle && UERE) || ECC.EXT) { DIM <- 2 } # requires 2D smoother
-    else if(!isotropic & UERE) { DIM <- 1/2 } # requires 2x1D smoothers
+    # don't try to fit error class parameters absent from data
+    if(any(CTMM$error>0) && "class" %in% names(data))
+    {
+      LEVELS <- levels(data$class)
+      UERE.DOF <- UERE.DOF[LEVELS]
+      UERE.FIT <- UERE.FIT[LEVELS]
+      # CTMM$error <- CTMM$error[LEVELS]
+    }
+
+    # are we fitting the error, then the above is not yet normalized.
+    if(any(UERE.FIT)) # calibrate errors
+    {
+      class <- c( class %*% CTMM$error^2 )
+      error[] <- class * error
+    }
+    rm(class)
+
+    if(ELLIPSE || (!isotropic && circle && any(CTMM$error>0)) || (ECC.EXT && AXES>1)) { DIM <- 2 } # requires 2D smoother
+    else if(!isotropic & any(CTMM$error>0)) { DIM <- 1/2 } # requires 2x1D smoothers
     else { DIM <- 1 } # can use 1x1D smoother
 
-    z <- get.telemetry(DATA,CTMM$axes)
+    z <- get.telemetry(data,CTMM$axes)
     # u <- CTMM$mean.vec
     # mu <- CTMM$mu
 
@@ -53,7 +73,7 @@ smoother <- function(DATA,CTMM,precompute=FALSE,sample=FALSE,residual=FALSE,...)
       z <- rotate.vec(z,-theta)
       sigma <- rotate.covm(sigma,-theta)
 
-      if(UERE>=4) { error <- rotate.mat(error,-theta) } # rotate error ellipses
+      if(ELLIPSE) { error <- rotate.mat(error,-theta) } # rotate error ellipses
     }
 
     # squeeze from ellipse to circle
@@ -63,14 +83,14 @@ smoother <- function(DATA,CTMM,precompute=FALSE,sample=FALSE,residual=FALSE,...)
       z <- squeeze(z,smgm)
       sigma <- squeeze.covm(sigma,circle=TRUE)
 
-      if(UERE) { error <- squeeze.mat(error,smgm) } # squeeze error circles into ellipses
+      if(any(CTMM$error>0)) { error <- squeeze.mat(error,smgm) } # squeeze error circles into ellipses
     }
 
     if(circle) ## COROTATING FRAME FOR circle=TRUE ##
     {
       R <- rotates(-circle*(t-t[1])) # rotation matrices
       z <- rotates.vec(z,R)
-      if(UERE>=4 || (UERE && SQUEEZE)) { error <- rotates.mat(error,R) }
+      if(ELLIPSE || (any(CTMM$error>0) && SQUEEZE)) { error <- rotates.mat(error,R) }
       # prepare R for inverse transformation
       R <- aperm(R,c(1,3,2))
     }
@@ -80,7 +100,7 @@ smoother <- function(DATA,CTMM,precompute=FALSE,sample=FALSE,residual=FALSE,...)
     # fix variances of empty timestamps - set from fill.data
     if(!residual)
     {
-      empty <- which(!DATA$record)
+      empty <- which(!data$record)
       if(length(empty)) { error[empty,,] <- aperm( array(diag(Inf,dim(error)[2]),c(dim(error)[2:3],length(empty))) ,c(3,1,2)) } # R is weird
       rm(empty)
     }
@@ -318,7 +338,7 @@ fill.data <- function(data,CTMM=ctmm(tau=Inf),verbose=FALSE,t=NULL,dt=NULL,res=1
     REPEAT <- which(diff(t.grid)==0)
     w.grid[REPEAT] <- w.grid[REPEAT]/2
     w.grid[REPEAT+1] <- w.grid[REPEAT+1]/2
-  }
+  } # end if is.null(t)
   else # use a pre-specified time grid
   {
     t.new <- t[!(t %in% data$t)]
@@ -451,24 +471,52 @@ occurrence <- function(data,CTMM,H=0,res.time=10,res.space=10,grid=NULL,cor.min=
 
 ##############################################
 # SIMULATE DATA over time array t
-simulate.ctmm <- function(object,nsim=1,seed=NULL,data=NULL,t=NULL,dt=NULL,res=1,complete=FALSE,precompute=FALSE,...)
+simulate.ctmm <- function(object,nsim=1,seed=NULL,data=NULL,VMM=NULL,t=NULL,dt=NULL,res=1,complete=FALSE,precompute=FALSE,...)
 {
+  T.SPECIFIED <- !is.null(t)
+
+  info <- attr(object,"info")
+  if(!is.null(data)) { info$identity <- glue( attr(data,'info')$identity , info$identity ) }
+
   if(class(nsim)[1] %in% c("data.frame","telemetry"))
   {
     data <- nsim
     nsim <- 1
   }
 
+  if(is.null(object) && !is.null(VMM)) # 1D
+  {
+    object <- VMM
+    VMM <- NULL
+  }
+  else if(!is.null(object) && !is.null(VMM)) # 3D
+  {
+    # combine results (lazy code, calculates time grid twice)
+    OUT <- simulate.ctmm(object,nsim=nsim,seed=seed,data=data,t=t,dt=dt,res=res,...)
+    ZOUT <- simulate.ctmm(VMM,nsim=nsim,seed=seed,data=data,t=t,dt=dt,res=res,...)
+    data <- cbind(OUT,ZOUT[,-1]) # drop redundant time column
+    rm(OUT,ZOUT)
+
+    data <- new.telemetry(data,info=info)
+    if(complete) { data <- pseudonymize(data,tz=info$timezone,proj=info$projection,origin=EPOCH) }
+
+    attr(data,"UERE") <- uere.null(data)
+    attr(data,"UERE")$UERE[] <- 0
+    attr(data,"UERE")$DOF[] <- Inf
+    attr(data,"UERE")$N[] <- Inf
+
+    return(data)
+  }
+  # 1-2D below
+
+  axes <- object$axes
+  AXES <- length(axes)
+
   # no movement model
-  if(is.null(object)) { object <- ctmm(sigma=0,mu=c(0,0),error=TRUE) }
+  if(is.null(object)) { object <- ctmm(sigma=0,mu=rep(0,AXES),error=TRUE) }
   ZERO <- all(diag(object$sigma)==0) # no movement model logical
 
   if(!is.null(seed)){ set.seed(seed) }
-
-  info <- attr(object,"info")
-  if(!is.null(data)) { info$identity <- glue( attr(data,'info')$identity , info$identity ) }
-  axes <- object$axes
-  AXES <- length(axes)
 
   CLASS <- class(data)[1]
   CONDITIONAL <- FALSE
@@ -515,37 +563,25 @@ simulate.ctmm <- function(object,nsim=1,seed=NULL,data=NULL,t=NULL,dt=NULL,res=1
     data <- cbind(t=data$t,data$R,data$V)
     data <- data.frame(data)
 
-    # # the user probably only wants times t if t is specified
-    # other stuff seems to be coded for uniform sampling...
-    # if(!is.null(t))
-    # {
-    #   DEBUG <<- list(data=data,t=t)
-    #   WHICH <- logical(length(data$t))
-    #   i <- 1 ; j <- 1
-    #   while(j < length(data$t))
-    #   {
-    #     if(t[i]==data$t[j])
-    #     {
-    #       WHICH[j] <- TRUE
-    #       i <- i + 1
-    #     }
-    #     j <- j + 1
-    #   }
-    #   data <- data[WHICH,]
-    # }
+    # the user probably only wants times t if t is specified
+    if(T.SPECIFIED)
+    {
+      WHICH <- data$t %in% t # I'm assuming R is coded to do a respectable sort match
+      data <- data[WHICH,]
+    }
 
   } # conditional simulation
   else # Gaussian simulation not conditioned off of any data
   {
-    STUFF <- c('Green','Sigma','error','object','mu','Lambda','n','K','z','v','circle','R','UERE')
+    STUFF <- c('Green','Sigma','error','object','mu','Lambda','n','K','z','v','circle','R')
     if(precompute>=0)
     {
       if(is.null(data))
-      { error <- UERE <- FALSE }
+      { error <- ELLIPSE <- FALSE }
       else # get error if provided
       {
-        error <- get.error(data,object)
-        UERE <- attr(error,'flag')
+        error <- get.error(data,object,calibrate=TRUE)
+        ELLIPSE <- attr(error,'ellipse')
       }
       object <- ctmm.prepare(data.frame(t=t),object) # mean.vec calculated here
 
@@ -559,7 +595,7 @@ simulate.ctmm <- function(object,nsim=1,seed=NULL,data=NULL,t=NULL,dt=NULL,res=1
       else # have model
       {
         tau <- object$tau
-        if(is.null(tau)) { tau = 0 }
+        if(length(tau)==0) { tau = 0 }
         K <- length(tau)
 
         mu <- object$mu
@@ -602,9 +638,9 @@ simulate.ctmm <- function(object,nsim=1,seed=NULL,data=NULL,t=NULL,dt=NULL,res=1
       } # end if(!is.null(object))
 
       # pre-compute error matrices
-      if(UERE && UERE<=3) # circular errors
+      if(any(object$error>0) && !ELLIPSE) # circular errors
       { error <- sqrt(error) }
-      else if(UERE) # eliptical errors
+      else if(ELLIPSE) # eliptical errors
       {
         error <- vapply(1:n, function(i){sqrtm(error[i,,])}, diag(2)) # (2,2,n)
         error <- aperm(error,c(3,1,2)) # (n,2,2)
@@ -656,11 +692,11 @@ simulate.ctmm <- function(object,nsim=1,seed=NULL,data=NULL,t=NULL,dt=NULL,res=1
     } # end if(!is.null(object))
 
     # throw in error
-    if(UERE)
+    if(any(object$error>0))
     {
-      if(UERE<=3) # circular errors
+      if(!ELLIPSE) # circular errors
       { error <- error * array(stats::rnorm(n*length(axes)),c(n,length(axes))) }
-      else # eliptical errors # can we do this with one 2n column product?
+      else # elliptical errors # can we do this with one 2n column product?
       {
         error <- vapply(1:n, function(i){error[i,,] %*% stats::rnorm(2)}, c(0,0) )
         error <- t(error)
@@ -670,7 +706,7 @@ simulate.ctmm <- function(object,nsim=1,seed=NULL,data=NULL,t=NULL,dt=NULL,res=1
     }
 
     # restore error columns if we simulated error
-    if(is.null(data) || !UERE)
+    if(is.null(data) || !any(object$error>0))
     {
       data <- cbind(t=t,z,v)
       data <- data.frame(data)
@@ -683,13 +719,23 @@ simulate.ctmm <- function(object,nsim=1,seed=NULL,data=NULL,t=NULL,dt=NULL,res=1
   } # Gaussian simulation
 
   data <- new.telemetry(data,info=info)
-  if(complete) { data <- pseudonymize(data,tz=info$timezone,proj=info$projection,origin=EPOCH)  }
+  if(complete)
+  {
+    if(axes=='z') { stop("(x,y) locations must also be simulated for complete=TRUE.") }
+    data <- pseudonymize(data,tz=info$timezone,proj=info$projection,origin=EPOCH)
+  }
+
+  attr(data,"UERE") <- uere.null(data)
+  attr(data,"UERE")$UERE[] <- 0
+  attr(data,"UERE")$DOF[] <- Inf
+  attr(data,"UERE")$N[] <- Inf
+
   return(data)
 }
 #methods::setMethod("simulate",signature(object="ctmm"), function(object,...) simulate.ctmm(object,...))
 
 
-simulate.telemetry <- function(object,nsim=1,seed=NULL,CTMM=NULL,t=NULL,dt=NULL,res=1,complete=FALSE,precompute=FALSE,...)
+simulate.telemetry <- function(object,nsim=1,seed=NULL,CTMM=NULL,VMM=NULL,t=NULL,dt=NULL,res=1,complete=FALSE,precompute=FALSE,...)
 {
   if(class(nsim)[1]=="ctmm")
   {
@@ -697,17 +743,43 @@ simulate.telemetry <- function(object,nsim=1,seed=NULL,CTMM=NULL,t=NULL,dt=NULL,
     nsim <- 1
   }
 
-  simulate.ctmm(CTMM,nsim=nsim,seed=seed,data=object,t=t,dt=dt,res=res,complete=complete,precompute=precompute,...)
+  simulate.ctmm(CTMM,nsim=nsim,seed=seed,data=object,VMM=VMM,t=t,dt=dt,res=res,complete=complete,precompute=precompute,...)
 }
 
 
 ##########################
-# predict locations at certaint times !!! make times unique
+# predict locations at certain times !!! make times unique
 ##########################
-predict.ctmm <- function(object,data=NULL,t=NULL,dt=NULL,res=1,complete=FALSE,...)
+predict.ctmm <- function(object,data=NULL,VMM=NULL,t=NULL,dt=NULL,res=1,complete=FALSE,...)
 {
   info <- attr(object,"info")
   if(!is.null(data)) { info$identity <- glue( attr(data,'info')$identity , info$identity ) }
+
+  if(is.null(object) && !is.null(VMM)) # 1D
+  {
+    object <- VMM
+    VMM <- NULL
+  }
+  else if(!is.null(object) && !is.null(VMM)) # 3D
+  {
+    # combine results (lazy code, calculates time grid twice)
+    OUT <- predict.ctmm(object,data=data,t=t,dt=dt,res=res,...)
+    ZOUT <- predict.ctmm(VMM,data=data,t=t,dt=dt,res=res,...)
+    data <- cbind(OUT,ZOUT[,-1]) # drop redundant time column
+    rm(OUT,ZOUT)
+
+    data <- new.telemetry(data,info=info)
+    if(complete) { data <- pseudonymize(data,tz=info$timezone,proj=info$projection,origin=EPOCH) }
+
+    attr(data,"UERE") <- uere.null(data)
+    attr(data,"UERE")$UERE[] <- 1
+    attr(data,"UERE")$DOF[] <- Inf
+    attr(data,"UERE")$N[] <- Inf
+
+    return(data)
+  }
+  # 1-2D below
+
   axes <- object$axes
 
   # Gaussian simulation not conditioned off of any data
@@ -818,9 +890,19 @@ predict.ctmm <- function(object,data=NULL,t=NULL,dt=NULL,res=1,complete=FALSE,..
   }
 
   data <- new.telemetry(data,info=info)
-  if(complete) { data <- pseudonymize(data,tz=info$timezone,proj=info$projection,origin=EPOCH)  }
+  if(complete)
+  {
+    if(axes=='z') { stop("(x,y) locations must also be predicted for complete=TRUE.") }
+    data <- pseudonymize(data,tz=info$timezone,proj=info$projection,origin=EPOCH)
+  }
+
+  attr(data,"UERE") <- uere.null(data)
+  attr(data,"UERE")$UERE[] <- 1
+  attr(data,"UERE")$DOF[] <- Inf
+  attr(data,"UERE")$N[] <- Inf
+
   return(data)
 }
 
-predict.telemetry <- function(object,CTMM=NULL,t=NULL,dt=NULL,res=1,complete=FALSE,...)
-{ predict.ctmm(CTMM,data=object,t=t,dt=dt,res=res,complete=complete,...) }
+predict.telemetry <- function(object,CTMM=NULL,VMM=NULL,t=NULL,dt=NULL,res=1,complete=FALSE,...)
+{ predict.ctmm(CTMM,data=object,VMM=VMM,t=t,dt=dt,res=res,complete=complete,...) }

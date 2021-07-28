@@ -11,7 +11,6 @@ zoom.telemetry <- function(x,fraction=1,...)
 methods::setMethod("zoom",signature(x="telemetry"), function(x,fraction=1,...) zoom.telemetry(x,fraction=fraction,...))
 methods::setMethod("zoom",signature(x="UD"), function(x,fraction=1,...) zoom.telemetry(x,fraction=fraction,...))
 
-
 ##############
 new.plot <- function(data=NULL,CTMM=NULL,UD=NULL,level.UD=0.95,level=0.95,units=TRUE,fraction=1,add=FALSE,xlim=NULL,ylim=NULL,ext=NULL,...)
 {
@@ -148,7 +147,11 @@ plot.telemetry <- function(x,CTMM=NULL,UD=NULL,level.UD=0.95,level=0.95,DF="CDF"
   # are we plotting residuals?
   RESIDUALS <- !is.null(x) && !is.null(attr(x[[1]],"info")$residual)
   # standard normal model
-  if(RESIDUALS) { CTMM <- list(ctmm(sigma=1,mu=c(0,0))) }
+  if(RESIDUALS)
+  {
+    error <- FALSE
+    CTMM <- list(ctmm(sigma=1,mu=c(0,0)))
+  }
 
   dist <- new.plot(data=x,CTMM=CTMM,UD=UD,level.UD=level.UD,level=level,units=units,fraction=fraction,add=add,xlim=xlim,ylim=ylim,ext=ext,...)
 
@@ -205,26 +208,10 @@ plot.telemetry <- function(x,CTMM=NULL,UD=NULL,level.UD=0.95,level=0.95,DF="CDF"
   #########################
   # PLOT TELEMETRY DATA
 
-  # prepare point characteristics
-  prepare.p <- function(pchar,all=FALSE)
-  {
-    if(!is.list(pchar))
-    {
-      if(length(x)>1)
-      {
-        pchar <- array(pchar,length(x))
-        pchar <- as.list(pchar)
-      }
-      else if(!all)
-      { pchar <- list(array(pchar,length(x[[1]]$t))) }
-    }
-    return(pchar)
-  }
-
-  col <- prepare.p(col)
-  pch <- prepare.p(pch)
-  lwd <- prepare.p(lwd)
-  type <- prepare.p(type,all=TRUE)
+  col <- format.par(col,x)
+  pch <- format.par(pch,x)
+  lwd <- format.par(lwd,x)
+  type <- format.par(type,x,all=TRUE)
   error <- rep(error,length(x))
 
   # automagic the plot point size
@@ -233,7 +220,7 @@ plot.telemetry <- function(x,CTMM=NULL,UD=NULL,level.UD=0.95,level=0.95,DF="CDF"
     p <- sum(sapply(x, function(d) { length(d$t) } ))
     if(p>1000) { cex <- 1000/p } else { cex <- 1 }
   }
-  cex <- prepare.p(cex)
+  cex <- format.par(cex,x)
 
   # standard deviations to plot for circle/ellipse
   z <- sqrt(-2*log(alpha.UD))
@@ -248,14 +235,22 @@ plot.telemetry <- function(x,CTMM=NULL,UD=NULL,level.UD=0.95,level=0.95,DF="CDF"
     r <- x[[i]][,c('x','y')]
 
     # scaled error info
-    ERROR <- get.error(x[[i]],list(error=TRUE,axes=c('x','y')))
-    # don't want to throw z in here yet, in case of kernels
-    FLAG <- attr(ERROR,"flag") # nothing, circle or ellipse?
-    if(FLAG && FLAG<=2) { ERROR <- ERROR * (10/get('x.scale',pos=plot.env))^2 } # 10 meter default error
+    if(error[i] && is.calibrated(x[[i]])<1) { uere(x[[i]]) <- uere(x[[i]]) } # force calibration for plotting
+
+    if(error[i])
+    {
+      UERE <- uere(x[[i]])
+      ERROR <- UERE$UERE[,'horizontal']
+      names(ERROR) <- rownames(UERE$UERE) # R drops dimnames
+      ERROR <- ctmm(error=ERROR,axes=c('x','y'))
+      ERROR <- get.error(x[[i]],ERROR,calibrate=TRUE)
+      # don't want to throw z in here yet, in case of kernels
+      ELLIPSE <- length(dim(ERROR))>0 # circle or ellipse?
+    }
 
     # we aren't plotting if UERE is missing
     # error=FALSE or no UERE
-    if(!error[i] || FLAG<=1) # DEFAULT POINTS
+    if(!error[i] || all(attr(x[[i]],"UERE")$UERE[,'horizontal']==0)) # DEFAULT POINTS
     { graphics::points(r, cex=cex[[i]], col=col[[i]], pch=pch[[i]], type=type[[i]], lwd=lwd[[i]], ...) }
     else if(error[i]<3) # CIRCLE/ELLIPSE
     {
@@ -319,13 +314,13 @@ plot.telemetry <- function(x,CTMM=NULL,UD=NULL,level.UD=0.95,level=0.95,DF="CDF"
       }
 
       # plot circle
-      if(FLAG<4)
+      if(!ELLIPSE)
       {
         # convert to radii
         ERROR <- z * sqrt(ERROR)
         graphics::symbols(x=r$x,y=r$y,circles=ERROR,fg=fg,bg=bg,inches=FALSE,add=TRUE,lwd=lwd[[i]],...)
       }
-      else if(FLAG==4)
+      else if(ELLIPSE)
       {
         if(length(lwd[[i]])<nrow(r)) { lwd[[i]] <- rep(lwd[[i]],nrow(r)) }
         for(j in 1:nrow(r)) { ellipsograph(mu=as.numeric(r[j,]),sigma=ERROR[j,,],level=level.UD,fg=fg[j],bg=bg[j],lwd=lwd[[i]][j],...) }
@@ -373,12 +368,37 @@ plot.telemetry <- function(x,CTMM=NULL,UD=NULL,level.UD=0.95,level=0.95,DF="CDF"
 #methods::setMethod("plot",signature(x="telemetry"), function(x,...) plot.telemetry(x,...))
 
 
+# format point characteristics for dataset x
+format.par <- function(pchar,x,all=FALSE)
+{
+  if(!is.list(pchar))
+  {
+    if(length(x)>1)
+    {
+      pchar <- array(pchar,length(x))
+      pchar <- as.list(pchar)
+    }
+    else if(!all)
+    { pchar <- list(array(pchar,length(x[[1]]$t))) }
+  }
+  return(pchar)
+}
+
+
+# get par that may be a constant or variable
+pull <- function(pchar,i)
+{
+  if(length(pchar)>1) { pchar <- pchar[i] }
+  return(pchar)
+}
+
+
 ##############
 plot.UD <- function(x,level.UD=0.95,level=0.95,DF="CDF",units=TRUE,col.level="black",col.DF="blue",col.grid="white",labels=NULL,fraction=1,add=FALSE,xlim=NULL,ylim=NULL,ext=NULL,cex=NULL,lwd=1,...)
 {
   x <- listify(x)
 
-  dist <- new.plot(UD=x,units=units,fraction=fraction,add=add,xlim=xlim,ylim=ylim,ext=ext,level.UD=level.UD,level=level,...)
+  dist <- new.plot(UD=x,units=units,fraction=fraction,add=add,xlim=xlim,ylim=ylim,ext=ext,level.UD=level.UD,level=level,cex=cex,...)
 
   # contours colour
   if(length(col.level)==length(level.UD) && length(col.level) != length(x))

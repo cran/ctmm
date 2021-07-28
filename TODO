@@ -1,11 +1,19 @@
 PRIORITY
+* Phylo: implement IID by hand
+* Phylo: pre-condition OUF with OU
+* Phylo: link function support
+* empirical Fisher information approximation for initializing the Hessian?
+* color -> weight telemetry data by time, by individual?
+* make QPQ.solve() work without environment (for other packages)
+* track updating for elliptical errors (additive errors or overall update?)
+* ctmm.select(...,IC="BCV",block=1 %#% 'day')
+* plot(telemetry,ctmm) fails for plain vector ctmm$mu
+* optimizer compare par to par/parscale==1 for scale parameters and reset Hessian if far away
 * akde on fit with DOF=0 error()
 * overlap VAR
-* meta list output
 * zoom needs CTMM argument named? No gear comes up then?
 * consistent grids with different resolutions (power of 2 relation; padding; etc.)
 * automatic timeformat (non-default argument)
-* store RMS UERE approxmation (1 or 10 meters) on import
 * errors on 0-1 locations -> initial functions: ctmm.guess, ctmm.fit, variogram, ...
 * 3D plots of 2D UDs
 * optimize REML correction?
