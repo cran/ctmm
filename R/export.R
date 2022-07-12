@@ -2,6 +2,7 @@
 # create a raster of the ML akde
 raster.UD <- function(x,DF="CDF",...)
 {
+  proj <- attr(x,"info")$projection
   UD <- x
 
   dx <- UD$dr[1]
@@ -13,16 +14,27 @@ raster.UD <- function(x,DF="CDF",...)
   ymn <- UD$r$y[1]-dy/2
   ymx <- last(UD$r$y)+dy/2
 
+  z <- UD$r$z
+
   # probability mass for the cells
   if(DF=="PMF")
+  { UD <- UD[["PDF"]] * prod(UD$dr) }
+  else
+  { UD <- UD[[DF]] }
+
+  if(length(dim(UD))==2)
   {
-    DF <- "PDF"
-    UD[[DF]] <- UD[[DF]] * prod(UD$dr)
+    UD <- t(UD[,dim(UD)[2]:1])
+    R <- raster::raster(UD,xmn=xmn,xmx=xmx,ymn=ymn,ymx=ymx,crs=proj)
+  }
+  else
+  {
+    UD <- aperm(UD[,dim(UD)[2]:1,],c(2,1,3))
+    R <- raster::brick(UD,xmn=xmn,xmx=xmx,ymn=ymn,ymx=ymx,crs=proj)
+    R <- raster::setZ(R,z,name="height")
   }
 
-  Raster <- raster::raster(t(UD[[DF]][,dim(UD[[DF]])[2]:1]),xmn=xmn,xmx=xmx,ymn=ymn,ymx=ymx,crs=attr(UD,"info")$projection)
-
-  return(Raster)
+  return(R)
 }
 methods::setMethod("raster",signature(x="UD"), function(x,DF="CDF",...) raster.UD(x,DF=DF,...))
 
@@ -46,7 +58,7 @@ inside <- function(A,B)
 
 
 ##############
-SpatialPolygonsDataFrame.UD <- function(object,level.UD=0.95,level=0.95,...)
+SpatialPolygonsDataFrame.UD <- function(object,convex=FALSE,level.UD=0.95,level=0.95,...)
 {
   UD <- object
 
@@ -55,7 +67,7 @@ SpatialPolygonsDataFrame.UD <- function(object,level.UD=0.95,level=0.95,...)
   ID <- NULL
   for(i in 1:length(level.UD))
   {
-    p <- CI.UD(UD,level.UD[i],level,P=TRUE)
+    p <- CI.UD(UD,level.UD[i],level,P=TRUE,convex=convex)
     P <- cbind(P,p)
     ID <- cbind(ID,paste(UD@info$identity," ",round(100*level.UD[i]),"% ",names(p),sep=""))
   }
@@ -71,6 +83,16 @@ SpatialPolygonsDataFrame.UD <- function(object,level.UD=0.95,level=0.95,...)
 
     if(length(CL)==0) # nuge sp to make a contour
     { CL <- grDevices::contourLines(UD$r,z=UD$CDF,levels=P[i]*(1+.Machine$double.eps)) }
+
+    if(convex)
+    {
+      xy <- NULL
+      for(cl in CL) { xy <- rbind(xy, cbind(x=cl$x,y=cl$y) ) }
+      SUB <- grDevices::chull(xy) # convex hull indices
+      xy <- xy[SUB,] # convex hull points
+      # format like contourLines output
+      CL <- list( list(level=P[i],x=xy[,'x'],y=xy[,'y']) )
+    }
 
     # create contour heirarchy matrix (half of it)
     H <- array(0,c(1,1)*length(CL))
@@ -114,12 +136,12 @@ SpatialPolygonsDataFrame.UD <- function(object,level.UD=0.95,level=0.95,...)
 
 
 ################
-writeShapefile.UD <- function(object,folder,file=NULL,level.UD=0.95,level=0.95,...)
+writeShapefile.UD <- function(object,folder,file=NULL,convex=FALSE,level.UD=0.95,level=0.95,...)
 {
   UD <- object
   if(is.null(file)) { file <- attr(object,"info")$identity }
 
-  SP <- SpatialPolygonsDataFrame.UD(UD,level.UD=level.UD,level=level)
+  SP <- SpatialPolygonsDataFrame.UD(UD,convex=convex,level.UD=level.UD,level=level)
 
   rgdal::writeOGR(SP, dsn=folder, layer=file, driver="ESRI Shapefile",...)
 }
@@ -172,6 +194,7 @@ SpatialPolygonsDataFrame.telemetry <- function(object,level.UD=0.95,...)
 {
   object <- listify(object)
   identity <- unlist(sapply(object,function(o){ rep(attr(o,"info")$identity,length(o$t)) }))
+  if(!length(identity)) { identity <- 1:length(object) }
   # sp does something weird to POSIXct columns -> character
   timestamp <- do.call(c,lapply(object,function(o){ paste(o$timestamp,attr(o,"info")$timezone) }))
 
@@ -200,6 +223,12 @@ SpatialPolygonsDataFrame.telemetry <- function(object,level.UD=0.95,...)
   polygons <- sp::SpatialPolygons(polygons, proj4string=sp::CRS(proj))
   # names(polygons) <- 1:length(polygons)
 
+  n <- length(polygons)
+  if(n>length(identity))
+  {
+    identity <- rep(identity,n)
+    timestamp <- rep(timestamp,n)
+  }
   # spatial polygons data frame
   DF <- data.frame(identity=identity,timestamp=timestamp,row.names=names(polygons))
   names(DF) <- c("identity","timestamp") # weird namespace collision with identity()

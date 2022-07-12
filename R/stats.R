@@ -1,3 +1,96 @@
+# generalized covariance from negative-log-likelihood derivatives
+cov.loglike <- function(hess,grad=rep(0,sqrt(length(hess))),tol=.Machine$double.eps)
+{
+  # in case of bad derivatives, use worst-case numbers
+  grad <- nant(grad,Inf)
+  hess <- nant(hess,0)
+
+  # if hessian is likely to be positive definite
+  if(all(diag(hess)>0))
+  {
+    COV <- try(PDsolve(hess))
+    if(class(COV)[1]=="matrix" && all(diag(COV)>0)) { return(COV) }
+  }
+  # one of the curvatures is negative or close to negative
+  # return something sensible just in case we are on a boundary and this makes sense
+
+  # normalize parameter scales by curvature or gradient (whatever is larger)
+  V <- abs(diag(hess))
+  V <- sqrt(V)
+  V <- pmax(V,abs(grad))
+
+  # don't divide by zero
+  TEST <- V<=tol
+  if(any(TEST)) { V[TEST] <- 1 }
+
+  W <- V %o% V
+
+  grad <- grad/V
+  hess <- hess/W
+
+  EIGEN <- eigen(hess)
+  values <- EIGEN$values
+  if(any(values<=0))
+  {
+    # shouldn't need to warn if using ctmm.select
+    WARN <- TRUE
+    N <- sys.nframe()
+    if(N>=2)
+    {
+      for(i in 2:N)
+      {
+        CALL <- deparse(sys.call(-i))[1]
+        CALL <- grepl("ctmm.select",CALL) || grepl("cv.like",CALL) || grepl("ctmm.boot",CALL) || grepl("mean.mu",CALL) || grepl("mean.features",CALL)
+        if(CALL)
+        {
+          WARN <- FALSE
+          break
+        }
+      }
+    }
+    # warn if weren't using ctmm.select
+    if(WARN) { warning("MLE is near a boundary or optimizer failed.") }
+  }
+  values <- clamp(values,0,Inf)
+  vectors <- EIGEN$vectors
+
+  # transform gradient to hess' coordinate system
+  grad <- t(vectors) %*% grad
+
+  # generalized Wald-like formula with zero-curvature limit
+  # VAR ~ square change required to decrease log-likelihood by 1/2
+  for(i in 1:length(values))
+  {
+    DET <- values[i]+grad[i]^2
+
+    if(values[i]==0.0) # Wald limit of below
+    { values[i] <- 1/(2*grad[i])^2 }
+    else if(DET>=0.0) # Wald
+    { values[i] <- ((sqrt(DET)-grad[i])/values[i])^2 }
+    else # minimum loglike? optim probably failed or hit a boundary
+    {
+      # (parameter distance to worst parameter * 1/2 / loglike difference to worst parameter)^2
+      # values[i] <- 1/grad[i]^2
+      # pretty close to the other formula, so just using that
+      values[i] <- 1/(2*grad[i])^2
+    }
+  }
+
+  COV <- array(0,dim(hess))
+  values <- nant(values,Inf) # worst case NaN fix
+  SUB <- values<Inf
+  if(any(SUB)) # separate out the finite part
+  { COV <- COV + Reduce("+",lapply((1:length(grad))[SUB],function(i){ values[i] * outer(vectors[,i]) })) }
+  SUB <- !SUB
+  if(any(SUB)) # toss out the off-diagonal NaNs
+  { COV <- COV + Reduce("+",lapply((1:length(grad))[SUB],function(i){ D <- diag(outer(vectors[,i])) ; D[D>0] <- Inf ; diag(D,length(D)) })) }
+
+  COV <- COV/W
+
+  return(COV)
+}
+
+
 # interpolate vector by continuous index (vectorized by index)
 # vec is a vector, ind is a continuous index
 vint <- function(vec,ind,return.ind=FALSE)
@@ -35,6 +128,7 @@ vint <- function(vec,ind,return.ind=FALSE)
   return(vec)
 }
 
+
 # same thing as above but with a block-vector mat
 mint <- function(mat,ind)
 {
@@ -43,23 +137,63 @@ mint <- function(mat,ind)
   return(mat)
 }
 
+
 # bi-linear interpolation
-bint <- function(X,ind)
+bint <- function(M,ind)
 {
   ind <- cbind(ind) # vectorize
+  # rownames(ind) <- c('x','y')
 
-  # interpolate first index
-  IND <- vint(X[,1],ind[1,],return.ind=TRUE)
-  X <- X[IND[1,],] + (X[IND[2,],]-X[IND[1,],])*(ind[1,]-IND[1,])
-  # first index collapsed
-  vint(X,ind[2,])
+  # index each dimension
+  INDx <- vint(M[,1],ind[1,],return.ind=TRUE)
+  INDy <- vint(M[1,],ind[2,],return.ind=TRUE)
+
+  BINT <- function(i)
+  {
+    dX <- c(INDx[2,i]-ind[1,i],ind[1,i]-INDx[1,i]) / (INDx[2,i]-INDx[1,i])
+    dX <- nant(dX,1)
+
+    dY <- c(INDy[2,i]-ind[2,i],ind[2,i]-INDy[1,i]) / (INDy[2,i]-INDy[1,i])
+    dY <- nant(dY,1)
+
+    c( dX %*% M[INDx[,i],INDy[,i]] %*% dY )
+  }
+
+  M <- vapply(1:ncol(ind),BINT,0)
+  return(M)
 }
 
 
 # tri-linear interpolation
-tint <- function(X,ind)
+tint <- function(M,ind)
 {
-  # TODO
+  ind <- cbind(ind) # vectorize
+  # rownames(ind) <- c('x','y','z')
+
+  # index each dimension
+  INDx <- vint(M[,1,1],ind[1,],return.ind=TRUE)
+  INDy <- vint(M[1,,1],ind[2,],return.ind=TRUE)
+  INDz <- vint(M[1,1,],ind[3,],return.ind=TRUE)
+
+  CINT <- function(i)
+  {
+    dX <- c(INDx[2,i]-ind[1,i],ind[1,i]-INDx[1,i]) / (INDx[2,i]-INDx[1,i])
+    dX <- nant(dX,1)
+
+    dY <- c(INDy[2,i]-ind[2,i],ind[2,i]-INDy[1,i]) / (INDy[2,i]-INDy[1,i])
+    dY <- nant(dY,1)
+
+    dZ <- c(INDz[2,i]-ind[3,i],ind[3,i]-INDz[1,i]) / (INDz[2,i]-INDz[1,i])
+    dZ <- nant(dZ,1)
+
+    M <- M[INDx[,i],INDy[,i],INDz[,i]] # tensor block
+    M <- dX %.% M # tensor contraction of first index
+    M <- dY %*% M %*% dZ
+    c(M)
+  }
+
+  M <- vapply(1:ncol(ind),CINT,0)
+  return(M)
 }
 
 # confidence interval functions
@@ -355,6 +489,23 @@ chi.dof <- function(M1,M2,precision=1/2)
   return(DOF)
 }
 
+# variance of chi variable, given dof
+chi.var <- function(DOF,M1=1)
+{
+  R <- 2*pi/DOF/beta(DOF/2,1/2)^2
+  VAR <- (1/R-1)*M1^2
+  return(VAR)
+}
+
+# relative bias in chi estimate, given unbiased chi^2 estimate
+# 1 is no bias
+chi.bias <- function(DOF)
+{
+  BIAS <- sqrt(2/DOF)*exp(lgamma((DOF+1)/2)-lgamma(DOF/2))
+  BIAS <- ifelse(DOF==0,0,BIAS)
+  BIAS <- ifelse(DOF==Inf,1,BIAS)
+  return(BIAS)
+}
 
 # (scaled) chi^2 degrees-of-freedom from median and interquartile range
 chisq.dof <- function(MED,IQR,alpha=0.25)
@@ -509,6 +660,7 @@ F.CI <- function(E1,VAR1,E2,VAR2,level=0.95)
   N1 <- 2*E1^2/VAR1 # chi^2 DOF
   N2 <- 2*E2^2/VAR2 + 4 # inverse-chi^2 DOF
   BIAS <- N2/(N2-2) # F-distribution mean bias factor
+  if(BIAS<0) { BIAS <- Inf }
 
   alpha <- (1-level)/2
   CI <- stats::qf(c(alpha,1-alpha),N1,N2)
@@ -527,4 +679,40 @@ loglike.chisq <- function(sigma,dof,constant=FALSE)
   R <- - df2*(log(sigma)+1/sigma)
   if(constant) { R <- R + df2*log(df2) - lgamma(df2) }
   return(R)
+}
+
+
+#
+qmvnorm <- function(p,dim=1,tol=1/2)
+{
+  tol <- .Machine$double.eps^tol
+  alpha <- 1-p
+
+  if(dim==1)
+  { z <- stats::qnorm(1-alpha/2) }
+  else if(dim==2)
+  { z <- sqrt(-2*log(alpha)) }
+  else
+  {
+    if(dim==3)
+    {
+      # distribution function
+      p.fn <- function(z) { stats::pchisq(z^2,df=1) - sqrt(2/pi)*z*exp(-z^2/2) }
+      # density function (derivative)
+      dp.fn <- function(z) { sqrt(2/pi)*z^2*exp(-z^2/2) }
+      # initial guess # dimensional extrapolation
+      z <- 2*qmvnorm(p,2) - qmvnorm(p,1)
+    }
+
+    ERROR <- Inf
+    while(ERROR>tol)
+    {
+      # p == p.fn(z) + dp.fn(z)*dz + O(dz^2)
+      dz <- (p-p.fn(z))/dp.fn(z)
+      z <- z + dz
+      ERROR <- abs(dz)
+    }
+  }
+
+  return(z)
 }

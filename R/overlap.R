@@ -1,7 +1,7 @@
 # overlap <- function(object,...) UseMethod("overlap") #S3 generic
 
 # forwarding function for list of a particular datatype
-overlap <- function(object,level=0.95,debias=TRUE,...)
+overlap <- function(object,method="Bhattacharyya",level=0.95,debias=TRUE,...)
 {
   check.projections(object)
 
@@ -20,23 +20,30 @@ overlap <- function(object,level=0.95,debias=TRUE,...)
   else { stop(CLASS," object class not supported by overlap.") }
 
   n <- length(object)
-  OVER <- array(0,c(n,n,3))
+  DOF <- array(Inf,c(n,n))
+  OVER <- array(1,c(n,n,3))
   # tabulate overlaps
   for(i in 1:n)
   {
-    for(j in (i+1):n)
-    { if(j<=n) { OVER[i,j,] <- OverlapFun(object[c(i,j)],level=level,debias=debias,...) } }
+    if(method=="Rate")
+    { START <- i } # include diagonal for normalization
+    else
+    { START <- i+1 }
+
+    for(j in START%:%n)
+    {
+      R <- OverlapFun(object[c(i,j)],level=level,debias=debias,method=method,...)
+      DOF[i,j] <- DOF[j,i] <- R$DOF
+      OVER[i,j,] <- OVER[j,i,] <- R$CI
+    }
   }
-
-  # symmetrize matrix
-  OVER <- OVER + aperm(OVER,c(2,1,3))
-
-  # fix diagonals
-  diag(OVER[,,1]) <- diag(OVER[,,2]) <- diag(OVER[,,3]) <- 1
 
   dimnames(OVER) <- list(names(object),names(object),NAMES.CI)
 
-  return(OVER)
+  R <- list(DOF=DOF,CI=OVER)
+  class(R) <- "overlap"
+
+  return(R)
   # utils::getS3method("overlap",CLASS)(object,...)
 }
 
@@ -85,9 +92,7 @@ overlap.ctmm <- function(object,level=0.95,debias=TRUE,COV=TRUE,method="Bhattach
   CTMM2 <- object[[2]]
   DIM <- length(CTMM1$axes)
 
-  if(method=="Bhattacharyya") { Dfunc <- BhattacharyyaD }
-  else if(method=="Mahalanobis") { Dfunc <- MahalanobisD }
-  else if(method=="Euclidean") { Dfunc <- EuclideanD }
+  Dfunc <- get(paste0(method,'D')) # functions in distance.R
   STUFF <- gauss.comp(Dfunc,object,COV=COV)
   MLE <- c(STUFF$MLE)
   VAR <- c(STUFF$COV)
@@ -143,6 +148,20 @@ overlap.ctmm <- function(object,level=0.95,debias=TRUE,COV=TRUE,method="Bhattach
     BIAS <- BIAS + max( ElogW(sigma,n0)/2 - ElogW(CTMM1$sigma,n1)/4 - ElogW(CTMM2$sigma,n2)/4 , 0)
     # this is actually the expectation value?
   }
+  else if(method=="Encounter")
+  {
+    BIAS <- BIAS/4
+    # AMGM covariance terms
+    BIAS <- BIAS + max( ElogW(sigma,n0)/2 - ElogW(CTMM1$sigma,n1)/4 - ElogW(CTMM2$sigma,n2)/4 , 0)
+    # this is actually the expectation value?
+  }
+  else if(method=="Rate")
+  {
+    BIAS <- BIAS/4
+    # covariance terms
+    BIAS <- BIAS + max( ElogW(sigma,n0)/2 , 0)
+    # this is actually the expectation value?
+  }
 
   # relative bias instead of absolute bias
   BIAS <- BIAS/MLE
@@ -157,14 +176,16 @@ overlap.ctmm <- function(object,level=0.95,debias=TRUE,COV=TRUE,method="Bhattach
   {
     if(debias) { MLE <- MLE/BIAS }
 
-    CI <- chisq.ci(MLE,VAR=VAR,alpha=1-level)
+    DOF <- 2*MLE^2/VAR
+    CI <- chisq.ci(MLE,DOF=DOF,alpha=1-level)
     if(distance) { return(CI) } # return distance
 
     # transform from (square) distance to overlap measure
     CI <- exp(-rev(CI))
     names(CI) <- NAMES.CI
 
-    return(CI)
+    R <- list(DOF=DOF,CI=CI)
+    return(R)
   }
   else # return BD ingredients
   { return(list(MLE=MLE,VAR=VAR,DOF=DOF,BIAS=BIAS)) }
@@ -173,7 +194,7 @@ overlap.ctmm <- function(object,level=0.95,debias=TRUE,COV=TRUE,method="Bhattach
 
 #####################
 #overlap density function
-overlap.UD <- function(object,level=0.95,debias=TRUE,...)
+overlap.UD <- function(object,level=0.95,debias=TRUE,method="Bhattacharyya",...)
 {
   CTMM <- list(attr(object[[1]],"CTMM"),attr(object[[2]],"CTMM"))
   type <- c(attr(object[[1]],"type"),attr(object[[2]],"type"))
@@ -188,15 +209,22 @@ overlap.UD <- function(object,level=0.95,debias=TRUE,...)
   dA <- prod(dr)
 
   OVER <- object[[1]]$PDF * object[[2]]$PDF
-  if(!is.null(OVER)) { OVER <- sqrt(OVER) }
+  if(!is.null(OVER) && method=="Bhattacharyya") { OVER <- sqrt(OVER) }
 
   # overlap point estimate
   OVER <- sum(OVER)*dA
 
+  if(!is.null(OVER) && method=="Encounter")
+  {
+    OVER <- OVER / sqrt(sum(object[[1]]$PDF^2)*dA*sum(object[[2]]$PDF^2)*dA)
+    # no shared support after subsetting
+    OVER <- nant(OVER,0)
+  }
+
   if(!is.null(CTMM))
   {
     # calculate Gaussian overlap distance^2 variance, bias, etc.
-    CI <- overlap.ctmm(CTMM,level=FALSE)
+    CI <- overlap.ctmm(CTMM,method=method,level=FALSE)
 
     # Bhattacharyya distances
     D <- -log(OVER)
@@ -205,50 +233,20 @@ overlap.UD <- function(object,level=0.95,debias=TRUE,...)
     if(debias){ D <- D/CI$BIAS }
 
     # calculate new distance^2 with KDE point estimate
-    CI <- chisq.ci(D,VAR=CI$VAR,alpha=1-level)
+    DOF <- 2*D^2/CI$VAR
+    CI <- chisq.ci(D,DOF=DOF,alpha=1-level)
 
     # transform from (square) distance to overlap measure
-    OVER <- exp(-rev(CI))
-
+    CI <- exp(-rev(CI))
   }
   else
-  { OVER <- c(NA,OVER,NA) }
-
-  names(OVER) <- NAMES.CI
-  return(OVER)
-}
-
-
-###################
-# average aligned UDs
-mean.UD <- function(x,weights=NULL,...)
-{
-  if(is.null(weights)) { weights <- rep(1,length(x)) }
-  weights <- weights/sum(weights)
-
-  info <- mean.info(x)
-  type <- unique(sapply(x,function(y){attr(y,"type")}))
-  if(length(type)>1) { stop("Distribution types ",type," differ.") }
-  dV <- prod(x[[1]]$dr)
-  n <- length(x)
-  N <- rowSums(sapply(x,function(y){ y$DOF.area }))
-
-  GRID <- grid.union(x) # r,dr of grid union
-  DIM <- c(length(GRID$r$x),length(GRID$r$y))
-  PDF <- matrix(0,DIM[1],DIM[2]) # initialize Joint PDF
-
-  for(i in 1:n)
   {
-    SUB <- grid.intersection(list(GRID,x[[i]]))
-    PDF[SUB[[1]]$x,SUB[[1]]$y] <- PDF[SUB[[1]]$x,SUB[[1]]$y] + weights[i] * x[[i]]$PDF[SUB[[2]]$x,SUB[[2]]$y]
+    DOF <- NA
+    CI <- c(NA,OVER,NA)
   }
 
-  x <- GRID
-  x$PDF <- PDF
-  x$DOF.area <- N
-  x$CDF <- pmf2cdf(PDF*dV)
+  names(CI) <- NAMES.CI
 
-  x <- new.UD(x,info=info,type=type,CTMM=ctmm())
-
-  return(x)
+  R <- list(DOF=DOF,CI=CI)
+  return(R)
 }

@@ -24,7 +24,6 @@ subset.telemetry <- function(x,...)
 head.telemetry <- function(x, n = 6L, ...) { utils::head(data.frame(x),n=n,...) }
 tail.telemetry <- function(x, n = 6L, ...) { utils::tail(data.frame(x),n=n,...) }
 
-
 # rbind track segments
 tbind <- function(...)
 {
@@ -35,20 +34,48 @@ tbind <- function(...)
     if(class(x)[1]=="telemetry") { return(x) }
   }
 
+  PROJS <- length(projection(x))
   info <- mean.info(x)
+
+  # unique names - just in case
+  if(is.null(names(x)))
+  { names(x) <- sapply(1:length(x),function(i){paste(attr(x[[i]],'info')$identity,i)}) }
 
   UERE <- uere(x) # initial UERE information
   if(class(UERE)[1]=="list") # non-unique calibration information
   {
-    # fix missing class information
-    for(i in 1:length(UERE))
+    # which calibrations are equivalent
+    # EQUAL <- outer(UERE,identical) # annoyingly, this does not work
+    EQUAL <- array(TRUE,c(length(x),length(x)))
+    for(i in 1:length(x))
     {
-      if("class" %nin% names(x[[i]]))
+      for(j in 1%:%(i-1))
+      { EQUAL[i,j] <- EQUAL[j,i] <- identical(UERE[[i]],UERE[[j]]) }
+    }
+
+    # are any in-equivalent datasets sharing the same class names?
+    RENAME <- rep(FALSE,length(x))
+    for(i in 1:length(x))
+    {
+      for(j in 1%:%(i-1))
       {
-        CLASS <- names(x)[i] # name class after device
-        x[[i]]$class <- as.factor(CLASS)
-        rownames(UERE[[i]]$UERE) <- CLASS
-        rownames(UERE[[i]]$DOF) <- CLASS
+        if(!EQUAL[i,j] && any(classnames(UERE[[i]]) %in% classnames(UERE[[j]])))
+        { RENAME[i] <- RENAME[j] <- TRUE }
+      }
+    }
+
+    # some devices have the same class names, but different calibration information
+    if(any(RENAME))
+    {
+      warning("Inconsistent location classes renamed.")
+      for(i in 1:length(x))
+      {
+        LEVELS <- classnames(UERE[[i]]) %in% levels(x[[i]]$class)
+        CLASS <- paste(names(x)[i],classnames(UERE[[i]]))
+        classnames(UERE[[i]]) <- CLASS
+
+        if('class' %nin% names(x[[i]])) { x[[i]]$class <- as.factor(CLASS) }
+        else { levels(x[[i]]$class) <- CLASS[LEVELS] }
       }
     }
 
@@ -93,45 +120,20 @@ tbind <- function(...)
       MUERE <- UERE[[1]]
       for(i in 2:length(UERE))
       {
-        MUERE$UERE <- rbind(MUERE$UERE,UERE[[i]]$UERE)
-        MUERE$DOF <- rbind(MUERE$DOF,UERE[[i]]$DOF)
-        MUERE$AICc <- MUERE$AICc + UERE[[i]]$AICc
-        MUERE$Zsq <- nant(MUERE$N*MUERE$Zsq,Inf) + nant(UERE[[i]]$N*UERE[[i]]$Zsq,Inf)
-        MUERE$VAR.Zsq <- nant(MUERE$N*MUERE$VAR.Zsq,Inf) + nant(UERE[[i]]$N*UERE[[i]]$VAR.Zsq,Inf)
-        MUERE$N <- MUERE$N + UERE[[i]]$N
-        MUERE$Zsq <- nant(MUERE$Zsq / MUERE$N,Inf)
-        MUERE$VAR.Zsq <- nant(MUERE$VAR.Zsq / MUERE$N,Inf)
+        if(!any(EQUAL[i,1%:%(i-1)])) # not equal to any previous UERE already included
+        {
+          MUERE$UERE <- rbind(MUERE$UERE,UERE[[i]]$UERE)
+          MUERE$DOF <- rbind(MUERE$DOF,UERE[[i]]$DOF)
+          MUERE$AICc <- MUERE$AICc + UERE[[i]]$AICc
+          MUERE$Zsq <- nant(MUERE$N*MUERE$Zsq,Inf) + nant(UERE[[i]]$N*UERE[[i]]$Zsq,Inf)
+          MUERE$VAR.Zsq <- nant(MUERE$N*MUERE$VAR.Zsq,Inf) + nant(UERE[[i]]$N*UERE[[i]]$VAR.Zsq,Inf)
+          MUERE$N <- MUERE$N + UERE[[i]]$N
+          MUERE$Zsq <- nant(MUERE$Zsq / MUERE$N,Inf)
+          MUERE$VAR.Zsq <- nant(MUERE$VAR.Zsq / MUERE$N,Inf)
+        }
       }
       UERE <- MUERE
       rm(MUERE)
-
-      # combine identical classes
-      CLASSES <- rownames(UERE)
-      CLASSES <- unique(CLASSES)
-      for(CLASS in CLASSES)
-      {
-        IN <- CLASS %in% CLASSES
-        if(length(IN)>1)
-        {
-          UERE$UERE[IN[1],] <- colMeans(UERE$UERE[IN,])
-          UERE$UERE <- UERE$UERE[-IN[-1],]
-
-          UERE$DOF[IN[1],] <- colMeans(UERE$DOF[IN,])
-          UERE$DOF <- UERE$DOF[-IN[-1],]
-
-          UERE$AICc[IN[1]] <- mean(UERE$AICc[IN])
-          UERE$AICc <- UERE$AICc[-IN[-1]]
-
-          UERE$Zsq[IN[1]] <- mean(UERE$Zsq[IN])
-          UERE$Zsq <- UERE$Zsq[-IN[-1]]
-
-          UERE$VAR.Zsq[IN[1]] <- mean(UERE$VAR.Zsq[IN])
-          UERE$VAR.Zsq <- UERE$VAR.Zsq[-IN[-1]]
-
-          UERE$N[IN[1]] <- mean(UERE$N[IN])
-          UERE$N <- UERE$N[-IN[-1]]
-        }
-      } # end class merger
     } # end UERE merger
   } # end UERE list
 
@@ -172,10 +174,6 @@ tbind <- function(...)
 
     UERE$UERE <- UERE$UERE[CLASS,,drop=FALSE]
     UERE$DOF <- UERE$DOF[CLASS,,drop=FALSE]
-    UERE$AICc <- UERE$AICc[CLASS]
-    UERE$Zsq <- UERE$Zsq[CLASS]
-    UERE$VAR.Zsq <- UERE$VAR.Zsq[CLASS]
-    UERE$N <- UERE$N[CLASS]
   }
 
   # handle missing error information
@@ -221,7 +219,30 @@ tbind <- function(...)
 
   y <- new.telemetry(y,info=info,UERE=UERE)
 
+  # inconsistent projections
+  if(PROJS>1)
+  {
+    warning("Re-projecting due to inconsistent projections.")
+    projection(y) <- median(y,k=2)
+  }
+
   return(y)
+}
+
+# bind UERE calibrations - NOT FINISHED
+ubind <- function(x)
+{
+  if(class(x)[1]=="UERE") { return(x) }
+
+  for(i in 1:length(x))
+  {
+    CLASS <- rownames(x[[i]]$DOF)
+    y <- data.frame(t=1:length(CLASS),class=as.factor(CLASS))
+    x[[i]] <- new.telemetry(y,info=list(),UERE=x[[i]])
+  }
+  x <- tbind(x)
+  x <- x@UERE
+  return(x)
 }
 
 
@@ -556,8 +577,8 @@ as.telemetry.data.frame <- function(object,timeformat="",timezone="UTC",projecti
   NAMES$id <- c("animal.ID","individual.local.identifier","local.identifier","individual.ID","Name","ID","ID.Names","Animal","Full.ID",
                 "tag.local.identifier","tag.ID","band.number","band.num","device.info.serial","Device.ID","collar.id","Logger","Logger.ID",
                 "Deployment","deployment.ID","track.ID")
-  NAMES$long <- c("location.long","Longitude","longitude.WGS84","Longitude.deg","long","lon","lng","GPS.Longitude","\u7D4C\u5EA6")
-  NAMES$lat <- c("location.lat","Latitude","latitude.WGS84","Latitude.deg","latt","lat","GPS.Latitude","\u7DEF\u5EA6")
+  NAMES$long <- c("location.longitude","location.long","Longitude","longitude.WGS84","Longitude.deg","long","lon","lng","GPS.Longitude","\u7D4C\u5EA6")
+  NAMES$lat <- c("location.latitude","location.lat","Latitude","latitude.WGS84","Latitude.deg","latt","lat","GPS.Latitude","\u7DEF\u5EA6")
   NAMES$zone <- c("GPS.UTM.zone","UTM.zone","zone")
   NAMES$east <- c("GPS.UTM.Easting","GPS.UTM.East","GPS.UTM.x","UTM.Easting","UTM.East","UTM.E","UTM.x","Easting","East","x")
   NAMES$north <- c("GPS.UTM.Northing","GPS.UTM.North","GPS.UTM.y","UTM.Northing","UTM.North","UTM.N","UTM.y","Northing","North","y")
@@ -575,7 +596,9 @@ as.telemetry.data.frame <- function(object,timeformat="",timezone="UTC",projecti
   NAMES$v <- c("ground.speed",'speed.over.ground','speed.over.ground.m.s',"speed","GPS.speed")
   NAMES$heading <- c("heading","heading.degree","heading.degrees","GPS.heading","Course","direction","direction.deg")
 
-  # get rid of tibble class # it does weird stuff
+  # get rid of tibble classes # they don't extend data.frame objects quite right
+  if(class(object)[1] == "grouped_df")
+  { object <- dplyr::ungroup(object) }
   if(class(object)[1] %in% c("tbl_df","tbl"))
   { object <- as.data.frame(object) }
 
@@ -656,10 +679,20 @@ as.telemetry.data.frame <- function(object,timeformat="",timezone="UTC",projecti
     COL <- pull.column(object,COL)
     XY <- cbind(XY,COL)
 
-    if(!is.null(XY) && ncol(XY)==2 && !is.null(zone))
+    # XY information present but zone not present
+    if(!is.null(XY) && ncol(XY)==2)
     {
-      # construct UTM projections
-      if(any(grepl("^[0-9]*$",zone))) { message('UTM zone missing lattitude bands; assuming UTM hemisphere="north". Alternatively, format zone column "# +south".') }
+      # missing zone
+      if(is.null(zone))
+      {
+        message('UTM zone missing; assuming UTM zone="1N".')
+        zone <- rep("1N",nrow(XY))
+      }
+
+      # missing hemisphere / latitude
+      if(any(grepl("^[0-9]*$",zone)))
+      { message('UTM zone missing lattitude bands; assuming UTM hemisphere="north". Alternatively, format zone column "# +south".') }
+
       zone <- paste0("+proj=utm +zone=",zone)
 
       # convert to long-lat

@@ -12,7 +12,7 @@ methods::setMethod("zoom",signature(x="telemetry"), function(x,fraction=1,...) z
 methods::setMethod("zoom",signature(x="UD"), function(x,fraction=1,...) zoom.telemetry(x,fraction=fraction,...))
 
 ##############
-new.plot <- function(data=NULL,CTMM=NULL,UD=NULL,level.UD=0.95,level=0.95,units=TRUE,fraction=1,add=FALSE,xlim=NULL,ylim=NULL,ext=NULL,...)
+new.plot <- function(data=NULL,CTMM=NULL,UD=NULL,R=NULL,col.bg="white",col.R="green",legend=FALSE,level.UD=0.95,level=0.95,units=TRUE,fraction=1,add=FALSE,xlim=NULL,ylim=NULL,ext=NULL,...)
 {
   RESIDUALS <- !is.null(data) && !is.null(attr(data[[1]],"info")$residual)
 
@@ -37,7 +37,19 @@ new.plot <- function(data=NULL,CTMM=NULL,UD=NULL,level.UD=0.95,level=0.95,units=
 
     # bounding locations from UDs
     if(!is.null(UD))
-    { ext <- rbind(ext,extent(UD,level=level,level.UD=level.UD)[,axes]) }
+    {
+      if(class(UD[[1]])[1]=='RS') # backup extent for RS objects
+      {
+        ext <- data.frame(x=1:2,y=1:2)
+        rownames(ext) <- c('min','max')
+        ext['min','x'] <- min(sapply(UD,function(U){U$r$x[1]}))
+        ext['max','x'] <- min(sapply(UD,function(U){last(U$r$x)}))
+        ext['min','y'] <- min(sapply(UD,function(U){U$r$y[1]}))
+        ext['max','y'] <- min(sapply(UD,function(U){last(U$r$y)}))
+      }
+      else
+      { ext <- rbind(ext,extent(UD,level=level,level.UD=level.UD)[,axes]) }
+    }
 
     # bounding locations from Gaussian CTMM
     if(!is.null(CTMM) & !any(is.na(level.UD)))
@@ -95,6 +107,18 @@ new.plot <- function(data=NULL,CTMM=NULL,UD=NULL,level.UD=0.95,level=0.95,units=
 
     # empty base layer plot
     plot(ext, xlab=xlab, ylab=ylab, col=grDevices::rgb(1,1,1,0), asp=1, ...)
+
+    # plot background color
+    lim <- graphics::par('usr')
+    xlim <- lim[1:2]
+    dx <- diff(xlim)
+    ylim <- lim[3:4]
+    dy <- diff(ylim)
+    # dx <- dy <- 0
+    graphics::rect(xlim[1]-dx/2,ylim[1]-dy/2,xlim[2]+dx/2,ylim[2]+dy/2,border=col.bg,col=col.bg)
+    # this can cover the plot box
+    graphics::box()
+
     # plot information for further layering
     projection <- unique(c(projection(data),projection(CTMM),projection(UD))) # some objects could be NULL
     if(length(projection)>1 && !RESIDUALS) { stop("Multiple projections not yet supported.") }
@@ -120,6 +144,9 @@ new.plot <- function(data=NULL,CTMM=NULL,UD=NULL,level.UD=0.95,level=0.95,units=
     }
   }
 
+  # PLOT RASTER / SUITABILITY
+  if(!is.null(R)) { plot.R(R,col=col.R,legend=legend) }
+
   return(dist)
 }
 # setup environment
@@ -128,17 +155,32 @@ plot.env <- new.env()
 #######################################
 # PLOT TELEMETRY DATA
 #######################################
-plot.telemetry <- function(x,CTMM=NULL,UD=NULL,level.UD=0.95,level=0.95,DF="CDF",error=TRUE,velocity=FALSE,units=TRUE,col="red",col.level="black",col.DF="blue",col.grid="white",transparency.error=0.25,pch=1,type='p',labels=NULL,fraction=1,add=FALSE,xlim=NULL,ylim=NULL,ext=NULL,cex=NULL,lwd=1,lwd.level=1,...)
+plot.telemetry <- function(x,CTMM=NULL,UD=NULL,col.bg='white',
+                           cex=NULL,col="red",lwd=1,pch=1,type='p',error=TRUE,transparency.error=0.25,velocity=FALSE,
+                           DF="CDF",col.DF="blue",col.grid="white",labels=NULL,convex=FALSE,level=0.95,level.UD=0.95,col.level="black",lwd.level=1,
+                           SP=NULL,border.SP=TRUE,col.SP=NA,
+                           R=NULL,col.R="green",legend=FALSE,
+                           fraction=1,xlim=NULL,ylim=NULL,ext=NULL,units=TRUE,add=FALSE,...)
 {
   alpha <- 1-level
   alpha.UD <- 1-level.UD
 
-  # listify everything for generality
+  # list-ify everything for generality
   x <- listify(x)
   CTMM <- listify(CTMM)
   UD <- listify(UD)
+  R <- listify(R)
   # fix argument order
-  if(class(CTMM[[1]])=="UD") { TEMP <- CTMM; CTMM <- UD; UD <- TEMP; rm(TEMP) }
+  if(class(CTMM[[1]])[1]=="UD") { UD <- CTMM; CTMM <- NULL }
+  if(class(CTMM[[1]])[1]=="RasterLayer") { R <- CTMM; CTMM <- NULL }
+
+  # catch 3D UDs
+  if(length(dim(UD[[1]]$CDF))==3)
+  { return(plot3d(data=x,UD=UD,level=level,level.UD=level.UD,xlim=xlim,ylim=ylim,ext=ext,
+                  cex=cex,col=col,lwd=lwd,pch=pch,type=type,error=error,transparency.error=transparency.error,velocity=velocity,
+                  DF=DF,col.DF=col.DF,col.grid=col.grid,labels=labels,col.level=col.level,lwd.level=lwd.level,
+                  SP=SP,border.SP=border.SP,col.SP=col.SP,
+                  fraction=fraction,units=units,add=add,...)) }
 
   # median time step of data
   dt <- lapply(x,function(X){diff(X$t)})
@@ -153,12 +195,20 @@ plot.telemetry <- function(x,CTMM=NULL,UD=NULL,level.UD=0.95,level=0.95,DF="CDF"
     CTMM <- list(ctmm(sigma=1,mu=c(0,0)))
   }
 
-  dist <- new.plot(data=x,CTMM=CTMM,UD=UD,level.UD=level.UD,level=level,units=units,fraction=fraction,add=add,xlim=xlim,ylim=ylim,ext=ext,...)
+  dist <- new.plot(data=x,CTMM=CTMM,UD=UD,col.bg=col.bg,R=R,col.R=col.R,legend=legend,level.UD=level.UD,level=level,units=units,fraction=fraction,add=add,xlim=xlim,ylim=ylim,ext=ext,...)
 
   # plot cm per unit of distance plotted (m or km)
   cmpkm <- 2.54*mean(graphics::par("fin")*diff(graphics::par("plt"))[-2]/diff(graphics::par("usr"))[-2])
   # plot px per unit of distance plotted (m or km)
   pxpkm <- mean(grDevices::dev.size("px")*diff(graphics::par("plt"))[-2]/diff(graphics::par("usr"))[-2])
+
+  # #######################
+  # # PLOT RASTER / SUITABILITY
+  # if(!is.null(R)) { plot.R(R,col=col.R) }
+
+  #########################3
+  # PLOT SHAPEFILES
+  if(!is.null(SP)) { plot.SP(SP=SP,border.SP=border.SP,col.SP=col.SP,PROJ=ctmm::projection(x),...) }
 
   #########################
   # PLOT GAUSSIAN CONTOURS AND DENSITY
@@ -174,7 +224,7 @@ plot.telemetry <- function(x,CTMM=NULL,UD=NULL,level.UD=0.95,level=0.95,DF="CDF"
       CTMM[[i]] <- unit.ctmm(CTMM[[i]],dist$scale)
 
       # plot denisty function lazily reusing KDE code
-      pdf <- kde(data.frame(CTMM[[i]]$mu[1,,drop=FALSE]),H=methods::getDataPart(CTMM[[i]]$sigma),axes=c("x","y"),res=500)
+      pdf <- agde(CTMM[[i]],res=500)
       plot.df(pdf,DF=DF,col=col.DF[[i]],...)
 
       # plot ML estimate, regular style
@@ -202,7 +252,7 @@ plot.telemetry <- function(x,CTMM=NULL,UD=NULL,level.UD=0.95,level=0.95,DF="CDF"
   if(!is.null(UD))
   {
     # UD <- lapply(UD,function(ud){ unit.UD(ud,length=dist$scale) }) # now done in plot.UD
-    plot.UD(UD,level.UD=level.UD,level=level,DF=DF,col.level=col.level,col.DF=col.DF,col.grid=col.grid,labels=labels,fraction=fraction,add=TRUE,xlim=xlim,ylim=ylim,ext=ext,cex=cex,lwd=lwd.level,...)
+    plot.UD(UD,level.UD=level.UD,level=level,DF=DF,col.level=col.level,col.DF=col.DF,col.grid=col.grid,labels=labels,fraction=fraction,add=TRUE,xlim=xlim,ylim=ylim,ext=ext,cex=cex,lwd.level=lwd.level,convex=convex,...)
   }
 
   #########################
@@ -393,12 +443,71 @@ pull <- function(pchar,i)
 }
 
 
+# plot raster layer
+plot.R <- function(R,col="green",legend=FALSE)
+{
+  x.scale <- get0('x.scale',plot.env)
+
+  R <- listify(R)
+
+  for(i in 1:length(R))
+  {
+    PROJ <- raster::projection(R[[i]])
+    if(x.scale==1000 && grepl("+units=m",PROJ)) # km scale (not meters)
+    { raster::extent(R[[i]]) <- raster::extent(R[[i]])[]/1000 }
+
+    if(length(col)==length(R))
+    { COL <- malpha(col[i],(0:255)/255) }
+    else
+    { COL <- col }
+
+    raster::plot(R[[i]],col=COL,legend=legend,maxpixels=.Machine$integer.max,add=TRUE)
+  }
+}
+
+
+# plot shapefiles
+plot.SP <- function(SP=NULL,border.SP=TRUE,col.SP=NA,PROJ=NULL,...)
+{
+  x.scale <- get0('x.scale',plot.env)
+  if(x.scale==1000 && grepl("+units=m",PROJ)) # km scale (not meters)
+  {
+    PROJ <- strsplit(PROJ,"units=m")[[1]]
+    PROJ <- paste0(PROJ[1],"units=km",PROJ[2])
+  }
+
+  if(class(SP)[1]=="SpatialPolygonsDataFrame")
+  {
+    SP <- sp::spTransform(SP,CRSobj=PROJ)
+    sp::plot(SP,col=col.SP,border=border.SP,add=TRUE)
+  }
+}
+
+
 ##############
-plot.UD <- function(x,level.UD=0.95,level=0.95,DF="CDF",units=TRUE,col.level="black",col.DF="blue",col.grid="white",labels=NULL,fraction=1,add=FALSE,xlim=NULL,ylim=NULL,ext=NULL,cex=NULL,lwd=1,...)
+plot.UD <- function(x,col.bg="white",DF="CDF",col.DF="blue",col.grid="white",labels=NULL,convex=FALSE,level=0.95,level.UD=0.95,col.level="black",lwd.level=1,
+                    SP=NULL,border.SP=TRUE,col.SP=NA,
+                    R=NULL,col.R="green",legend=FALSE,
+                    fraction=1,xlim=NULL,ylim=NULL,ext=NULL,units=TRUE,add=FALSE,...)
 {
   x <- listify(x)
 
-  dist <- new.plot(UD=x,units=units,fraction=fraction,add=add,xlim=xlim,ylim=ylim,ext=ext,level.UD=level.UD,level=level,cex=cex,...)
+  # catch 3D UDs
+  if(length(dim(x[[1]]$CDF))==3)
+  { return(plot3d(UD=x,level=level,level.UD=level.UD,xlim=xlim,ylim=ylim,ext=ext,
+                  DF=DF,col.DF=col.DF,col.grid=col.grid,labels=labels,col.level=col.level,lwd.level=lwd.level,
+                  SP=SP,border.SP=border.SP,col.SP=col.SP,
+                  fraction=fraction,units=units,add=add,...)) }
+
+  if(class(x[[1]])[1]=="RS") { DF <- 'RS' }
+
+  dist <- new.plot(UD=x,R=R,col.bg=col.bg,col.R=col.R,legend=legend,units=units,fraction=fraction,xlim=xlim,ylim=ylim,ext=ext,level.UD=level.UD,level=level,add=add,...)
+
+  # # PLOT RASTER / SUITABILITY
+  # if(!is.null(R)) { plot.R(R,col=col.R) }
+
+  # PLOT SHAPEFILES
+  if(!is.null(SP)) { plot.SP(SP=SP,border.SP=border.SP,col.SP=col.SP,PROJ=ctmm::projection(x),...) }
 
   # contours colour
   if(length(col.level)==length(level.UD) && length(col.level) != length(x))
@@ -430,6 +539,8 @@ plot.UD <- function(x,level.UD=0.95,level=0.95,DF="CDF",units=TRUE,col.level="bl
     plot.df(x[[i]],DF=DF,col=col.DF[[i]],...)
   }
 
+  if(DF %nin% c("PDF","CDF")) { return(invisible(NULL)) } # NPR
+
   # plot grid
   for(i in 1:length(x))
   {
@@ -455,36 +566,39 @@ plot.UD <- function(x,level.UD=0.95,level=0.95,DF="CDF",units=TRUE,col.level="bl
 
       # extent of data
       B <- (x[[i]]$PDF > 0)
-      u <- u[B]
-      v <- v[B]
+      if(any(B))
+      {
+        u <- u[B]
+        v <- v[B]
 
-      ex.u <- range(u)
-      ex.v <- range(v)
+        ex.u <- range(u)
+        ex.v <- range(v)
 
-      mu.u <- mean(ex.u)
-      mu.v <- mean(ex.v)
+        mu.u <- mean(ex.u)
+        mu.v <- mean(ex.v)
 
-      # grid numbers
-      n.u <- diff(ex.u)/du
-      n.v <- diff(ex.v)/dv
+        # grid numbers
+        n.u <- diff(ex.u)/du
+        n.v <- diff(ex.v)/dv
 
-      n.u <- ceiling(n.u/2)
-      n.v <- ceiling(n.v/2)
+        n.u <- ceiling(n.u/2)
+        n.v <- ceiling(n.v/2)
 
-      # grid nodes
-      u <- mu.u + du*(-n.u):n.u
-      v <- mu.v + dv*(-n.v):n.v
+        # grid nodes
+        u <- mu.u + du*(-n.u):n.u
+        v <- mu.v + dv*(-n.v):n.v
 
-      # transform back
-      X <- outer(u*COS,-v*SIN,"+")
-      Y <- outer(u*SIN,+v*COS,"+")
+        # transform back
+        X <- outer(u*COS,-v*SIN,"+")
+        Y <- outer(u*SIN,+v*COS,"+")
 
-      for(j in 1:length(u)) { graphics::segments(x0=X[j,1],y0=Y[j,1],x1=last(X[j,]),y1=last(Y[j,]),col=col.grid[i],...) }
-      for(j in 1:length(v)) { graphics::segments(x0=X[1,j],y0=Y[1,j],x1=last(X[,j]),y1=last(Y[,j]),col=col.grid[i],...) }
+        for(j in 1:length(u)) { graphics::segments(x0=X[j,1],y0=Y[j,1],x1=last(X[j,]),y1=last(Y[j,]),col=col.grid[i],...) }
+        for(j in 1:length(v)) { graphics::segments(x0=X[1,j],y0=Y[1,j],x1=last(X[,j]),y1=last(Y[,j]),col=col.grid[i],...) }
+      }
     }
 
     # not sure why this is necessary
-    graphics::box(lwd=lwd,...)
+    graphics::box(lwd=lwd.level,...)
   }
 
   # CONTOURS
@@ -493,17 +607,18 @@ plot.UD <- function(x,level.UD=0.95,level=0.95,DF="CDF",units=TRUE,col.level="bl
     if(!any(is.na(col.level[i,,])) && !any(is.na(level.UD)))
     {
       # make sure that correct style is used for low,ML,high even in absence of lows and highs
-      plot.kde(x[[i]],level=level.UD,labels=labels[i,,2],col=malpha(col.level[i,,2],1),lwd=lwd,...)
+      plot.kde(x[[i]],level=level.UD,labels=labels[i,,2],col=malpha(col.level[i,,2],1),lwd=lwd.level,convex=convex,...)
 
       if(!is.na(level) && !is.null(x[[i]]$DOF.area))
       {
         P <- sapply(level.UD, function(l) { CI.UD(x[[i]],l,level,P=TRUE)[-2] } )
-        plot.kde(x[[i]],level=P,labels=c(t(labels[i,,c(1,3)])),col=malpha(c(t(col.level[i,,c(1,3)])),0.5),lwd=lwd/2,...)
+        plot.kde(x[[i]],level=P,labels=c(t(labels[i,,c(1,3)])),col=malpha(c(t(col.level[i,,c(1,3)])),0.5),lwd=lwd.level/2,convex=convex,...)
       }
     }
   }
 
 }
+plot.RS <- plot.UD
 
 ##################################
 # plot PDF stored as KDE object
@@ -514,14 +629,18 @@ plot.df <- function(kde,DF="CDF",col="blue",...)
   alpha <- min(alpha,254) # overflow bug otherwise
   col <- malpha(col,(0:alpha)/255)
 
-  if(DF=="PDF")
+  if(DF %in% "PDF")
   {
-    zlim <- c(0,max(kde$PDF))
+    zlim <- c(0,max(kde[[DF]]))
   }
   else if(DF=="CDF")
   {
     zlim <- c(0,1)
-    kde$CDF <- 1 - kde$CDF
+    kde[[DF]] <- 1 - kde[[DF]]
+  }
+  else # NPR
+  {
+    zlim <- range(kde[[DF]],na.rm=TRUE)
   }
 
   graphics::image(kde$r,z=kde[[DF]],useRaster=TRUE,zlim=zlim,col=col,add=TRUE,...)
@@ -530,15 +649,26 @@ plot.df <- function(kde,DF="CDF",col="blue",...)
 
 #############################
 # Plot a KDE object's contours
-plot.kde <- function(kde,level=0.95,labels=round(level*100),col="black",...)
+plot.kde <- function(kde,level=0.95,labels=round(level*100),col="black",convex=FALSE,...)
 {
   # record current option
   # MAX <- getOption("max.contour.segments")
 
   # do something that works
-  options(max.contour.segments=.Machine$integer.max)
   drawlabels <- !(labels==FALSE | is.na(labels))
-  graphics::contour(kde$r,z=kde$CDF,levels=level,labels=labels,labelcex=1,drawlabels=drawlabels,col=col,add=TRUE,...)
+  if(!convex)
+  {
+    options(max.contour.segments=.Machine$integer.max)
+    graphics::contour(kde$r,z=kde$CDF,levels=level,labels=labels,labelcex=1,drawlabels=drawlabels,col=col,add=TRUE,...)
+  }
+  else
+  {
+    for(i in 1:length(level))
+    {
+      SP <- convex(kde,level=level[i]) # now spatial polygons
+      sp::plot(SP,border=col,add=TRUE,...)
+    }
+  }
 
   # reinstate initial option (or default if was NULL--can't set back to NULL???)
   # if(is.null(MAX)) { MAX <- 25000 }

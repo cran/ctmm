@@ -1,3 +1,64 @@
+ctmm 1.0.0 (2022-07-07)
+================
+
+  * new function rsf.fit() to fit integrated resource selection functions (iRSFs) with autocorrelation-adjusted weighted likelihood
+  
+  * new function mean.ctmm() to calculate population average movement models
+  
+  * new function revisitation() to calculate the distribution of revisitations
+  
+  * new function npr() to calculate non-parametric spatial regressions
+  
+  * new function agde() to calculate autocorrelated Gaussian distribution estimates, with RSF support
+  
+  * new function suitability() to calculate suitability rasters from RSF fit objects
+  
+  * new function rates() to calculate relative encounter rates
+  
+  * new function dt.plot() to inspect sampling intervals
+  
+  * akde() and occurrence() now support RSF-informed kernels and boundary-respecting kernels
+  
+  * summary.ctmm() now outputs diffusion rate estimates
+  
+  * new argument variable for meta() to estimate population diffusion rates, mean speeds, and autocorrelation timescales
+  
+  * new arguments R and SP in plot.telemetry() and plot.UD() for plotting raster and shapefile base layers
+  
+  * new option method="Encounter" in overlap()
+  
+  * mean.UD() now propagates uncertainties
+  
+  * mean.UD() now functions on occurrence distributions
+  
+  * new convex argument to UD summary(), plot(), and export functions
+  
+  * plot() and raster() now work on 3D UDs
+  
+  * plot.outlie() now works on lists of outlie objects
+  
+  * speed() output now includes DOF estimate for use with meta()
+  
+  * tbind() now works correctly with different projections and calibrations
+  
+  * %#% unit conversion operator can now interpret products and ratios
+  
+  * summary() timescale confidence intervals are now gamma/inverse-gamma more inline with meta()
+  
+  * progress bar added to optimizer() when trace=1
+  
+  * bugfix in IID area CIs
+  
+  * bugfix in ctmm.loglike() when fitting multiple error classes, where some are zero
+  
+  * bugfix in ctmm.boot() when bias estimate exceeds variance parameter
+  
+  * bugfixes in 3D akde()
+  
+  * bugfix in time gridding code when dt is coarse
+  
+  * bugfix in SpatialPoints.telemetry for single individuals
+
 ctmm 0.6.1 (2021-07-26)
 ================
 

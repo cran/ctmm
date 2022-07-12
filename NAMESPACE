@@ -64,6 +64,7 @@ S3method(head,telemetry)
 S3method(tail,telemetry)
 #S3method(rbind,telemetry)
 #S3method(sample,telemetry)
+export(dt.plot)
 
 #VARIOGRAM FUNCTIONS
 export(variogram,variogram.fit)
@@ -80,15 +81,16 @@ S3method(`[`,periodogram)
 
 #LIKELIHOOD/MODEL FUNCTIONS
 export(correlogram,ctmm,ctmm.guess,ctmm.fit,ctmm.loglike,ctmm.select,ctmm.boot)
-S3method(residuals,ctmm)
+S3method(mean,ctmm)
 S3method(residuals,telemetry)
+S3method(residuals,ctmm)
 S3method(summary,ctmm)
 S3method(str,ctmm)
 
 #MEAN FUNCTIONS
 
 #AKDE FUNCTIONS
-export(akde,bandwidth,homerange,writeShapefile,SpatialPolygonsDataFrame.UD)
+export(agde,akde,bandwidth,homerange,SpatialPolygonsDataFrame.UD,suitability,writeShapefile)
 #S3method(akde,list)
 #S3method(akde,telemetry)
 S3method(mean,UD)
@@ -97,6 +99,8 @@ S3method(summary,UD)
 S3method(writeShapefile,list)
 S3method(writeShapefile,telemetry)
 S3method(writeShapefile,UD)
+
+#S3method(plot,RS)
 
 #KRIGE FUNCTIONS
 export(occurrence)
@@ -134,4 +138,11 @@ export(annotate,color)
 export(lasso,marquee,cleave)
 
 # ENCOUNTER FUNCTIONS
-export(encounter)
+export(encounter,rates)
+
+# RSF functions
+export(rsf.fit)
+
+# revisitation
+export(revisitation)
+export(npr)

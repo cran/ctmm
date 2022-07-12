@@ -259,33 +259,44 @@ sqrtm.covm <- function(sigma)
   return(sigma)
 }
 
-
 # matrix power
-mpow.covm <- function(sigma,pow)
+fn.covm <- function(sigma,fn)
 {
   isotropic <- sigma@isotropic
   axes <- colnames(sigma)
 
   sigma <- attr(sigma,"par")
   PARS <- 1:min(2,length(sigma)) # major, (minor)
-  sigma[PARS] <- sigma[PARS]^pow
+  sigma[PARS] <- fn(sigma[PARS])
 
   sigma <- covm(sigma,isotropic=isotropic,axes=axes)
 
   return(sigma)
 }
 
+# matrix power
+mpow.covm <- function(sigma,pow) { fn.covm(sigma,function(s){s^pow}) }
+
+# matrix logarithm
+log.covm <- function(sigma,pow) { fn.covm(sigma,log) }
+
+# matrix exponental
+exp.covm <- function(sigma,pow) { fn.covm(sigma,exp) }
+
 
 ####### calculate variance and variance-covariance from major/minor information
 # assumes that variance/covariance parameters come first in COV
 axes2var <- function(CTMM,MEAN=TRUE)
 {
+  PAR <- c('major','minor','angle')
   COV <- CTMM$COV
-  NAMES <- rownames(COV)
 
-  if(CTMM$isotropic)
+  OLD <- rownames(COV)
+  OTHER <- OLD[OLD %nin% PAR]
+
+  if(CTMM$isotropic[1])
   {
-    NAMES <- c("variance",NAMES[-1])
+    NEW <- c("variance",OTHER)
 
     if(!MEAN)
     {
@@ -295,22 +306,21 @@ axes2var <- function(CTMM,MEAN=TRUE)
   }
   else
   {
-    NAMES <- c("variance",NAMES[-(1:3)])
+    NEW <- c("variance",OTHER)
+    grad <- matrix(0,length(NEW),length(OLD))
+    rownames(grad) <- NEW
+    colnames(grad) <- OLD
+    if(length(OTHER)==1)
+    { grad[OTHER,OTHER] <- 1 } # annoying that below isn't general
+    else if(length(OTHER)>1)
+    { diag(grad[OTHER,OTHER]) <- 1 }
 
     # convert major,minor/major uncertainty into mean-variance uncertainty
-    grad <- c(1,1,0)  # gradient of total x-y variance
+    grad['variance','major'] <- grad['variance','minor'] <- 1
     if(MEAN) { grad <- grad/2 } # average x-y variance
 
-    P <- nrow(COV)
-    if(P>3)
-    {
-      grad <- rbind( grad , array(0,c(P-3,3)) )
-      grad <- cbind( grad , rbind( rep(0,P-3) , diag(1,P-3) ) )
-    }
-    else
-    { grad <- rbind(grad) }
-
     COV <- grad %*% COV %*% t(grad)
+
     # backup for infinite covariances
     for(i in 1:nrow(COV))
     {
@@ -321,13 +331,13 @@ axes2var <- function(CTMM,MEAN=TRUE)
       }
     }
   }
-  dimnames(COV) <- list(NAMES,NAMES)
+  dimnames(COV) <- list(NEW,NEW)
 
   return(COV)
 }
 
 
-# gradient matrix d sigma / d par
+# gradient matrix d sigma / d par from par
 J.sigma.par <- function(par)
 {
   major <- par["major"]
@@ -354,6 +364,35 @@ J.sigma.par <- function(par)
   return(grad)
 }
 
+# gradient matrix d par / d sigma from sigma
+J.par.sigma <- function(sigma)
+{
+  names(sigma) <- c("xx","yy","xy")
+
+  par.fn <- function(s)
+  {
+    par <- matrix(s[c("xx","xy","xy","yy")],2,2)
+    covm(par)@par
+  }
+
+  parscale <- sigma
+  parscale['xy'] <- sqrt(sigma['xx']*sigma['yy'])
+  lower <- c(0,0,-Inf)
+
+  J <- genD(sigma,par.fn,lower=lower,parscale=parscale,order=1)
+  J <- J$grad
+  dimnames(J) <- list(c('major','minor','angle'),names(sigma))
+  return(J)
+
+  # solver method - could fail
+  J <- J.sigma.par(sigma)
+  J <- solve(J)
+  return(J)
+
+  # analytic calculation - unfinished, requires a limit corner case solution
+  TR <- sum(sigma[c("xx","yy")])
+  DET <- sigma["xx"]*sigma["yy"] - sigma["xy"]^2
+}
 
 # return the COV matrix for covm par representation
 COV.covm <- function(sigma,n,k=1,REML=TRUE)
@@ -386,7 +425,7 @@ COV.covm <- function(sigma,n,k=1,REML=TRUE)
     # gradient matrix d sigma / d par
     grad <- J.sigma.par(par)
     # gradient matrix d par / d sigma via inverse function theorem
-    grad <- PDsolve(grad)
+    grad <- PDsolve(grad,sym=FALSE)
 
     COV <- (grad) %*% COV %*% t(grad)
     COV <- nant(COV,0) # 0/0 for inactive

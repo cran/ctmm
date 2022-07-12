@@ -4,6 +4,12 @@ annotate <- function(object,by="all",cores=1,...)
   if(class(object)[1]=="list") { return(plapply(object,annotate,cores=cores,fast=FALSE)) }
   # else one at a time below
 
+  #
+  if(class(by)[1]=="data.frame")
+  {
+    # FOR THE FUTURE
+  }
+
   if(by=='all' || 'moon' %in% by)
   {
     ADD <- suncalc::getMoonIllumination(object$timestamp,keep="fraction")$fraction
@@ -38,6 +44,12 @@ annotate <- function(object,by="all",cores=1,...)
     data <- as.numeric(data)
     dim(data) <- c(nrow(object),2)
     object$tropic <- (object$t-data[,1])/(data[,2]-data[,1])
+  }
+
+  if(by %in% c('switch','sundial'))
+  {
+    STUFF <- get.sundial(object)
+    for(col in names(STUFF)) { object[[col]] <- STUFF[[col]] }
   }
 
   return(object)
@@ -136,6 +148,15 @@ malpha <- function(col,alpha=1)
   return(col)
 }
 
+grad.white <- function(col)
+{
+  col <- c(grDevices::col2rgb(col))
+  col <- c(grDevices::rgb2hsv(col[1],col[2],col[3]))
+  white <- (255:0)/255
+  col <- grDevices::hsv(col[1],white,col[3])
+  return(col)
+}
+
 
 ##############################
 # COLOR BY INDIVIDUAL
@@ -154,7 +175,7 @@ color.individual <- function(object,cores=1,...)
   { OVER <- plapply(object,function(o){ ctmm.fit(o,ctmm(isotropic=(nrow(o)<3)),method='ML',COV=FALSE) },cores=cores) }
   else if(CLASS %in% c('ctmm','UD'))
   { OVER <- object }
-  OVER <- overlap(OVER,debias=FALSE,COV=FALSE)[,,2]
+  OVER <- overlap(OVER,debias=FALSE,COV=FALSE)$CI[,,2]
   diag(OVER) <- 0 # no self interactions
 
   # who has the worst spatial overlap

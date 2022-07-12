@@ -1,4 +1,11 @@
-tr <- function(x) { sum(diag(x)) }
+# matrix trace
+tr <- function(x)
+{
+  x <- cbind(x)
+  x <- sum(diag(x))
+  return(x)
+}
+
 
 # 2D rotation matrix
 rotate <- function(theta)
@@ -119,14 +126,46 @@ He <- function(M) { (M + Adj(M))/2 }
 
 
 # map function for real-valued PSD matrices
-PDfunc <-function(M,func=function(m){1/m},force=FALSE,pseudo=FALSE,tol=.Machine$double.eps)
+PDfunc <-function(M,func=function(m){1/m},sym=TRUE,force=FALSE,pseudo=FALSE,tol=.Machine$double.eps)
 {
   DIM <- dim(M)[1]
-  if(is.null(DIM)) { DIM <- 1 }
+  if(is.null(DIM))
+  {
+    DIM <- 1
+    M <- cbind(M)
+  }
   # tol <- max(tol,.Machine$double.eps)
+
+  # for singular maps
+  INF <- diag(M)==Inf
+  if(func(0)<Inf)
+  { ZERO <- sapply(1:nrow(M),function(i){all(M[i,]==0)}) }
+  else
+  { ZERO <- rep(FALSE,DIM) }
 
   if(DIM==1)
   { M <- c(M) }
+  else if(any(INF) || any(ZERO)) # check for Inf & map those properly
+  {
+    if(any(INF))
+    {
+      if(func(Inf)==0) # maps to zero
+      { M[INF,] <- M[,INF] <- 0 }
+      else if(func(Inf)==Inf) # maps to infinity
+      {
+        M[INF,] <- M[,INF] <- 0
+        M[INF,INF] <- Inf
+      }
+    }
+
+    if(any(ZERO)) { diag(M)[ZERO] <- func(0) }
+
+    # regular inverse of remaining dimensions
+    REM <- !(INF|ZERO)
+    if(any(REM)) { M[REM,REM] <- PDfunc(M[REM,REM,drop=FALSE],func=func,force=force,pseudo=pseudo) }
+
+    return(M)
+  }
   else if(DIM==2)
   {
     TR <- (M[1,1] + M[2,2])/2 # half trace
@@ -162,11 +201,23 @@ PDfunc <-function(M,func=function(m){1/m},force=FALSE,pseudo=FALSE,tol=.Machine$
   }
   else if(DIM>2) # arbitrary DIM
   {
-    M <- eigen(M)
-    V <- M$vectors
-    M <- Re(M$values)
+    if(sym)
+    {
+      M <- eigen(M)
+      V <- M$vectors
+      M <- Re(M$values)
 
-    V <- vapply(1:DIM,function(i){Re(V[,i] %o% Conj(V[,i]))},diag(1,DIM))
+      V <- vapply(1:DIM,function(i){Re(V[,i] %o% Conj(V[,i]))},diag(1,DIM))
+    }
+    else
+    {
+      M <- svd(M)
+      U <- solve(Adj(M$v))
+      V <- solve(M$u)
+      M <- Re(M$d)
+
+      V <- vapply(1:DIM,function(i){Re(U[,i] %o% V[i,])},diag(1,DIM))
+    }
   }
 
   if(any(M<0) && !force && !pseudo) { stop("Matrix not positive definite.") }
@@ -179,6 +230,7 @@ PDfunc <-function(M,func=function(m){1/m},force=FALSE,pseudo=FALSE,tol=.Machine$
   # PSEUDO <- (abs(M) < tol) # why abs(M)?
 
   if(any(FORCE) && force) { M[FORCE] <- tol }
+  if(any(PSEUDO) && pseudo) { M[PSEUDO] <- 0 }
   M <- func(M)
   if(any(PSEUDO) && pseudo) { M[PSEUDO] <- 0 }
 
@@ -197,7 +249,7 @@ PDfunc <-function(M,func=function(m){1/m},force=FALSE,pseudo=FALSE,tol=.Machine$
 
 
 # Positive definite solver
-PDsolve <- function(M,force=FALSE,pseudo=FALSE,tol=.Machine$double.eps)
+PDsolve <- function(M,sym=TRUE,force=FALSE,pseudo=FALSE,tol=.Machine$double.eps)
 {
   DIM <- dim(M)
   if(is.null(DIM))
@@ -212,20 +264,15 @@ PDsolve <- function(M,force=FALSE,pseudo=FALSE,tol=.Machine$double.eps)
   ZERO <- sapply(1:nrow(M),function(i){all(M[i,]==0)})
   if(any(INF) || any(ZERO))
   {
-    # 1/Inf == 0
-    if(any(INF))
-    { M[INF,INF] <- 0 }
+    # 1/Inf == 0 # correlations not accounted for
+    if(any(INF)) { M[INF,] <- M[,INF] <- 0 }
 
     # 1/0 == Inf
-    if(any(ZERO))
-    {
-      M[ZERO,ZERO] <- 0
-      diag(M)[ZERO] <- Inf
-    }
+    if(any(ZERO)) { diag(M)[ZERO] <- Inf }
 
     # regular inverse of remaining dimensions
     REM <- !(INF|ZERO)
-    if(any(REM)) { M[REM,REM] <- PDsolve(M[REM,REM,drop=FALSE]) }
+    if(any(REM)) { M[REM,REM] <- PDsolve(M[REM,REM,drop=FALSE],force=force,pseudo=pseudo) }
 
     return(M)
   }
@@ -245,7 +292,7 @@ PDsolve <- function(M,force=FALSE,pseudo=FALSE,tol=.Machine$double.eps)
   }
 
   # symmetrize
-  M <- He(M)
+  if(sym) { M <- He(M) }
 
   # rescale
   W <- abs(diag(M))
@@ -269,13 +316,13 @@ PDsolve <- function(M,force=FALSE,pseudo=FALSE,tol=.Machine$double.eps)
   if( class(M.try)[1] == "matrix")
   { M <- M.try }
   else
-  { M <- PDfunc(M,func=function(m){1/m},force=force,pseudo=pseudo,tol=tol) }
+  { M <- PDfunc(M,func=function(m){1/m},sym=sym,force=force,pseudo=pseudo,tol=tol) }
 
   # back to covariance matrix
   M <- M/W
 
   # symmetrize
-  M <- He(M)
+  if(sym) { M <- He(M) }
 
   return(M)
 }
@@ -316,7 +363,7 @@ sqrtm <- function(M,force=FALSE,pseudo=FALSE)
     TR <- M[1,1] + M[2,2]
     DET <- M[1,1]*M[2,2] - M[1,2]*M[2,1]
 
-    if(DET<0 || TR^2<4*DET || diag(M)<0)
+    if(DET<0 || TR^2<4*DET || any(diag(M)<0))
     {
       if(force || pseudo)
       { M <- PDfunc(M,func=sqrt,force=force,pseudo=pseudo) }
@@ -327,16 +374,22 @@ sqrtm <- function(M,force=FALSE,pseudo=FALSE)
     {
       S <- sqrt(DET)
       M <- (M + S*diag(2))/sqrt(TR+2*S)
+      M <- nant(M,0) # not sure if this is a general fix
     }
   }
   else
   {
-    if(all(diag(M)>=-TOL))
-    { R <- expm::sqrtm(M) }
-    else
-    { R <- diag(-1,nrow=DIM) }
+    FAIL <- diag(-1,nrow=DIM)
 
-    if(all(Re(diag(R))>=-TOL && abs(Im(diag(R)))<=TOL))
+    if(all(diag(M)>=-TOL))
+    {
+      R <- try(expm::sqrtm(M),silent=TRUE)
+      if(class(R)[1]=="try-error") { R <- FAIL }
+    }
+    else
+    { R <- FAIL }
+
+    if(all(Re(diag(R))>=-TOL) && all(abs(Im(diag(R)))<=TOL))
     {
       M <- Re(R)
       TEST <- (diag(M)<=0)
@@ -350,6 +403,20 @@ sqrtm <- function(M,force=FALSE,pseudo=FALSE)
       { stop("Matrix is not positive definite.") }
     }
   }
+
+  return(M)
+}
+
+
+unnant <- function(M)
+{
+  NAN <- is.nan(M)
+  DIAG <- diag(TRUE,nrow(M))
+
+  if(any(NAN)) { M[NAN] <- 0 }
+
+  INF <- NAN & DIAG
+  if(any(INF)) { M[INF] <- Inf }
 
   return(M)
 }
@@ -371,7 +438,7 @@ conditionNumber <- function(M)
 
 
 # Positive definite part of matrix
-PDclamp <- function(M,lower=0,upper=Inf)
+PDclamp <- function(M,lower=0,upper=Inf,...)
 {
   # Inf fix
   INF <- diag(M)==Inf
@@ -392,7 +459,19 @@ PDclamp <- function(M,lower=0,upper=Inf)
     # symmetrize
     M <- He(M)
 
-    M <- PDfunc(M,function(m){clamp(m,lower,upper)},pseudo=TRUE)
+    # similarity transform
+    V <- abs(diag(M))
+    V <- sqrt(V)
+    # don't divide by zero
+    TEST <- V<=.Machine$double.eps
+    if(any(TEST)) { V[TEST] <- 1 }
+    V <- V %o% V
+    M <- M/V
+
+    M <- PDfunc(M,function(m){clamp(m,lower,upper)},pseudo=TRUE,...)
+
+    # similarity back-transform
+    M <- M*V
 
     # symmetrize
     M <- He(M)
@@ -446,4 +525,3 @@ ext.mat <- function(...,MAX=TRUE)
   MATS <- Reduce("+",MATS)
   return(MATS)
 }
-

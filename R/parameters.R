@@ -25,6 +25,9 @@ id.parameters <- function(CTMM,profile=TRUE,linear=FALSE,linear.cov=FALSE,UERE.F
 
   if(!linear) # nonlinear autocorrelation parameters
   {
+    TIMELINK <- length(CTMM$timelink.par)
+    if(TIMELINK) { NAMES <- c(NAMES,paste0("timelink-",1:TIMELINK)) }
+
     TAU <- STRUCT$tau # for structure here
     if(!STRUCT$range) { TAU <- TAU[-1] }
     if(length(TAU))
@@ -113,6 +116,16 @@ id.parameters <- function(CTMM,profile=TRUE,linear=FALSE,linear.cov=FALSE,UERE.F
 
   if(!linear) # nonlinear autocorrelation parameters
   {
+    if(TIMELINK)
+    {
+      TLI <- timelink.parinfo(CTMM)
+
+      parscale <- c(parscale,rep(TLI$parscale,TIMELINK))
+      lower <- c(lower,rep(TLI$lower,TIMELINK))
+      upper <- c(upper,rep(TLI$upper,TIMELINK))
+      period <- c(period,rep(FALSE,TIMELINK))
+    }
+
     if(length(TAU))
     {
       parscale <- c(parscale,pmax(TAU,dt))
@@ -180,7 +193,11 @@ get.parameters <- function(CTMM,NAMES,profile=FALSE,linear.cov=FALSE)
   names(par) <- NAMES
 
   # can't loop this easily because R collapses NULL values
-  getter <- function(NAME,VALUE=CTMM[[NAME]]) { if(NAME %in% NAMES) { par[NAME] <<- VALUE } }
+  getter <- function(NAME,VALUE=CTMM[[NAME]])
+  { if(NAME %in% NAMES) { par[NAME] <<- VALUE } }
+
+  beta <- CTMM$beta
+  for(B in names(beta)) { getter(B,beta[B]) }
 
   sigma <- CTMM$sigma
   if(!linear.cov)
@@ -202,6 +219,10 @@ get.parameters <- function(CTMM,NAMES,profile=FALSE,linear.cov=FALSE)
     PARS <- NAMES[ grepl("error",NAMES) ]
     for(P in PARS) { par[P] <- CTMM$error[ substr(P,nchar("error ?"),nchar(P)) ]^2 }
   }
+
+  timelink <- CTMM$timelink.par
+  TIMELINK <- which(grepl("timelink",NAMES))
+  if(length(timelink) && length(TIMELINK)) { par[TIMELINK] <- timelink }
 
   tau <- CTMM$tau
   getter("tau position",if(length(tau)>0) { tau[1] } else { 0 })
@@ -252,7 +273,7 @@ profiled.var <- function(CTMM,sigma=CTMM$sigma,UERE.RMS=CTMM$error,DT=1,AVE=FALS
 
 
 # clean up parameter arrays
-clean.parameters <- function(par,profile=FALSE,linear.cov=FALSE)
+clean.parameters <- function(par,profile=FALSE,linear.cov=FALSE,timelink="identity")
 {
   NAMES <- names(par)
 
@@ -312,6 +333,13 @@ clean.parameters <- function(par,profile=FALSE,linear.cov=FALSE)
   P <- c("tau position","tau velocity")
   if(all(P %in% NAMES)) { par[P] <- sort(par[P],decreasing=TRUE) }
 
+  # clean timelink parameters
+  if(timelink!="identity")
+  {
+    PAR <- grepl("timelink",NAMES)
+    if(any(PAR)) { par[PAR] <- timelink.clean(par[PAR],timelink=timelink) }
+  }
+
   return(par)
 }
 
@@ -321,6 +349,12 @@ set.parameters <- function(CTMM,par,profile=FALSE,linear.cov=FALSE)
 {
   NAMES <- names(par)
   AXES <- length(CTMM$axes)
+
+  beta <- CTMM$beta
+  BETA <- names(beta)
+  beta[] <- NA
+  for(B in BETA) { beta[B] <- par[B] }
+  CTMM$beta <- beta
 
   sigma <- CTMM$sigma
   if(!linear.cov)
@@ -354,6 +388,9 @@ set.parameters <- function(CTMM,par,profile=FALSE,linear.cov=FALSE)
   }
   CTMM$sigma <- covm(sigma,axes=CTMM$axes)
 
+  timelink <- par[grepl("timelink",NAMES)]
+  if(length(timelink)) { CTMM$timelink.par <- timelink }
+
   NAME <- "tau position"; if(NAME %in% NAMES) { CTMM$tau[1] <- par[NAME] ; names(CTMM$tau)[1] <- 'position' }
   NAME <- "tau velocity"; if(NAME %in% NAMES) { CTMM$tau[2] <- par[NAME] ; names(CTMM$tau)[2] <- 'velocity' }
   NAME <- "tau"; if(NAME %in% NAMES) { CTMM$tau <- c(1,1)*par[NAME] ; names(CTMM$tau) <- c('position','velocity') } # identical timescales
@@ -380,6 +417,13 @@ copy.parameters <- function(x,value,par=value$features,destructive=TRUE)
     sigma <- scale.covm( sigma, var.covm(value$sigma,ave=TRUE) )
     sigma@isotropic=FALSE
     x$sigma <- sigma
+  }
+
+  timelink <- which(grepl('timelink',Pv))
+  if(length(timelink))
+  {
+    x$timelink <- value$timelink
+    x$timelink.par[1:length(value$timelink.par)] <- value$timelink.par
   }
 
   if("tau position" %in% Pv) { x$tau[1] <- value$tau[1] }

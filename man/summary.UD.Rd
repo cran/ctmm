@@ -5,11 +5,12 @@
 \title{Summarize a range distribution}
 \description{ This function returns a list of biologically interesting parameters in human readable format, as derived from an autocorrelated kernel density estimate.}
 \usage{
-\S3method{summary}{UD}(object,level=0.95,level.UD=0.95,units=TRUE,...)
+\S3method{summary}{UD}(object,convex=FALSE,level=0.95,level.UD=0.95,units=TRUE,...)
 }
 %- maybe also 'usage' for other objects documented here.
 \arguments{
-  \item{object}{ An \code{akde} autocorrelated kernel-density estimate from the output of \code{akde}. }
+  \item{object}{ An \code{akde} autocorrelated kernel-density estimate from the output of \code{akde}.}
+  \item{convex}{Report convex coverage areas if \code{TRUE}. By default, the highest density regions (HDRs) are reported.}
   \item{level}{ Confidence level for the above area estimate. E.g., the 95\% confidence interval of the 50\% core area.}
   \item{level.UD}{ Coverage level for the home-range area. E.g., the 50\% core area. }
   \item{units}{Convert result to natural units.}
@@ -49,14 +50,14 @@ library(ctmm)
 data(buffalo)
 
 # Extract movement data for a single animal
-Cilla <- buffalo$Cilla
+DATA <- buffalo$Cilla
 
 # Fit a movement model
-GUESS <- ctmm.guess(Cilla,interactive=FALSE)
-FIT <- ctmm.fit(Cilla,GUESS)
+GUESS <- ctmm.guess(DATA,interactive=FALSE)
+FIT <- ctmm.fit(DATA,GUESS)
 
 # Estimate and summarize the AKDE
-UD <- akde(Cilla,FIT)
+UD <- akde(DATA,FIT)
 summary(UD)
 }}
 

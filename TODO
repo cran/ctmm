@@ -1,16 +1,71 @@
-PRIORITY
+** PRIORITY
+* fit periodicity frequencies for Bill
+* DDIM natural resolution option
+* export UD on CTMM objects
+
+** MISC
+* only rareify models after compatible features are selected
+* export list of objects
+* profile upper speed CI?
+* meta - plot distribution when data are sorted in plot
+* parameter table creation code
+* weighting times in ocurrence distributions by?
+* plot.telemetry raster backgrounds
+* color -> weight telemetry data by time, by individual?
+* make QPQ.solve() work without environment (for other packages)
+* ctmm.select(...,IC="BCV",block=1 %#% 'day')
+* plot(telemetry,ctmm) fails for plain vector ctmm$mu
+* akde on fit with DOF=0 error()
+* overlap VAR
+
+** mean.ctmm
+* subtract prior from location-error posteriors before averaging and then add back at the end
+
+** RSF
+* Riemann sum / Simpson integration method
+* AIC for sum of individuals and for population meta-analysis
+* distinguish between temporal stacks and height stacks
+* precompute option for formula (with no annotations)
+* RSF AGDE non-stationary needs times
+* non-integrated RSFs need to switch autocorrelation model to BM/IOU?
+* RSF habitat suitability calculation
+* timelink upgrade to use periodic splinefun with deriv argument
+* rsf.fit variable scaling option
+* rsf.fit simulate, predict
+* rsf.fit record availiable points sampled and numerical error estimate
+* RSF: model selection re-using available sample and beta
+* RSF: model selction: trace=(x^2+y^2), x^2-y^2, x*y
+* RSF: lower bound for parameter corrections: -1<trace
+* timeseries annotate tool
+
+** timelink
+* periodic splines with derivatives
+* timelink par upper-lower function
+* circadian plot, animate with sundial
+* periodic sundial rates, periodic predict, speeds, AKDE weights
+* timelink simulate and predict
+
+** CTPM
+* plot.variogram fraction=1 for phylogenetic variograms
 * Phylo: implement IID by hand
 * Phylo: pre-condition OUF with OU
 * Phylo: link function support
-* empirical Fisher information approximation for initializing the Hessian?
-* color -> weight telemetry data by time, by individual?
-* make QPQ.solve() work without environment (for other packages)
+* plot of overlap, area, mean distance versus time (relative to reference)
+
+** location error
+* error - IID Gaussian mean weights
+* update the turtle vignette example to talk about location classes
 * track updating for elliptical errors (additive errors or overall update?)
-* ctmm.select(...,IC="BCV",block=1 %#% 'day')
-* plot(telemetry,ctmm) fails for plain vector ctmm$mu
+
+** NPR
+* grad %*% -solve(Hess.max) %*% grad
+* NPR occurrence
+* NPR range debias numerator and denominator?
+
+** optimizer
+* BHHH (empirical Fisher) approximation for first step of optimizer to initialize Hessian
 * optimizer compare par to par/parscale==1 for scale parameters and reset Hessian if far away
-* akde on fit with DOF=0 error()
-* overlap VAR
+
 * zoom needs CTMM argument named? No gear comes up then?
 * consistent grids with different resolutions (power of 2 relation; padding; etc.)
 * automatic timeformat (non-default argument)

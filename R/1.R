@@ -16,9 +16,13 @@ methods::setOldClass("ctmm")
 new.ctmm <- methods::setClass("ctmm",contains="list",representation=methods::representation(info="list"),
                               prototype=methods::prototype(list(),info=list()))
 
+#methods::setOldClass("RS")
+#new.RS <- methods::setClass("RS",contains="list",representation=methods::representation(info="list",type="character",variable="character",CTMM="ctmm"),
+#                            prototype=methods::prototype(list(),info=list(),type=character(),variable=character(),CTMM=new.ctmm()) )
+
 methods::setOldClass("UD")
-new.UD <- methods::setClass("UD",contains="list",representation=methods::representation(info="list",type="character",CTMM="ctmm"),
-                            prototype=methods::prototype(list(),info=list(),type=character(),CTMM=new.ctmm()) )
+new.UD <- methods::setClass("UD",contains="list",representation=methods::representation(info="list",type="character",variable="character",CTMM="ctmm"),
+                            prototype=methods::prototype(list(),info=list(),type=character(),variable=character(),CTMM=new.ctmm()) )
 
 methods::setOldClass("variogram")
 new.variogram <- methods::setClass("variogram",representation=methods::representation("data.frame",info="list",UERE="UERE"),
@@ -26,6 +30,9 @@ new.variogram <- methods::setClass("variogram",representation=methods::represent
 
 methods::setOldClass("outlie")
 new.outlie <- methods::setClass("outlie",representation=methods::representation("data.frame"),prototype=methods::prototype(data.frame()))
+
+# R drop is very annoying and yet this doesn't do anything despite the error on det(1)
+#setMethod('determinant', signature(x='numeric'), identity)
 
 # existing functions -> S4 generics
 # this doesn't work
@@ -46,6 +53,7 @@ methods::setGeneric("projection", getGeneric("projection", package="raster"))
 methods::setGeneric("projection<-", getGeneric("projection<-", package="raster"))
 methods::setGeneric("raster", getGeneric("raster", package="raster"))
 methods::setGeneric("zoom", getGeneric("zoom", package="raster"))
+
 
 # new S3 generic functions
 writeShapefile <- function(object,folder,file=NULL,...) UseMethod("writeShapefile")

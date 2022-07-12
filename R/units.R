@@ -100,6 +100,17 @@ generate.units <- function()
   add(c("st","stone","stones"),0.45359237*14)
   add(c("ton","tons"),0.45359237*2000) # NA ton (not UK)
 
+  # memory
+  add(c("byte","bytes","B"),1)
+  add(c("Kb","KiB"),1024)
+  add(c("Mb","MiB"),1024^2)
+  add(c("Gb","GiB"),1024^3)
+  add(c("Tb","TiB"),1024^4)
+  add(c("Pb","PiB"),1024^5)
+  add(c("Eb","EiB"),1024^6)
+  add(c("Zb","ZiB"),1024^7)
+  add(c("Yb","YiB"),1024^8)
+
   return(list(alias=alias,scale=scale))
 }
 UNIT <- list() # generated onLoad
@@ -178,8 +189,14 @@ unit <- function(data,dimension,thresh=1,concise=FALSE,SI=FALSE)
     abrv.list <- c("ng","\u03BCg","mg","gm","kg","Mg")
     scale.list <- c(1/1000^4,1/1000^3,1/1000^2,1/1000,1,1000)
   }
+  else # units not recognized
+  {
+    R <- list(scale=1,name=NULL)
+    return(R)
+  }
 
   data <- data[!is.na(data)]
+  data <- data[abs(data)<Inf]
   if(length(data)) { max.data <- max(abs(data)) } else { max.data <- 1 }
 
   if(concise) { name.list <- abrv.list }
@@ -228,6 +245,10 @@ unit.telemetry <- function(data,length=1,time=1,axes=c('x','y'))
   convert <- function(NAMES,scale) { for(NAME in NAMES) { if(NAME %in% names(data)) { data[[NAME]] <<- data[[NAME]]/scale } } }
 
   convert('t',time)
+  convert('light.time',time)
+  convert('dark.time',time)
+  convert('sundial.rate',1/time)
+
   convert(DOP.LIST$horizontal$axes,length)
   convert(DOP.LIST$vertical$axes,length)
   convert(DOP.LIST$speed$axes,length/time)
@@ -261,6 +282,9 @@ unit.ctmm <- function(CTMM,length=1,time=1)
     drift <- get(CTMM$mean)
     CTMM <- drift@scale(CTMM,time)
   }
+
+  if(!is.null(CTMM$timelink.cycle))
+  { CTMM$timelink.cycle <- CTMM$timelink.cycle/time }
 
   # if(class(CTMM$error)[1]=='numeric')
   { CTMM$error <- CTMM$error/length } # don't divide logicals
@@ -373,6 +397,33 @@ unit.variogram <- function(SVF,time=1,area=1)
   }
 
   name <- canonical.name(name)
+  if(name=="") { return(num) }
+
+  name <- strsplit(name,'*',fixed=TRUE)[[1]]
+  if(length(name)>1)
+  {
+    if(pow==1)
+    { for(i in 1:length(name)) { num <- num %#% name[i] } }
+    else if(pow==-1)
+    { for(i in 1:length(name)) { num <- name[i] %#% num } }
+    return(num)
+  }
+
+  name <- strsplit(name,"/",fixed=TRUE)[[1]]
+  if(length(name)>1)
+  {
+    if(pow==1)
+    {
+      num <- num %#% name[1]
+      for(i in 2:length(name)) { num <- name[i] %#% num }
+    }
+    else if(pow==-1)
+    {
+      num <- name[1] %#% num
+      for(i in 2:length(name)) { num <- num %#% name[i] }
+    }
+    return(num)
+  }
 
   alias <- UNIT$alias
   scale <- UNIT$scale
@@ -381,4 +432,18 @@ unit.variogram <- function(SVF,time=1,area=1)
     if(name %in% alias[[i]]) { return(num*scale[i]^pow) }
   }
   stop(paste("Unit",name,"unknown."))
+}
+
+# interpret a string as number with units
+ustring <- function(x)
+{
+  x <- canonical.name(x)
+
+  y <- strsplit(x,"[a-z,A-Z]")[[1]][1]
+  n <- nchar(y)+1
+  y <- as.numeric(y)
+  x <- substr(x,n,nchar(x))
+
+  x <- y %#% x
+  return(x)
 }

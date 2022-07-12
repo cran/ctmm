@@ -62,6 +62,7 @@ encounter <- function(object,include=NULL,exclude=NULL,debias=FALSE,...)
   object$PDF <- PMF / dV
   object$CDF <- pmf2cdf(PMF)
   object$axes <- axes
+  object$weight <- GAMMA # store overall weight for future averaging
 
   # resolution (add up like covariance?)
   IN <- 0
@@ -81,7 +82,7 @@ encounter <- function(object,include=NULL,exclude=NULL,debias=FALSE,...)
   object$DOF.area <- DOF.area
 
   info <- mean.info(UD)
-  object <- new.UD(object,info=info,type='encounter',CTMM=CTMM)
+  object <- new.UD(object,info=info,type='range',variable="encounter",CTMM=CTMM)
 
   return(object)
 }
@@ -199,4 +200,26 @@ encounter.ctmm <- function(CTMM,include=NULL,exclude=NULL,debias=FALSE,...)
 
   CTMM <- ctmm(mu=mu,sigma=sigma,COV.mu=COV.mu,COV=COV,axes=axes,isotropic=isotropic,info=info)
   return(list(CTMM=CTMM,BIAS=BIAS,bias=bias))
+}
+
+
+# relative encounter rates
+rates <- function(object,debias=TRUE,level=0.95,normalize=TRUE,...)
+{
+  units <- FALSE
+
+  R <- overlap(object,debias=debias,level=level,method="Rate",...)
+  R <- R$CI
+
+  if(normalize)
+  {
+    M <- 1/diag(R[,,'est']) # TODO !!! REMOVE MEAN BIAS CORRECTION
+    M <- mean(M) # TODO !!! REPLACE THIS WITH META-MEAN
+    R <- R*M
+  }
+
+  # fix diagonals # self encounter rate
+  diag(R[,,1]) <- diag(R[,,2]) <- diag(R[,,3]) <- Inf
+
+  return(R)
 }

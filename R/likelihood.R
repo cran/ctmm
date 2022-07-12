@@ -1,8 +1,39 @@
+get.link <- function(CTMM)
+{
+  link <- CTMM$link
+
+  if(is.null(link)) { link <- "identity" }
+
+  link <- list(name=link,fn=get(link))
+
+  if(link$name=="identity")
+  { link$grad <- function(x){rep(1,length(x))} }
+  else if(link$name=="log")
+  { link$grad <- function(x){1/x} }
+  else # numDeriv
+  {} # TODO
+
+  return(link)
+}
+
+
 ####################################
 # log likelihood function
 ####################################
 ctmm.loglike <- function(data,CTMM=ctmm(),REML=FALSE,profile=TRUE,zero=0,verbose=FALSE)
 {
+  # fail state - bad parameters or bad data
+  if(verbose)
+  {
+    FAIL <- CTMM
+    FAIL$loglike <- -Inf
+  }
+  else
+  { FAIL <- -Inf }
+
+  # employ link function on time
+  if(length(CTMM$timelink.par)) { data$t <- linktime(data,CTMM) }
+
   n <- length(data$t)
   AXES <- length(CTMM$axes)
 
@@ -54,7 +85,7 @@ ctmm.loglike <- function(data,CTMM=ctmm(),REML=FALSE,profile=TRUE,zero=0,verbose
   }
 
   circle <- CTMM$circle
-  if(circle && ECC.EXT) { return(-Inf) } # can't squeeze !!! need 2D Langevin code
+  if(circle && ECC.EXT) { return(FAIL) } # can't squeeze !!! need 2D Langevin code
 
   n <- length(data$t)
 
@@ -109,10 +140,12 @@ ctmm.loglike <- function(data,CTMM=ctmm(),REML=FALSE,profile=TRUE,zero=0,verbose
     UERE.DOF <- UERE.DOF[LEVELS]
   }
 
-  if(is.null(CTMM$errors)) { CTMM$errors <- any(CTMM$error>0) }
-
-  UERE.FIT <- (CTMM$error | CTMM$errors) & !is.na(UERE.DOF) & UERE.DOF<Inf # will we be fitting error parameters?
-  UERE.FIX <- (CTMM$error | CTMM$errors) & (is.na(UERE.DOF) | UERE.DOF==Inf) # are there fixed error parameters
+  ## I don't recall what this was for, you can't profile from zero variance
+  # if(is.null(CTMM$errors)) { CTMM$errors <- any(CTMM$error>0) }
+  # UERE.FIT <- (CTMM$error | CTMM$errors) & !is.na(UERE.DOF) & UERE.DOF<Inf # will we be fitting error parameters?
+  # UERE.FIX <- (CTMM$error | CTMM$errors) & (is.na(UERE.DOF) | UERE.DOF==Inf) # are there fixed error parameters
+  UERE.FIT <- (CTMM$error) & !is.na(UERE.DOF) & UERE.DOF<Inf # will we be fitting error parameters?
+  UERE.FIX <- (CTMM$error) & (is.na(UERE.DOF) | UERE.DOF==Inf) # are there fixed error parameters
 
   ### what kind of profiling is possible
   if((!any(CTMM$error>0) && !(circle && !isotropic)) || (!any(UERE.FIX) && isotropic)) # can profile full covariance matrix all at once
@@ -245,12 +278,12 @@ ctmm.loglike <- function(data,CTMM=ctmm(),REML=FALSE,profile=TRUE,zero=0,verbose
   ZERO <- which(dt<=.Machine$double.eps)
   if(length(ZERO) && length(CTMM$tau) && CTMM$tau[1])
   {
-    if(all(CTMM$error==FALSE)) { warning("Duplicate timestamps require an error model.") ; return(-Inf) }
+    if(all(CTMM$error==FALSE)) { warning("Duplicate timestamps require an error model.") ; return(FAIL) }
     # check for HDOP==0 just in case
     ZERO <- error[ZERO,,,drop=FALSE]
     ZERO <- apply(ZERO,1,det) # AXES factors in product
     ZERO <- min(ZERO)
-    if(ZERO<=.Machine$double.eps^AXES) { warning("Duplicate timestamps require an error model.") ; return(-Inf) }
+    if(ZERO<=.Machine$double.eps^AXES) { warning("Duplicate timestamps require an error model.") ; return(FAIL) }
   }
 
   # check for bad variances
@@ -259,7 +292,7 @@ ctmm.loglike <- function(data,CTMM=ctmm(),REML=FALSE,profile=TRUE,zero=0,verbose
   {
     ZERO <- apply(error,1,det) # AXES factors in product
     ZERO <- min(ZERO)
-    if(ZERO<=.Machine$double.eps^AXES) { return(-Inf) }
+    if(ZERO<=.Machine$double.eps^AXES) { return(FAIL) }
   }
 
   #### RUN KALMAN FILTERS ###
@@ -433,6 +466,7 @@ ctmm.loglike <- function(data,CTMM=ctmm(),REML=FALSE,profile=TRUE,zero=0,verbose
     # assign variables
     if(profile && PROFILE) { CTMM$sigma <- M.sigma }
     else { CTMM$sigma <- sigma }
+    CTMM$UERE <- attr(data,"UERE")$UERE
 
     CTMM <- ctmm.repair(CTMM,K=K)
 

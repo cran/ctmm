@@ -108,8 +108,10 @@ variogram.dt <- function(data,dt=NULL,fast=NULL,res=1,CI="Markov",error=FALSE,ax
       di <- 1
       while(REPEAT[i+di+1]) { di <- di + 1 }
 
-      w <- 1/error[i + 0:di] # precisions
-      ERROR[INDEX[i]] <- 1/sum(1/w) # aggregate variance - can be zero
+      e <- error[i + 0:di] # variances
+      w <- 1/e # precisions
+      ERROR[INDEX[i]] <- clamp(1/sum(1/w),0,min(e)) # aggregate variance - can be zero
+      # clamp necessary for 0-error limit
 
       if(any(w==Inf)) # renormalize
       {
@@ -232,13 +234,23 @@ gridder <- function(t,z=NULL,dt=NULL,W=NULL,lag=NULL,p=NULL,FLOOR=NULL,finish=TR
   if(!is.null(z)) { Z.grid <- array(0,c(n,COL)) } else { Z.grid <- NULL }
   # lower time spread
   P <- p*W
-  W.grid[FLOOR] <- W.grid[FLOOR] + P
-  if(!is.null(z)) { Z.grid[FLOOR,] <- Z.grid[FLOOR,] + P*z }
+  Z <- P*z
+  for(i in 1:length(P)) # don't vector addition because duplicate indices overwrite
+  {
+    j <- FLOOR[i]
+    W.grid[j] <- W.grid[j] + P[i]
+    if(!is.null(z)) { Z.grid[j,] <- Z.grid[j,] + Z[i,] }
+  }
   # upper time spread
-  FLOOR <- FLOOR+1
+  FLOOR <- FLOOR+1 # this is now ceiling
   P <- (1-p)*W
-  W.grid[FLOOR] <- W.grid[FLOOR] + P
-  if(!is.null(z)) { Z.grid[FLOOR,] <- Z.grid[FLOOR,] + P*z }
+  Z <- P*z
+  for(i in 1:length(P)) # dont't vector addition because duplicate indices overwrite
+  {
+    j <- FLOOR[i]
+    W.grid[j] <- W.grid[j] + P[i]
+    if(!is.null(z)) { Z.grid[j,] <- Z.grid[j,] + Z[i,] }
+  }
 
   if(finish)
   {
@@ -246,8 +258,10 @@ gridder <- function(t,z=NULL,dt=NULL,W=NULL,lag=NULL,p=NULL,FLOOR=NULL,finish=TR
     POS <- (W.grid>0)
     if(!is.null(z)) { Z.grid[POS,] <- Z.grid[POS,]/W.grid[POS] }
 
-    W <- sum(W) # now total DOF
+    # W <- sum(W) # now total DOF
   }
+
+  W.grid <- clamp(W.grid,0,1)
 
   return(list(w=W.grid,z=Z.grid,lag=lag,dt=dt))
 }

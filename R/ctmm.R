@@ -17,7 +17,8 @@ ctmm <- function(tau=NULL,omega=FALSE,isotropic=FALSE,range=TRUE,circle=FALSE,er
 
   # put covariance into universal format
   if(length(axes)==1) { isotropic <- TRUE }
-  if(!is.null(List$sigma)) { List$sigma <- covm(List$sigma,isotropic=isotropic,axes=axes) }
+  if(!is.null(List$sigma)) { List$sigma <- covm(List$sigma,isotropic=isotropic[1],axes=axes) }
+  names(isotropic) <- c("sigma","mu")[1:length(isotropic)]
   List$isotropic <- isotropic
 
   # label tau elements
@@ -64,6 +65,9 @@ ctmm <- function(tau=NULL,omega=FALSE,isotropic=FALSE,range=TRUE,circle=FALSE,er
     List$mu <- rbind(List$mu)
     colnames(List$mu) <- axes
   }
+
+  # default time-link
+  if(is.null(List$timelink)) { List$timelink <- "identity" }
 
   # FIX THIS
   #if(!is.null(List$COV.mu)) { dimnames(List$COV.mu) <- list(axes,axes) }
