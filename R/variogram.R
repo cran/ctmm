@@ -22,7 +22,7 @@ subset.variogram <- function(x,...)
 
 #########################
 # variogram funcion wrapper
-variogram <- function(data,dt=NULL,fast=TRUE,res=1,CI="Markov",error=FALSE,axes=c("x","y"),precision=1/8)
+variogram <- function(data,dt=NULL,fast=TRUE,res=1,CI="Markov",error=FALSE,axes=c("x","y"),precision=1/8,trace=TRUE)
 {
   CI <- match.arg(CI,c("IID","Markov","Gauss"))
   #if(CI=="Gauss" && fast) { stop("Gaussian CIs not supported by fast method.") }
@@ -36,7 +36,7 @@ variogram <- function(data,dt=NULL,fast=TRUE,res=1,CI="Markov",error=FALSE,axes=
     res[-1] <- pmax(res[-1],dt[-1]/dt[-length(dt)])
 
     # calculate a variogram at each dt
-    SVF <- lapply(1:length(dt), function(i) { variogram.dt(data,dt=dt[i],fast=fast,res=res[i],CI=CI,error=error,axes=axes,precision=precision) } )
+    SVF <- lapply(1:length(dt), function(i) { variogram.dt(data,dt=dt[i],fast=fast,res=res[i],CI=CI,error=error,axes=axes,precision=precision,trace=trace) } )
 
     # subset each variogram to relevant range of lags
     dt <- c(-dt[1],dt,Inf)
@@ -66,7 +66,7 @@ variogram <- function(data,dt=NULL,fast=TRUE,res=1,CI="Markov",error=FALSE,axes=
 
 ################################
 # wrapper for fast and slow variogram codes, for a specified dt
-variogram.dt <- function(data,dt=NULL,fast=NULL,res=1,CI="Markov",error=FALSE,axes=c("x","y"),precision=1/2)
+variogram.dt <- function(data,dt=NULL,fast=NULL,res=1,CI="Markov",error=FALSE,axes=c("x","y"),precision=1/2,trace=TRUE)
 {
   # intelligently select algorithm
   if(is.null(fast))
@@ -106,7 +106,7 @@ variogram.dt <- function(data,dt=NULL,fast=NULL,res=1,CI="Markov",error=FALSE,ax
     if(REPEAT[i+1])
     {
       di <- 1
-      while(REPEAT[i+di+1]) { di <- di + 1 }
+      while(i+di+1<=nrow(data) && REPEAT[i+di+1]) { di <- di + 1 }
 
       e <- error[i + 0:di] # variances
       w <- 1/e # precisions
@@ -133,7 +133,7 @@ variogram.dt <- function(data,dt=NULL,fast=NULL,res=1,CI="Markov",error=FALSE,ax
   if(fast)
   { SVF <- variogram.fast(data=data,error=error,dt=dt,res=res,CI=CI,axes=axes) }
   else
-  { SVF <- variogram.slow(data=data,error=error,dt=dt,CI=CI,axes=axes,precision=precision) }
+  { SVF <- variogram.slow(data=data,error=error,dt=dt,CI=CI,axes=axes,precision=precision,trace=trace) }
 
   # skip missing data
   SVF <- SVF[which(SVF$DOF>0),]
@@ -159,6 +159,9 @@ grid.init <- function(t,dt=stats::median(diff(t)),W=NULL)
   COS <- c(W %*% cos(theta))
   t0 <- -dt/(2*pi)*atan(SIN/COS)
 
+  # not sure if necessary
+  t0 <- -round((t0-t[1])/dt)*dt
+
   return(t0)
 }
 
@@ -172,7 +175,8 @@ pregridder <- function(t,dt=NULL,W=NULL)
   if(is.null(dt)) { dt <- stats::median(diff(t)) }
 
   # choose best grid alignment
-  t <- t - grid.init(t,dt=dt,W=W)
+  t0 <- grid.init(t,dt=dt,W=W)
+  t <- t - t0
 
   # fractional grid index -- starts at >=1
   index <- t/dt
@@ -189,7 +193,8 @@ pregridder <- function(t,dt=NULL,W=NULL)
   n <- ceiling(last(index)) + 1
   lag <- seq(0,n-1)*dt
 
-  return(list(FLOOR=FLOOR,p=p,lag=lag))
+  R <- list(FLOOR=FLOOR,p=p,lag=lag,t0=t0,dt=dt)
+  return(R)
 }
 
 ############################
@@ -207,6 +212,7 @@ gridder <- function(t,z=NULL,dt=NULL,W=NULL,lag=NULL,p=NULL,FLOOR=NULL,finish=TR
   if(!is.na(dt) && dt==0) { dt <- stats::median(DT[DT>0]) }
   if(is.na(dt)) { dt <- 1 } # doesn't really matter
 
+  t0 <- t[1]
   # setup grid transformation
   if(is.null(lag))
   {
@@ -223,6 +229,7 @@ gridder <- function(t,z=NULL,dt=NULL,W=NULL,lag=NULL,p=NULL,FLOOR=NULL,finish=TR
     FLOOR <- pregridder(t,dt=dt/res,W=W)
     p <- FLOOR$p
     lag <- FLOOR$lag
+    t0 <- FLOOR$t0
     FLOOR <- FLOOR$FLOOR
   }
   else if(!W)
@@ -263,7 +270,7 @@ gridder <- function(t,z=NULL,dt=NULL,W=NULL,lag=NULL,p=NULL,FLOOR=NULL,finish=TR
 
   W.grid <- clamp(W.grid,0,1)
 
-  return(list(w=W.grid,z=Z.grid,lag=lag,dt=dt))
+  return(list(w=W.grid,z=Z.grid,lag=lag,dt=dt,t0=t0))
 }
 
 ############################
@@ -356,9 +363,9 @@ variogram.fast <- function(data,error=NULL,dt=NULL,res=1,CI="Markov",axes=c("x",
     SUB <- (-SUB):(+SUB)
 
     lag <- (0:m)*dt # aggregated lags > 0
-    SVF <- c(SVF[1], sapply(1:m,function(j){ SUB <- j*n + SUB ; sum(W*DOF[SUB]*SVF[SUB]) }) )
-    if(EOV) { error <- c(error[1], sapply(1:m,function(j){ SUB <- j*n + SUB ; sum(W*DOF[SUB]*error[SUB]) }) ) }
-    DOF <- c(DOF[1], sapply(1:m,function(j){ SUB <- j*n + SUB ; sum(W*DOF[SUB]) }) )
+    SVF <- c(SVF[1], sapply(1:m,function(j){ SUB <- SUB + round(j*n) ; sum(W*DOF[SUB]*SVF[SUB]) }) )
+    if(EOV) { error <- c(error[1], sapply(1:m,function(j){ SUB <- SUB + round(j*n) ; sum(W*DOF[SUB]*error[SUB]) }) ) }
+    DOF <- c(DOF[1], sapply(1:m,function(j){ SUB <- SUB + round(j*n) ; sum(W*DOF[SUB]) }) )
 
     SVF[-1] <- SVF[-1]/DOF[-1]
     if(EOV) { error[-1] <- error[-1]/DOF[-1] }
@@ -418,7 +425,7 @@ variogram.fast <- function(data,error=NULL,dt=NULL,res=1,CI="Markov",axes=c("x",
 
 ##################################
 # LAG-WEIGHTED VARIOGRAM
-variogram.slow <- function(data,error=NULL,dt=NULL,res=1,CI="Markov",axes=c("x","y"),ACF=FALSE,precision=1/2)
+variogram.slow <- function(data,error=NULL,dt=NULL,res=1,CI="Markov",axes=c("x","y"),ACF=FALSE,precision=1/2,trace=TRUE)
 {
   t <- data$t
   z <- get.telemetry(data,axes)
@@ -510,7 +517,7 @@ variogram.slow <- function(data,error=NULL,dt=NULL,res=1,CI="Markov",axes=c("x",
   ERROR <- Inf
   ERROR.OLD <- Inf
   TARGET <- .Machine$double.eps^precision
-  pb <- utils::txtProgressBar(style=3) # time loops
+  if(trace) { pb <- utils::txtProgressBar(style=3) } # time loops
   while(ERROR>TARGET && ERROR<=ERROR.OLD)
   {
     PG <- (TARGET/ERROR)^(1/4) # base progress
@@ -525,7 +532,7 @@ variogram.slow <- function(data,error=NULL,dt=NULL,res=1,CI="Markov",axes=c("x",
         accumulate(I1[i,j],W1[i,j],VAR[i,j],EVAR[i,j])
         accumulate(I2[i,j],W2[i,j],VAR[i,j],EVAR[i,j])
       }
-      utils::setTxtProgressBar(pb,PG+(1-PG)*(i*(2*n-i))/(n^2))
+      if(trace) { utils::setTxtProgressBar(pb,PG+(1-PG)*(i*(2*n-i))/(n^2)) }
     }
 
     # normalize SVF before we compare to old and/or correct DOF
@@ -612,7 +619,7 @@ variogram.slow <- function(data,error=NULL,dt=NULL,res=1,CI="Markov",axes=c("x",
   # finish off DOF, one for x and y
   SVF$DOF <- COL * SVF$DOF
 
-  close(pb)
+  if(trace) { close(pb) }
 
   return(SVF)
 }

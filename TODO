@@ -1,9 +1,30 @@
 ** PRIORITY
+* add ctmmlearn to FAQ
+* color data in data example man files
+* convenience functions like dof()<- for UERE models
+* update R.suit to use matrix.model
+* shift normalize suitability()
+* proximity with multiple individuals
+* user rater::project() in agde, akde, ...
+* predict() individual from population ctmm
+* posterior model predictions
+* pkde weights choice, bandwidth choice, RSF choice - wouldn't be necessary with posterior model predictions
+* gps-time fix on import (e-obs)
+* rsf.fit covariate integrator long-lat fix
+* rsf.fit HREML correction after variance fit
+* averaging individuals with different reference categories
+* include dt.plot diagnostic in bandwidth with weights=TRUE by default?
+** add some quick calculation messages when dt is automated
+* error message for as.telemetry on zero rows
 * fit periodicity frequencies for Bill
+* check for consistent projections in rsf.fit
+* remove bad UD returns (ctmm objects) from functions like mean and overlap
 * DDIM natural resolution option
 * export UD on CTMM objects
+* rsf.fit initial guesses determined by MOM
 
 ** MISC
+* overlap class error check
 * only rareify models after compatible features are selected
 * export list of objects
 * profile upper speed CI?

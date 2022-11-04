@@ -3,7 +3,7 @@
 # add independent variance from RMS speed?
 
 ####
-speeds.telemetry <- function(object,CTMM,t=NULL,cycle=Inf,level=0.95,robust=FALSE,prior=FALSE,fast=TRUE,error=0.01,cores=1,...)
+speeds.telemetry <- function(object,CTMM,t=NULL,cycle=Inf,level=0.95,robust=FALSE,prior=FALSE,fast=TRUE,error=0.01,cores=1,trace=TRUE,...)
 {
   cores <- resolveCores(cores,fast=FALSE)
   data <- object
@@ -12,7 +12,7 @@ speeds.telemetry <- function(object,CTMM,t=NULL,cycle=Inf,level=0.95,robust=FALS
   if(is.null(t)) { t <- data$t }
 
   if(!prior && fast) { SPEEDS <- speeds.fast(data,CTMM=CTMM,t=t,cycle=cycle,level=level,robust=robust,...) }
-  else { SPEEDS <- speeds.slow(data,CTMM=CTMM,t=t,cycle=cycle,level=level,robust=robust,prior=prior,fast=fast,error=error,cores=cores,...) }
+  else { SPEEDS <- speeds.slow(data,CTMM=CTMM,t=t,cycle=cycle,level=level,robust=robust,prior=prior,fast=fast,error=error,cores=cores,trace=trace,...) }
 
   SPEEDS <- as.data.frame(SPEEDS)
   SPEEDS$t <- t
@@ -24,12 +24,12 @@ speeds.telemetry <- function(object,CTMM,t=NULL,cycle=Inf,level=0.95,robust=FALS
   return(SPEEDS)
 }
 
-speeds.ctmm <- function(object,data=NULL,t=NULL,cycle=Inf,level=0.95,robust=FALSE,prior=FALSE,fast=TRUE,error=0.01,cores=1,...)
-{ speeds.telemetry(data,CTMM=object,t=t,cycle=cycle,level=level,robust=robust,prior=prior,fast=fast,error=error,cores=cores,...) }
+speeds.ctmm <- function(object,data=NULL,t=NULL,cycle=Inf,level=0.95,robust=FALSE,prior=FALSE,fast=TRUE,error=0.01,cores=1,trace=TRUE,...)
+{ speeds.telemetry(data,CTMM=object,t=t,cycle=cycle,level=level,robust=robust,prior=prior,fast=fast,error=error,cores=cores,trace=trace,...) }
 
 
 # emulate then simulate
-speeds.slow <- function(data,CTMM=NULL,t=NULL,level=0.95,robust=FALSE,prior=FALSE,fast=TRUE,error=0.01,cores=1,...)
+speeds.slow <- function(data,CTMM=NULL,t=NULL,level=0.95,robust=FALSE,prior=FALSE,fast=TRUE,error=0.01,cores=1,trace=TRUE,...)
 {
   n <- length(t)
 
@@ -101,7 +101,7 @@ speeds.slow <- function(data,CTMM=NULL,t=NULL,level=0.95,robust=FALSE,prior=FALS
 
   # loop over emulations
   ERROR <- Inf
-  pb <- utils::txtProgressBar(style=3)
+  if(trace){ pb <- utils::txtProgressBar(style=3) }
   while(ERROR>=error || N<=20)
   {
     ADD <- plapply(1:cores,spds.fn,cores=cores,fast=FALSE)
@@ -157,7 +157,7 @@ speeds.slow <- function(data,CTMM=NULL,t=NULL,level=0.95,robust=FALSE,prior=FALS
       }
 
       # update progress bar
-      utils::setTxtProgressBar(pb,clamp(min(length(SPEEDS)/20,(error/ERROR)^2)))
+      if(trace){ utils::setTxtProgressBar(pb,clamp(min(length(SPEEDS)/20,(error/ERROR)^2))) }
     }
   } # end while
 
@@ -185,7 +185,7 @@ speeds.slow <- function(data,CTMM=NULL,t=NULL,level=0.95,robust=FALSE,prior=FALS
   }
   CI <- t(CI)
 
-  close(pb)
+  if(trace){ close(pb) }
 
   # all samples were Inf fix
   INF <- CI[,"low"]==Inf
@@ -219,34 +219,23 @@ speeds.fast <- function(data,CTMM=NULL,t=NULL,level=0.95,robust=FALSE,append=FAL
     if(!is.null(CTMM)) { data <- predict(CTMM,data=data,t=t,...) }
 
     axes <- c("vx","vy")
-    v <- get.telemetry(data,axes=axes) # (n,2)
-    VAR <- get.error(data,list(axes=axes,error=TRUE),DIM=2) # (n,2,2)
-
-    # exact second moment - not used currently
-    M2 <- vapply(1:n,function(i){ sum( v[i,]^2 + diag(VAR[i,,]) ) },numeric(1))
-
-    # good approximation to mean speed (delta method fails when velocity estimate is small)
-    M1 <- vapply(1:n,function(i){abs.bivar(v[i,],VAR[i,,])},numeric(1)) # n
+    STUFF <- abs.data(data,axes)
+    v <- STUFF$r
+    M1 <- STUFF$M1
+    M2 <- STUFF$M2
+    VAR <- STUFF$VAR
+    DOF <- STUFF$DOF
 
     if(append)
     {
       data$speed <- M1
       return(data)
     }
-
-    # variance of square speed # exact?
-    # VAR <- 4 * vapply(1:n,function(i){v[i,] %*% VAR[i,,] %*% v[i,]},numeric(1)) # (n)
-    # variance of speed - delta method (M2 might be inconsistent with M1)
-    # VAR <- VAR/AVE^2
-
-    # chi^1 DOF consistent with M1 & VAR about M1 (M2 might be inconsistent with M1)
-    DOF <- vapply(1:n,function(i){chi.dof(M1[i],M2[i])},numeric(1))
   }
-
 
   # if no level, return point estimate and DOF
   if(is.null(level))
-  { v <- cbind(speed=M1,DOF=DOF,VAR=pmax(0,M2-M1^2)) } # output v and chi DOF
+  { v <- cbind(speed=M1,DOF=DOF,VAR=VAR) } # output v and chi DOF
   else
   {
     v <- vapply(1:n,function(i){ chisq.ci(M2[i],DOF=DOF[i],level=level,robust=robust) },numeric(3)) # (3,n)
@@ -262,7 +251,7 @@ speeds.fast <- function(data,CTMM=NULL,t=NULL,level=0.95,robust=FALSE,append=FAL
 # elliptical functions stuff (exact for zero mean)
 # anistotropic + nonzero combination is approximate
 # returns first two moments
-abs.bivar <- function(mu,Sigma)
+abs.bivar <- function(mu,Sigma,return.VAR=FALSE)
 {
   sigma0 <- mean(diag(Sigma))
   stdev0 <- sqrt(sigma0)
@@ -272,18 +261,56 @@ abs.bivar <- function(mu,Sigma)
   sigma <- eigen(Sigma,only.values=TRUE)$values
 
   Barg <- mu2/(4*sigma0)
-  if(Barg >= BESSEL_LIMIT) { return(mu) }
+  if(Barg >= BESSEL_LIMIT)
+  { M1 <- mu }
+  else
+  {
+    B0 <- besselI(Barg,0,expon.scaled=TRUE)
+    B1 <- besselI(Barg,1,expon.scaled=TRUE)
 
-  B0 <- besselI(Barg,0,expon.scaled=TRUE)
-  B1 <- besselI(Barg,1,expon.scaled=TRUE)
+    # contains deterministic limit
+    sqrtpi2 <- sqrt(pi/2)
+    Bv <-  sqrtpi2 * sqrt(Barg) * ( B0 + B1 ) * mu
+    # contains stochastic limit
+    Bs <- B0 / sqrtpi2 * sqrt(sigma[1]) * pracma::ellipke(1-sigma[2]/sigma[1])$e
 
-  # contains deterministic limit
-  sqrtpi2 <- sqrt(pi/2)
-  Bv <-  sqrtpi2 * sqrt(Barg) * ( B0 + B1 ) * mu
-  # contains stochastic limit
-  Bs <- B0 / sqrtpi2 * sqrt(sigma[1]) * pracma::ellipke(1-sigma[2]/sigma[1])$e
+    M1 <- Bv + Bs
+  }
 
-  M1 <- Bv + Bs
+  if(return.VAR)
+  {
+    M2 <- mu2 + 2*sigma0
+    VAR <- max(0,M2-M1^2)
+    M1 <- c(M1,VAR)
+  }
 
   return(M1)
+}
+
+
+abs.data <- function(data,axes=c('x','y'))
+{
+  n <- nrow(data)
+
+  v <- get.telemetry(data,axes=axes) # (n,2)
+  VAR <- get.error(data,list(axes=axes,error=TRUE),DIM=2) # (n,2,2)
+
+  # exact second moment - not used currently
+  M2 <- vapply(1:n,function(i){ sum( v[i,]^2 + diag(VAR[i,,]) ) },numeric(1))
+
+  # good approximation to mean speed (delta method fails when velocity estimate is small)
+  M1 <- vapply(1:n,function(i){abs.bivar(v[i,],VAR[i,,])},numeric(1)) # n
+
+  # variance of square speed # exact?
+  # VAR <- 4 * vapply(1:n,function(i){v[i,] %*% VAR[i,,] %*% v[i,]},numeric(1)) # (n)
+  # variance of speed - delta method (M2 might be inconsistent with M1)
+  # VAR <- VAR/AVE^2
+
+  # chi^1 DOF consistent with M1 & VAR about M1 (M2 might be inconsistent with M1)
+  DOF <- vapply(1:n,function(i){chi.dof(M1[i],M2[i])},numeric(1))
+
+  VAR <- pmax(0,M2-M1^2)
+
+  R <- list(r=v,M1=M1,M2=M2,VAR=VAR,DOF=DOF)
+  return(R)
 }

@@ -102,6 +102,10 @@ determinant.numeric <- function(x,logarithm=TRUE,...)
   return(det)
 }
 
+# 2x2 determinant
+det2 <- function(x)
+{ x[1,1]*x[2,2] - x[1,2]*x[2,1] }
+
 
 # dyadic product default
 outer <- function(X,Y=X,FUN="*",...) { base::outer(X,Y,FUN=FUN,...) }
@@ -261,18 +265,22 @@ PDsolve <- function(M,sym=TRUE,force=FALSE,pseudo=FALSE,tol=.Machine$double.eps)
 
   # check for Inf & invert those to 0 (and vice versa)
   INF <- diag(M)==Inf
-  ZERO <- sapply(1:nrow(M),function(i){all(M[i,]==0)})
+  ZERO <- diag(M)<=0 & sym
   if(any(INF) || any(ZERO))
   {
     # 1/Inf == 0 # correlations not accounted for
     if(any(INF)) { M[INF,] <- M[,INF] <- 0 }
 
     # 1/0 == Inf
-    if(any(ZERO)) { diag(M)[ZERO] <- Inf }
+    if(any(ZERO))
+    {
+      M[ZERO,] <- M[,ZERO] <- 0
+      diag(M)[ZERO] <- Inf
+    }
 
     # regular inverse of remaining dimensions
     REM <- !(INF|ZERO)
-    if(any(REM)) { M[REM,REM] <- PDsolve(M[REM,REM,drop=FALSE],force=force,pseudo=pseudo) }
+    if(any(REM)) { M[REM,REM] <- PDsolve(M[REM,REM,drop=FALSE],force=force,pseudo=pseudo,sym=sym) }
 
     return(M)
   }
@@ -313,7 +321,7 @@ PDsolve <- function(M,sym=TRUE,force=FALSE,pseudo=FALSE,tol=.Machine$double.eps)
   # try ordinary inverse
   M.try <- try(qr.solve(M,tol=tol),silent=TRUE)
   # fall back on decomposition
-  if( class(M.try)[1] == "matrix")
+  if( class(M.try)[1] == "matrix" && (!sym || all(diag(M.try>=0))) )
   { M <- M.try }
   else
   { M <- PDfunc(M,func=function(m){1/m},sym=sym,force=force,pseudo=pseudo,tol=tol) }

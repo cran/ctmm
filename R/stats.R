@@ -8,7 +8,7 @@ cov.loglike <- function(hess,grad=rep(0,sqrt(length(hess))),tol=.Machine$double.
   # if hessian is likely to be positive definite
   if(all(diag(hess)>0))
   {
-    COV <- try(PDsolve(hess))
+    COV <- try(PDsolve(hess),silent=TRUE)
     if(class(COV)[1]=="matrix" && all(diag(COV)>0)) { return(COV) }
   }
   # one of the curvatures is negative or close to negative
@@ -151,10 +151,12 @@ bint <- function(M,ind)
   BINT <- function(i)
   {
     dX <- c(INDx[2,i]-ind[1,i],ind[1,i]-INDx[1,i]) / (INDx[2,i]-INDx[1,i])
-    dX <- nant(dX,1)
+    dX <- nant(dX,1) # in case of 0/0
+    dX <- dX/sum(dX) # in case of two NaNs
 
     dY <- c(INDy[2,i]-ind[2,i],ind[2,i]-INDy[1,i]) / (INDy[2,i]-INDy[1,i])
     dY <- nant(dY,1)
+    dY <- dY/sum(dY)
 
     c( dX %*% M[INDx[,i],INDy[,i]] %*% dY )
   }
@@ -179,12 +181,15 @@ tint <- function(M,ind)
   {
     dX <- c(INDx[2,i]-ind[1,i],ind[1,i]-INDx[1,i]) / (INDx[2,i]-INDx[1,i])
     dX <- nant(dX,1)
+    dX <- dX/sum(dX) # in case of two NaNs
 
     dY <- c(INDy[2,i]-ind[2,i],ind[2,i]-INDy[1,i]) / (INDy[2,i]-INDy[1,i])
     dY <- nant(dY,1)
+    dY <- dY/sum(dY) # in case of two NaNs
 
     dZ <- c(INDz[2,i]-ind[3,i],ind[3,i]-INDz[1,i]) / (INDz[2,i]-INDz[1,i])
     dZ <- nant(dZ,1)
+    dZ <- dZ/sum(dZ) # in case of two NaNs
 
     M <- M[INDx[,i],INDy[,i],INDz[,i]] # tensor block
     M <- dX %.% M # tensor contraction of first index
@@ -307,30 +312,36 @@ idchisq <- function(p,df)
 
 
 # normal confidence intervals
-norm.ci <- function(MLE,COV,level=0.95,alpha=1-level)
+norm.ci <- function(MLE,VAR,level=0.95,alpha=1-level)
 {
   # z-values for low, ML, high estimates
   z <- stats::qnorm(1-alpha/2)*c(-1,0,1)
 
   # normal ci
-  CI <- MLE + z*sqrt(COV)
+  CI <- MLE + z*sqrt(VAR)
 
   names(CI) <- NAMES.CI
   return(CI)
 }
 
 # calculate log-normal confidence intervals from MLE and COV estimates
-lognorm.ci <- function(MLE,COV,level=0.95,alpha=1-level)
+lognorm.ci <- function(MLE,VAR,level=0.95,alpha=1-level)
 {
-  # log transform of variance
-  COV <- COV/MLE^2
-  # log transform of point estimate
-  MLE <- log(MLE)
+  # MLE = exp(mu + sigma/2)
+  # VAR = (exp(sigma)-1) * MLE^2
 
-  CI <- norm.ci(MLE,COV,alpha=alpha)
+  # exp(sigma)-1 = VAR/MLE^2
+  # exp(sigma) = 1+VAR/MLE^2
+  sigma <- log(1 + VAR/MLE^2)
+
+  # mu+sigma/2 = log(MLE)
+  mu <- log(MLE) - sigma/2
+
+  CI <- norm.ci(mu,sigma,alpha=alpha)
 
   # transform back
   CI <- exp(CI)
+  CI[2] <- MLE
 
   return(CI)
 }
@@ -462,28 +473,37 @@ mtmean <- function(x,lower=-Inf,upper=Inf,func=mean)
 # degrees-of-freedom of (proportionally) chi distribution with specified moments
 chi.dof <- function(M1,M2,precision=1/2)
 {
+  # DEBUG <<- list(M1=M1,M2=M2,precision=precision)
+  error <- .Machine$double.eps^precision
+
   # solve for chi^2 DOF consistent with M1 & M2
   R <- M1^2/M2 # == 2*pi/DOF / Beta(DOF/2,1/2)^2 # 0 <= R <= 1
-  if(R>=1) { return(Inf) } # purely deterministic
-  if(R<=0) { return(0) }
+  if(1-R <= 0) { return(Inf) } # purely deterministic
+  if(R <= 0) { return(0) }
 
   DOF <- M1^2/(M2-M1^2)/2 # initial guess - asymptotic limit
-  error <- .Machine$double.eps^precision
   ERROR <- Inf
   while(ERROR>=error)
   {
+    DOF.old <- DOF
+    ERROR.old <- ERROR
+
     # current value at guess
     R0 <- 2*pi/DOF/beta(DOF/2,1/2)^2
     # current value of gradient
     G0 <- ( digamma((DOF+1)/2) - digamma(DOF/2) - 1/DOF )*R0
     # correction
     delta <- (R-R0)/G0
+
     # make sure DOF remains positive
     if(DOF+delta<=0)
     { DOF <- DOF/2 }
     else
     { DOF <- DOF + delta }
+
     ERROR <- abs(delta)/DOF
+
+    if(ERROR>ERROR.old) { return(DOF.old) }
   }
 
   return(DOF)
@@ -656,16 +676,23 @@ DD.IG.ratio <- function(par,VAR,n)
 # VAR2 == VAR[1/denominator]
 F.CI <- function(E1,VAR1,E2,VAR2,level=0.95)
 {
-  EST <- E1*E2
+  EST <- nant(E1*E2,0)
   N1 <- 2*E1^2/VAR1 # chi^2 DOF
-  N2 <- 2*E2^2/VAR2 + 4 # inverse-chi^2 DOF
-  BIAS <- N2/(N2-2) # F-distribution mean bias factor
-  if(BIAS<0) { BIAS <- Inf }
+  N2 <- nant(2*E2^2/VAR2 + 4,0) # inverse-chi^2 DOF
 
-  alpha <- (1-level)/2
-  CI <- stats::qf(c(alpha,1-alpha),N1,N2)
-  CI <- CI / BIAS # debiased ratio corresponding to EST=1
-  CI <- c(CI[1],1,CI[2]) * EST
+  if(N1<=0 || N2<=0)
+  { CI <- c(0,EST,Inf) }
+  else
+  {
+    BIAS <- N2/(N2-2) # F-distribution mean bias factor
+    if(BIAS<=0) { BIAS <- Inf }
+
+    alpha <- (1-level)/2
+    CI <- stats::qf(c(alpha,1-alpha),N1,N2)
+    CI <- CI / BIAS # debiased ratio corresponding to EST=1
+    CI <- c(CI[1],1,CI[2]) * EST
+  }
+
   names(CI) <- NAMES.CI
 
   return(CI)

@@ -1,3 +1,48 @@
+ctmm 1.1.0 (2022-11-03)
+================
+
+  * new function pkde() for population kernel density estimates
+  
+  * new functions difference(), distances(), proximity() for estimating distances between individuals
+
+  * new functions Log(), Exp() to log transform parameter estimates and their uncertainties for meta-analytic regression
+  
+  * new functions dimfig(), sigfig() to represent quantities with concise units and significant digits
+
+  * new argument 'sample' in mean()
+  
+  * new argument 'interpolate' in rsf.fit()
+  
+  * new arguments 'xlim', 'ylim' to plot.outlie()
+
+  * numerical stability improvements in rsf.fit optimization and hessian calculations
+  
+  * numerical convergence improvements in location error fitting
+  
+  * numerical convergence improvements in AKDE weight optimization
+  
+  * plot.telemetry can now subset and reproject rasters
+  
+  * bugfix in sp::polygon derived areas (used since v1.0.0 for summary, plot, meta)
+  
+  * bugfix in agde, suitability, RSF-akde when reprojecting onto the same raster
+  
+  * bugfix in mean() when averaging isotropic and anisotropic models together
+
+  * bugfix in speeds() without telemetry object
+  
+  * bugfix in cluster() with 0/0 bias correction error
+  
+  * bugfix in occurrence() with multiple error classes
+  
+  * bugfix in chi dof computation
+  
+  * bugfix in outlie() for error ellipses
+  
+  * summary() now works on mean.ctmm() outputs from different input model structures (OUF & OUO)
+  
+  * fixed log-chi^2 bias correction in mean.ctmm()
+
 ctmm 1.0.0 (2022-07-07)
 ================
 

@@ -4,6 +4,7 @@
 PQP.solve <- function(G,FLOOR=NULL,p=NULL,lag=NULL,error=.Machine$double.eps,PC="circulant",IG=NULL,MARKOV=NULL,trace=FALSE,...)
 {
   silent <- TRUE
+  RESIDUAL <- FALSE # residual conjugate gradient (not yet tested)
 
   if(length(dim(G))==2) { fast <- FALSE } else { fast <- TRUE }
   # are we doing direct matrix calculations or FFT tricks?
@@ -78,7 +79,7 @@ PQP.solve <- function(G,FLOOR=NULL,p=NULL,lag=NULL,error=.Machine$double.eps,PC=
     {
       stop("!fast & Topelitz not yet implemented.")
     }
-  }
+  } # end !fast PC and %*%
   else ### using FFT tricks ###########################################################
   {
     n <- length(FLOOR) # number of sampled times
@@ -210,7 +211,7 @@ PQP.solve <- function(G,FLOOR=NULL,p=NULL,lag=NULL,error=.Machine$double.eps,PC=
 
       G.VEC <- function(V,inverse=FALSE) { c(G %*% V) }
     }
-  }
+  } # end fast PC and %*%
 
   ########################################################
   ######### DEFINE PRECONDITIONERS #######################
@@ -260,7 +261,7 @@ PQP.solve <- function(G,FLOOR=NULL,p=NULL,lag=NULL,error=.Machine$double.eps,PC=
 
       return(V)
     }
-  }
+  } # end banded PC
   else if(PC=="circulant")
   {
     PC.VEC <- function(V)
@@ -317,50 +318,54 @@ PQP.solve <- function(G,FLOOR=NULL,p=NULL,lag=NULL,error=.Machine$double.eps,PC=
 
       return(V)
     }
-  }
+  } # end Markov PC
 
-  # find the best linear combination of vectors for solution to V=solve(G,1)
-  L.SEARCH <- function(V,G.V)
-  {
-    k <- length(V)
-    k.V <- length(G.V)
-
-    # populate remainder of G.V if necessary
-    if(k.V < k)
-    {
-      for(i in (k.V+1):k)
-      {
-        G.V[[i]] <- G.VEC(V[[i]])
-        G.V[[i]][ACTIVE] <- 0
-      }
-    }
-
-    # matrix of inner productions WRT G
-    M <- array(0,c(k,k))
-    for(i in 1:k)
-    {
-      # fill upper triangle
-      for(j in i:k)
-      { M[i,j] <- c(V[[i]] %*% G.V[[j]]) }
-      # copy lower triangle
-      for(j in 1:i)
-      { M[j,i] <- M[i,j] }
-    }
-
-    # vector of inner products WRT 1
-    B <- sapply(V,sum)
-
-    # safe solver in case of colinearity
-    A <- PDsolve(M,pseudo=TRUE) %*% B
-
-    V <- lapply(1:k,function(i) { A[i] * V[[i]] })
-    G.V <- lapply(1:k,function(i) { A[i] * G.V[[i]] })
-
-    V <- Reduce('+',V)
-    G.V <- Reduce('+',G.V)
-
-    return(list(V=V,G.V=G.V))
-  }
+  # # find the best linear combination of vectors for solution to V=solve(G,1)
+  # L.SEARCH <- function(V,G.V)
+  # {
+  #   k <- length(V)
+  #   k.V <- length(G.V)
+  #
+  #   # populate remainder of G.V if necessary
+  #   if(k.V < k)
+  #   {
+  #     for(i in (k.V+1):k)
+  #     {
+  #       G.V[[i]] <- G.VEC(V[[i]])
+  #       G.V[[i]][ACTIVE] <- 0
+  #     }
+  #   }
+  #
+  #   # matrix of inner productions WRT G
+  #   M <- array(0,c(k,k))
+  #   for(i in 1:k)
+  #   {
+  #     # fill upper triangle
+  #     for(j in i:k)
+  #     { M[i,j] <- c(V[[i]] %*% G.V[[j]]) }
+  #     # copy lower triangle
+  #     for(j in 1:i)
+  #     { M[j,i] <- M[i,j] }
+  #   }
+  #
+  #   # vector of inner products WRT 1
+  #   B <- sapply(V,sum)
+  #
+  #   # safe solver in case of colinearity
+  #   A <- PDsolve(M,pseudo=TRUE) %*% B
+  #
+  #   V <- lapply(1:k,function(i) { A[i] * V[[i]] })
+  #   G.V <- lapply(1:k,function(i) { A[i] * G.V[[i]] })
+  #
+  #   V <- Reduce('+',V)
+  #   G.V <- Reduce('+',G.V)
+  #
+  #   W <- sum(V)
+  #   V <- V/W
+  #   G.V <- G.V/W
+  #
+  #   return(list(V=V,G.V=G.V))
+  # }
 
   #####################
   # CHECK KKT CONDITIONS TO FIX ACTIVE/FREE DIMENSIONS
@@ -368,7 +373,7 @@ PQP.solve <- function(G,FLOOR=NULL,p=NULL,lag=NULL,error=.Machine$double.eps,PC=
   FREE <- !ACTIVE # current feasible dimensions
   m <- n # number of free dimensions
   CHANGE <- TRUE # did our constraints change?, then keep working
-  MISE <- rep(Inf,3) # last 3 MISE objectives - the 3>1 is arbitrary
+  MISE <- rep(Inf,3) # last 3 MISE objectives - the 3>2 is arbitrary
   LAMBDA <- rep(1/n,3) # last 3 normalization constants
   KKT <- function()
   {
@@ -416,6 +421,9 @@ PQP.solve <- function(G,FLOOR=NULL,p=NULL,lag=NULL,error=.Machine$double.eps,PC=
     { P <- PC.VEC(P) }
     else # might as well do something
     { P[FREE] <- qr.solve(G[FREE,FREE],rep(1,m),tol=.Machine$double.eps) }
+
+    P <- clamp(P,0,Inf)
+    P <- P/sum(P)
   }
   else # use preconditioner solution
   {
@@ -444,63 +452,99 @@ PQP.solve <- function(G,FLOOR=NULL,p=NULL,lag=NULL,error=.Machine$double.eps,PC=
     {
       PC.UPDATE()
       G.P[ACTIVE] <- 0
-
-      # we can do a better job of fixing G[FREE,FREE]*P[FREE] == 1[FREE] than just tossing out the zeros from P
-      # P[FREE] <- A[1]*P[FREE] + A[2]*1[FREE] + A[3]*PC(1[FREE]) + A[4]*dP[FREE]
-      P <- list(P)
-      P[[2]] <- as.numeric(FREE)
-      if(PC!="IID" & (!get("EMPTY",pos=PQP.env) || CHANGES>1)) # otherwise this is the same as [[2]] || [[1]]
-      {
-        P[[3]] <- PC.VEC(P[[2]])
-        P[[3]][ACTIVE] <- 0
-      }
-      G.P <- list(G.P)
-
-      P <- L.SEARCH(P,G.P)
-      G.P <- P$G.V
-      P <- P$V
-      # The improvement with this seems rather marginal, but worth keeping...
+      P[ACTIVE] <- 0
+      SP <- sum(P)
+      P <- P/SP
+      G.P <- G.P/SP
 
       # STEEPEST DESCENT INITIALIZATION INTO CONJUGATE GRADIENT ON !CHANGE
       # optimization in the free space to actually solve for Q=solve(G_FREE,1_FREE) proportional to solution by P=LAMBDA*Q
-      RES <- FREE - G.P # this is -GRAD in the conditioned free space, using conjugate-gradient notation of residual
-      Z <- PC.VEC(RES) # preconditioned conjugate gradient variable
-      CONJ <- Z # this is often called 'p', but that's confusing because we are working with probabilities
+      RES <- FREE - G.P # (r) this is -GRAD in the conditioned free space, using conjugate-gradient notation of residual
+      Z <- PC.VEC(RES) # (z) preconditioned conjugate gradient variable
+      CONJ <- Z # (p) this is often called 'p', but that's confusing because we are working with probabilities
       # optimize step length in free space assumption
 
       # CONJUGATE GRADIENT (STEPEST DESCENT ON FIRST STEP)
-      ERROR <- Inf
+      ERROR <- ERROR.OLD <- Inf
       CG.STEPS <- 0
+      RESTARTED <- FALSE
       while(ERROR > error && CG.STEPS < n)
       {
         # optimize step length in free space assumption
-        G.CONJ <- G.VEC(CONJ)
+        G.CONJ <- G.VEC(CONJ) # (A.p)
         G.CONJ[ACTIVE] <- 0
-        C.G.C <- c(CONJ %*% G.CONJ)
-        if(abs(C.G.C)<=.Machine$double.eps) { if(!silent) { message("PCCG divergence in alpha") } ; break }
-        Z.RES <- c(Z %*% RES)
-        A <- Z.RES / C.G.C
-        dP <- A*CONJ # need this for stopping condition
 
-        # make sure Lagrangian/objective is decreasing
+        Z.RES <- c(Z %*% RES) # (z.r)
+        if(!RESIDUAL) # regular conjugate gradient
+        {
+          C.G.C <- c(CONJ %*% G.CONJ) # (p.A.p)
+          if(abs(C.G.C)<=.Machine$double.eps) { break }
+
+          A <- Z.RES / C.G.C # (alpha)
+        }
+        else # residual conjugate gradient
+        {
+          PC.G.C <- PC.VEC(G.CONJ) # (PC.A.p)
+          C.G.PC.G.C <- c(G.CONJ %*% PC.G.C) # (p.A.PC.A.p)
+          if(abs(C.G.PC.G.C)<=.Machine$double.eps) { break }
+
+          if(CG.STEPS==0)
+          {
+            G.Z <- G.VEC(Z) # (A.z)
+            Z.G.Z <- c(Z %*% G.Z) # (z.A.z)
+          }
+
+          A <- Z.G.Z / C.G.PC.G.C
+        }
+
+        dP <- A*CONJ # (dx) need this for stopping condition
+
+        # make sure corrections will get smaller
+        ERROR.OLD <- ERROR
+        ERROR <- sqrt(sum(dP^2))
+
+        # make sure Lagrangian/objective will decrease
         dL <- c((P+dP/2) %*% G.CONJ)*A - sum(dP)
-        # the solution going forward is actually worse
-        if(dL>=0) { if(!silent) { message("PCCG stopped converging") } ; break }
 
-        P <- P + dP
-        dRES <- -A*G.CONJ # need this for Polak-Ribiere formula
-        RES <- RES + dRES
-        Z <- PC.VEC(RES)
-        Z.dRES <- c(Z %*% dRES) # Polak-Ribiere formula
-        Z.dRES <- max(0,Z.dRES) # reset to steepest descent if necessary
-        if(abs(Z.RES)<=.Machine$double.eps) { if(!silent) { message("PCCG divergence in beta") } ; break }
-        B <- Z.dRES / Z.RES
-        CONJ <- Z + B*CONJ
+        if(ERROR>=ERROR.OLD || dL>=0)
+        {
+          # you get one restart
+          if(RESTARTED || !CG.STEPS) { break }
 
-        ####################################
-        # make this the decrease in Lagrangian or something ?
-        # weights are all on the same scale.................
-        ERROR <- max(abs(dP)) * n
+          G.P <- G.VEC(P)
+          G.P[ACTIVE] <- 0
+          RES <- FREE - G.P # (r)
+          Z <- PC.VEC(RES) # (z)
+          CONJ <- Z # (p)
+
+          RESTARTED <- TRUE
+          ERROR <- ERROR.OLD
+          next
+        }
+
+        P <- P + dP # (x)
+
+        dRES <- -A*G.CONJ # (dr) need this for Polak-Ribiere formula
+        RES <- RES + dRES # (r)
+        Z <- PC.VEC(RES) # (z)
+
+        if(!RESIDUAL) # regular conjugate gradient
+        {
+          Z.dRES <- c(Z %*% dRES) # (z.dr) Polak-Ribiere formula
+          Z.dRES <- max(0,Z.dRES) # reset to steepest descent if necessary
+          if(abs(Z.RES)<=.Machine$double.eps) { break } # ?
+          B <- Z.dRES / Z.RES # (beta)
+        }
+        else # residual conjugate gradient
+        {
+          B <- Z.G.Z # temp storage
+
+          G.Z <- G.VEC(Z) # (A.z)
+          Z.G.Z <- c(Z %*% G.Z) # (z.A.z)
+
+          B <- Z.G.Z/B
+        }
+        CONJ <- Z + B*CONJ # (p)
 
         CG.STEPS <- CG.STEPS + 1
       }
@@ -510,7 +554,8 @@ PQP.solve <- function(G,FLOOR=NULL,p=NULL,lag=NULL,error=.Machine$double.eps,PC=
     # CHECK KKT CONDITIONS AND RESET ACTIVE/FREE SPACE
     KKT()
 
-    # make sure the MISE is decreasing and we are not stuck in a rare numerical-indiscrimination / solution-boundary loop
+    # make sure the MISE is decreasing
+    # make sure we are not stuck in a rare numerical-indiscrimination / solution-boundary loop
     if(all(MISE[1] >= MISE[2:3])) { break }
   }
 

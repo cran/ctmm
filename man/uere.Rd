@@ -52,7 +52,7 @@ C. H. Fleming et al, ``A comprehensive framework for handling location error in 
 
 \seealso{ \code{\link{as.telemetry}}, \code{\link{residuals.telemetry}}.  }
 
-\examples{
+\examples{\donttest{
 # Load package and data
 library(ctmm)
 data(turtle)
@@ -75,13 +75,13 @@ RES <- lapply(turtle[1:2],residuals)
 plot(RES,col.DF=NA,level.UD=c(0.50,0.95,0.999))
 
 # check calibration data for autocorrelation using fast=FALSE because samples are small
-ACFS <- lapply(RES,function(R){correlogram(R,fast=FALSE,dt=10 \%#\% 'min')})
+ACFS <- lapply(RES,function(R){correlogram(R,fast=FALSE,dt=10 \%#\% 'min',trace=FALSE)})
 
 # pooling ACFs
 ACF <- mean(ACFS)
 
 plot(ACF)
-}
+}}
 
 % Add one or more standard keywords, see file 'KEYWORDS' in the
 % R documentation directory.

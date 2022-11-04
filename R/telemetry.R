@@ -571,7 +571,7 @@ as.telemetry.data.frame <- function(object,timeformat="",timezone="UTC",projecti
   NAMES$timestamp <- c('timestamp','timestamp.of.fix','Acquisition.Time',
                        'Date.Time','Date.Time.GMT','UTC.Date.Time',"DT.TM",'Ser.Local','GPS_YYYY.MM.DD_HH.MM.SS',
                        'Acquisition.Start.Time','start.timestamp',
-                       'Time.GMT','GMT.Time','time',"\u6642\u523B",
+                       'Time.GMT','GMT.Time','Local.Time','time',"\u6642\u523B",
                        'Date.GMT','Date','Date.Local',"\u65E5\u4ED8",
                        't','t_dat','use_date')
   NAMES$id <- c("animal.ID","individual.local.identifier","local.identifier","individual.ID","Name","ID","ID.Names","Animal","Full.ID",
@@ -582,7 +582,10 @@ as.telemetry.data.frame <- function(object,timeformat="",timezone="UTC",projecti
   NAMES$zone <- c("GPS.UTM.zone","UTM.zone","zone")
   NAMES$east <- c("GPS.UTM.Easting","GPS.UTM.East","GPS.UTM.x","UTM.Easting","UTM.East","UTM.E","UTM.x","Easting","East","x")
   NAMES$north <- c("GPS.UTM.Northing","GPS.UTM.North","GPS.UTM.y","UTM.Northing","UTM.North","UTM.N","UTM.y","Northing","North","y")
-  NAMES$error <- c("eobs.horizontal.accuracy.estimate","eobs.horizontal.accuracy.estimate.m","horizontal.accuracy.estimate","horizontal.accuracy.estimate.m","error.m","3D.error.m","HEPE","EPE","EHPE",
+  NAMES$error <- c("eobs.horizontal.accuracy.estimate","eobs.horizontal.accuracy.estimate.m","eobs.horizontal.accuracy",
+                   "gps.horizontal.accuracy.estimate","gps.horizontal.accuracy.estimate.m","gps.horizontal.accuracy",
+                   "horizontal.accuracy.estimate","horizontal.accuracy.estimate.m","horizontal.accuracy",
+                   "error.m","3D.error.m","HEPE","EPE","EHPE",
                    "\u8AA4\u5DEE","\u8AA4\u5DEE.m","\u8AA4\u5DEE\uFF08m\uFF09")
   NAMES$HDOP <- c("GPS.HDOP","HDOP","Horizontal.DOP","GPS.Horizontal.Dilution","Horizontal.Dilution","Hor.Dil","Hor.DOP","HPE")
   NAMES$DOP <- c("GPS.DOP","DOP","GPS.Dilution","Dilution","Dil")
@@ -591,7 +594,7 @@ as.telemetry.data.frame <- function(object,timeformat="",timezone="UTC",projecti
   NAMES$VDOP <- c("GPS.VDOP","VDOP","Vertical.DOP","GPS.Vertical.Dilusion","Vertical.Dilution","Ver.Dil","Ver.DOP")
   NAMES$nsat <- c("GPS.satellite.count","satellite.count","Sat.Count","Number.of.Sats","Num.Sats","Nr.Sat","NSat","NSats","Sat.Num","satellites.used","Satellites","Sats","SVs.in.use") # Counts? Messages?
   NAMES$FIX <- c("GPS.fix.type","GPS.fix.type.raw","fix.type","type.of.fix","e.obs.type.of.fix","Fix.Attempt","GPS.Fix.Attempt","Telonics.Fix.Attempt","Fix.Status","sensor.type","Fix","eobs.type.of.fix","2D/3D","X3.equals.3dfix.2.equals.2dfix","Nav","Validated","VALID")
-  NAMES$TTF <- c("GPS.time.to.fix","time.to.fix","time.to.GPS.fix","time.to.GPS.fix.s","GPS.TTF","TTF","GPS.fix.time","fix.time","time.to.get.fix","used.time.to.get.fix","e.obs.used.time.to.get.fix","Duration","GPS.navigation.time","navigation.time","Time.On")
+  NAMES$TTF <- c("GPS.time.to.fix","time.to.fix","time.to.GPS.fix","time.to.GPS.fix.s","GPS.TTF","TTF","GPS.fix.time","fix.time","time.to.get.fix","used.time.to.get.fix","e.obs.used.time.to.get.fix","Duration","GPS.navigation.time","navigation.time","Time.On","Searching.Time")
   NAMES$z <- c("height.above.ellipsoid","height.above.elipsoid","height.above.ellipsoid.m","height.above.elipsoid.m","height.above.msl","height.above.mean.sea.level","height.raw","height","height.m","barometric.height","altimeter","altimeter.m","Argos.altitude","GPS.Altitude","MSL_altitude_m","altitude","altitude.m","Alt","barometric.depth","depth","elevation","elevation.m","elev")
   NAMES$v <- c("ground.speed",'speed.over.ground','speed.over.ground.m.s',"speed","GPS.speed")
   NAMES$heading <- c("heading","heading.degree","heading.degrees","GPS.heading","Course","direction","direction.deg")
