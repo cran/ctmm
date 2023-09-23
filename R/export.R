@@ -36,16 +36,18 @@ raster.UD <- function(x,DF="CDF",...)
 
   return(R)
 }
-methods::setMethod("raster",signature(x="UD"), function(x,DF="CDF",...) raster.UD(x,DF=DF,...))
+methods::setMethod("raster",methods::signature(x="UD"), function(x,DF="CDF",...) raster.UD(x,DF=DF,...))
 
 
 ##########################
 writeRaster.UD <- function(x,filename,format,DF="CDF",...)
 {
+  if(missing(filename)) { filename <- attr(x,"info")$identity }
+
   x <- raster(x,DF=DF)
   writeRaster(x,filename,format,...)
 }
-methods::setMethod("writeRaster",signature(x="UD",filename="character"), function(x,filename,format,DF="CDF",...) writeRaster.UD(x,filename,format,DF=DF,...))
+methods::setMethod("writeRaster",methods::signature(x="UD",filename="character"), function(x,filename,format,DF="CDF",...) writeRaster.UD(x,filename,format,DF=DF,...))
 
 
 ################
@@ -83,6 +85,21 @@ SpatialPolygonsDataFrame.UD <- function(object,convex=FALSE,level.UD=0.95,level=
 
     if(length(CL)==0) # nudge sp to make a contour
     { CL <- grDevices::contourLines(UD$r,z=UD$CDF,levels=P[i]*(1+.Machine$double.eps)) }
+
+    if(length(CL)==0) # fallback on the mode
+    {
+      CL <- list()
+      CL$level <- P[i]
+      MODE <- which.min(UD$CDF)
+      MODE <- arrayInd(MODE,dim(UD$CDF))
+      MODE <- c( UD$r$x[ MODE[1,1] ] , UD$r$y[ MODE[1,2] ] )
+      AREA <- summary(UD,level.UD=P[i],units=FALSE)$CI[2]
+      RAD <- sqrt(AREA/pi)
+      RAD <- max(RAD,.Machine$double.eps)
+      CL$x <- MODE[1] + c(1,0,-1,0)*RAD
+      CL$y <- MODE[2] + c(0,1,0,-1)*RAD
+      CL <- list(CL)
+    }
 
     # # sp complains when less than 4 vertices
     # GOOD <- rep(TRUE,length(CL))
@@ -140,19 +157,38 @@ SpatialPolygonsDataFrame.UD <- function(object,convex=FALSE,level.UD=0.95,level=
 
   return(polygons)
 }
-#methods::setMethod("SpatialPolygonsDataFrame",signature(Sr="UD"), function(Sr,level.UD=0.95,level=0.95) SpatialPolygonsDataFrame.UD(Sr,level.UD=level.UD,level=level))
+#methods::setMethod("SpatialPolygonsDataFrame",methods::signature(Sr="UD"), function(Sr,level.UD=0.95,level=0.95) SpatialPolygonsDataFrame.UD(Sr,level.UD=level.UD,level=level))
+
+
+###########
+writeVector.UD <- function(x,filename,filetype="ESRI Shapefile",convex=FALSE,level.UD=0.95,level=0.95,...)
+{
+  if(missing(filename)) { filename <- attr(x,"info")$identity }
+  x <- SpatialPolygonsDataFrame.UD(x,convex=convex,level.UD=level.UD,level=level)
+  x <- terra::vect(x)
+  terra::writeVector(x,filename,filetype=filetype,...)
+}
+methods::setMethod("writeVector",methods::signature(x="UD",filename="character"), function(x,filename,filetype="ESRI Shapefile",convex=FALSE,level.UD=0.95,level=0.95,...) writeVector.UD(x,filename,filetype=filetype,convex=convex,level.UD=level.UD,level=level,...) )
+methods::setMethod("writeVector",methods::signature(x="UD",filename="missing"), function(x,filename,filetype="ESRI Shapefile",convex=FALSE,level.UD=0.95,level=0.95,...) writeVector.UD(x,filename,filetype=filetype,convex=convex,level.UD=level.UD,level=level,...) )
 
 
 ################
-writeShapefile.UD <- function(object,folder,file=NULL,convex=FALSE,level.UD=0.95,level=0.95,...)
+writeVector.telemetry <- function(x,filename,filetype="ESRI Shapefile",error=TRUE,level.UD=0.95,...)
 {
-  UD <- object
-  if(is.null(file)) { file <- attr(object,"info")$identity }
+  if(missing(filename)) { filename <- mean_info(x)$identity }
 
-  SP <- SpatialPolygonsDataFrame.UD(UD,convex=convex,level.UD=level.UD,level=level)
+  # make one long SPDF
+  if(error) { x <- SpatialPolygonsDataFrame.telemetry(x,level.UD=level.UD) }
+  else { x <- SpatialPointsDataFrame.telemetry(x) }
 
-  rgdal::writeOGR(SP, dsn=folder, layer=file, driver="ESRI Shapefile",...)
+  # make shape file from points
+  x <- terra::vect(x)
+  terra::writeVector(x,filename,filetype=filetype,...)
+
+  # no return value
 }
+methods::setMethod("writeVector",methods::signature(x="telemetry",filename="character"), function(x,filename,filetype="ESRI Shapefile",error=TRUE,level.UD=0.95,...) writeVector.telemetry(x,filename,filetype=filetype,error=error,level.UD=level.UD,...) )
+methods::setMethod("writeVector",methods::signature(x="telemetry",filename="missing"), function(x,filename,filetype="ESRI Shapefile",error=TRUE,level.UD=0.95,...) writeVector.telemetry(x,filename,filetype=filetype,error=error,level.UD=level.UD,...) )
 
 
 #########################
@@ -170,7 +206,7 @@ SpatialPoints.telemetry <- function(object,...)
 
   return(SP)
 }
-#methods::setMethod("SpatialPoints",signature(coords="telemetry"), function(coords) SpatialPoints.telemetry(coords))
+#methods::setMethod("SpatialPoints",methods::signature(coords="telemetry"), function(coords) SpatialPoints.telemetry(coords))
 
 
 ##############
@@ -243,22 +279,6 @@ SpatialPolygonsDataFrame.telemetry <- function(object,level.UD=0.95,...)
   polygons <- sp::SpatialPolygonsDataFrame(polygons,DF)
 
   return(polygons)
-}
-
-
-################
-writeShapefile.telemetry <- function(object,folder,file=NULL,error=TRUE,level.UD=0.95,...)
-{
-  if(is.null(file)) { file <- mean.info(object) }
-
-  # make one long SPDF
-  if(error) { SP <- SpatialPolygonsDataFrame.telemetry(object,level.UD=level.UD) }
-  else { SP <- SpatialPointsDataFrame.telemetry(object) }
-
-  # make shape file from points
-  rgdal::writeOGR(SP, dsn=folder, layer=file, driver="ESRI Shapefile",...)
-
-  # no return value
 }
 
 

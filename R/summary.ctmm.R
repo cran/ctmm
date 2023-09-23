@@ -16,51 +16,55 @@ confint.ctmm <- function(model,alpha=0.05,UNICODE=FALSE)
   POV <- model[["POV"]]
   COV.POV <- model[["COV.POV"]]
   VARS <- dimnames(COV)[[1]]
+  PVARS <- diag(POV)
 
   par <- NULL
   NAMES <- NULL
 
-  # standard area uncertainty: chi-square
-  NAMES <- c(NAMES,"area")
-  AREA <- area.covm(model$sigma)
-  DOF <- 2*DOF.area(model)
-  VAR <- 2*AREA^2/DOF
-  AREA <- chisq.ci(AREA,DOF=DOF,alpha=alpha)
-  par <- rbind(par,AREA)
-
-  if(!is.null(POV))
+  if("sigma" %in% names(model))
   {
-    J <- J.zero(POV)
+    # standard area uncertainty: chi-square
+    NAMES <- c(NAMES,"area")
+    AREA <- area.covm(model$sigma)
+    DOF <- 2*DOF.area(model)
+    VAR <- 2*AREA^2/DOF
+    AREA <- chisq.ci(AREA,DOF=DOF,alpha=alpha)
+    par <- rbind(par,AREA)
 
-    if(isotropic[1])
+    if(sum(PVARS[c('major','minor')],na.rm=TRUE)>0)
     {
-      P <- 'major'
-      AREA <- sigma@par[P]
-      # CoV^2
-      PAR <- POV[P,P] / AREA^2
-      # dArea/dpar
-      J[P,P] <- 1
-      J <- quad2lin(J,diag=TRUE)
-    }
-    else
-    {
-      P <- c('major','minor')
-      AREA <- sqrt(prod(sigma@par[P]))
-      # dArea/dpar
-      J0 <- 1/2 * AREA / sigma@par[P]
-      # CoV^2
-      PAR <- c(J0 %*% POV[P,P] %*% J0)/AREA^2
-      # Jacobian for VAR[Area]
-      J[P,P] <- J0
-      J <- quad2lin(J,diag=TRUE)
-    }
-    # VAR[PAR|POV] + VAR[PAR|Area]
-    VAR <- tr(J %*% COV.POV %*% t(J))/AREA^4 + (-2*PAR/AREA)^2*VAR
-    PAR <- chisq.ci(PAR,VAR=VAR,alpha=alpha)
-    PAR <- sqrt(PAR)
+      J <- J.zero(POV)
 
-    NAMES <- c(NAMES,"CoV[area]")
-    par <- rbind(par,PAR)
+      if(isotropic[1])
+      {
+        P <- 'major'
+        AREA <- sigma@par[P]
+        # CoV^2
+        PAR <- POV[P,P] / AREA^2
+        # dArea/dpar
+        J[P,P] <- 1
+      }
+      else
+      {
+        P <- c('major','minor')
+        AREA <- sqrt(prod(sigma@par[P]))
+        # dArea/dpar
+        J0 <- 1/2 * AREA / sigma@par[P]
+        # CoV^2
+        PAR <- c(J0 %*% POV[P,P] %*% J0)/AREA^2
+        # Jacobian for VAR[Area]
+        J[P,P] <- J0
+      }
+      J <- quad2lin(J,diag=TRUE)
+
+      # VAR[PAR|POV] + VAR[PAR|Area]
+      VAR <- tr(J %*% COV.POV %*% t(J))/AREA^4 + (-2*PAR/AREA)^2*VAR
+      PAR <- chisq.ci(PAR,VAR=VAR,alpha=alpha)
+      PAR <- sqrt(PAR)
+
+      NAMES <- c(NAMES,"CoV[area]")
+      par <- rbind(par,PAR)
+    }
   }
 
   # timescale uncertainty: can hit 0 and Inf
@@ -107,7 +111,7 @@ confint.ctmm <- function(model,alpha=0.05,UNICODE=FALSE)
       J[NAME,NAME] <- J0
       J <- quad2lin(J,diag=TRUE)
       VAR <- diag( J %*% COV.POV %*% t(J) )
-      names(VAR) <- model$features
+      names(VAR) <- rownames(COV)
       VAR <- VAR[NAME]/TAU^4 + (-2*PAR/TAU)^2*VAR.TAU
     }
 
@@ -116,7 +120,7 @@ confint.ctmm <- function(model,alpha=0.05,UNICODE=FALSE)
       par <- rbind(par,ci.tau(TAU[k],VAR.TAU[k],alpha=alpha))
       NAMES <- c(NAMES,LABEL[k])
 
-      if(!is.null(POV))
+      if(sum(PVARS[NAME[k]],na.rm=TRUE)>0)
       {
         par <- rbind(par,sqrt(chisq.ci(PAR[k],VAR[k],alpha=alpha)))
         NAMES <- c(NAMES,paste0("CoV[",LABEL[k],"]"))
@@ -150,7 +154,7 @@ confint.ctmm <- function(model,alpha=0.05,UNICODE=FALSE)
     par <- rbind(par,CI)
     NAMES <- c(NAMES,"circle")
 
-    if(!is.null(POV))
+    if(sum(PVARS['circle'],na.rm=TRUE)>0)
     {
       f <- 2*pi/circle
       J0 <- -2*pi/circle^2
@@ -269,6 +273,7 @@ summary.ctmm.single <- function(object, level=0.95, level.UD=0.95, units=TRUE, .
   {
     COV <- object$COV
     POV <- object$POV
+    PVARS <- diag(POV)
     COV.POV <- object$COV.POV
   }
   else # fill in with infinite covariance
@@ -279,6 +284,7 @@ summary.ctmm.single <- function(object, level=0.95, level.UD=0.95, units=TRUE, .
     dimnames(COV) <- list(P,P)
     object$COV <- COV
     POV <- NULL
+    PVARS <- NULL
   }
   P <- nrow(COV)
 
@@ -292,18 +298,21 @@ summary.ctmm.single <- function(object, level=0.95, level.UD=0.95, units=TRUE, .
   ### AREA
   par <- confint.ctmm(object,alpha=alpha,UNICODE=TRUE)
   # where to store unit information
-  K <- nrow(par)
+  K <- max(nrow(par),0)
   name <- rep("",K)
   scale <- rep(1,K)
   names(name) <- names(scale) <- rownames(par)
 
-  # standard area to home-range area
-  par["area",] <- -2*log(alpha.UD)*pi*par[1,]
+  if("area" %in% rownames(par))
+  {
+    # standard area to home-range area
+    par["area",] <- -2*log(alpha.UD)*pi*par[1,]
 
-  # pretty area units   # do we convert units
-  unit.list <- unit.par(par["area",],"area",SI=!units)
-  name["area"] <- unit.list$name
-  scale["area"] <- unit.list$scale
+    # pretty area units   # do we convert units
+    unit.list <- unit.par(par["area",],"area",SI=!units)
+    name["area"] <- unit.list$name
+    scale["area"] <- unit.list$scale
+  }
 
   # pretty time units
   I <- !grepl("CoV",rownames(par),fixed=TRUE)
@@ -345,13 +354,13 @@ summary.ctmm.single <- function(object, level=0.95, level.UD=0.95, units=TRUE, .
     par <- rbind(par,rms)
     rownames(par)[nrow(par)] <- "speed"
 
-    if(!is.null(POV))
+    if(sum(PVARS[c('major','minor','tau','tau position','tau velocity')],na.rm=TRUE)>0)
     {
       J0 <- STUFF$J
       PAR <- c(J0 %*% POV %*% J0)/ms^2
 
-      J0 <- rbind(J0,array(0,length(J0)-1:0))
-      J <- quad2lin(J0,diag=TRUE)
+      J <- rbind(J0,array(0,length(J0)-1:0))
+      J <- quad2lin(J,diag=TRUE)
       VAR <- tr(J %*% COV.POV %*% t(J))/ms^4 + (-2*PAR/ms)^2*var.ms
 
       # CoV^2 of MS[speed]
@@ -422,13 +431,14 @@ summary.ctmm.single <- function(object, level=0.95, level.UD=0.95, units=TRUE, .
     par <- rbind(par,D)
     rownames(par)[nrow(par)] <- "diffusion"
 
-    if(!is.null(POV))
+    if(sum(PVARS[c('major','minor','tau','tau position')],na.rm=TRUE)>0)
     {
       D <- D[2]
       J0 <- STUFF$J
       PAR <- c(J0 %*% POV %*% J0)/D^2
 
       J0 <- rbind(J0,array(0,length(J0)-1:0))
+      rownames(J0) <- colnames(J0)
       J <- quad2lin(J0,diag=TRUE)
       VAR <- tr(J %*% COV.POV %*% t(J))/D^4 + (-2*PAR/D)^2*STUFF$VAR
 
@@ -479,7 +489,7 @@ summary.ctmm.single <- function(object, level=0.95, level.UD=0.95, units=TRUE, .
     NAME <- paste0("1/",P)
     SCALE <- 1
 
-    if(!is.null(POV))
+    if(sum(PVARS[P],na.rm=TRUE)>0)
     {
       Q <- paste0(P,"-",P)
       PAR <- chisq.ci(POV[P,P],VAR=COV.POV[Q,Q],alpha=alpha)
@@ -533,6 +543,8 @@ summary.ctmm.single <- function(object, level=0.95, level.UD=0.95, units=TRUE, .
 #DOF of area
 DOF.area <- function(CTMM)
 {
+  if("sigma" %nin% names(CTMM)) { return(0) }
+
   sigma <- CTMM$sigma@par
   AREA <- area.covm(CTMM$sigma)
 
@@ -547,9 +559,10 @@ DOF.area <- function(CTMM)
     VAR <- c( GRAD %*% CTMM$COV[P,P] %*% GRAD )
   }
 
-  if(CTMM$range) { DOF <- AREA^2/abs(VAR) } else { DOF <- 0 }
-
-  if(is.nan(DOF)) { DOF <- 0 }
+  if(CTMM$range)
+  { DOF <- nant(AREA^2/abs(VAR),0) }
+  else
+  { DOF <- 0 }
 
   return(DOF)
 }
@@ -568,16 +581,25 @@ DOF.var <- function(CTMM)
 #########
 DOF.mean <- function(CTMM)
 {
-  if(!CTMM$range || "COV.mu" %nin% names(CTMM)) { return(0) }
+  if(!CTMM$range || "COV.mu" %nin% names(CTMM) || "mu" %nin% names(CTMM)) { return(0) }
 
-  sigma <- CTMM$sigma
   COV <- CTMM$COV.mu
-
   if(length(dim(COV))==4) { COV <- COV[,1,1,] } # take only stationary mean COV
 
-  sigma <- sqrtm.covm(sigma)
-  # symmetric under trace and det
+  if("POV.mu" %nin% names(CTMM))
+  {
+    sigma <- CTMM$sigma
+    sigma <- sqrtm.covm(sigma)
+  }
+  else
+  {
+    sigma <- CTMM$POV.mu
+    sigma <- sqrtm(sigma)
+  }
+
   if(any(is.na(COV))) { return(0) }
+
+  # symmetric under trace and det
   DOF <- sigma %*% PDsolve(COV) %*% sigma
   DOF <- mean(diag(DOF))
 

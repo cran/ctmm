@@ -1,9 +1,29 @@
+getMethod <- function(fn,signature,...)
+{
+  meth <- NULL
+  # S3 and S4 method dispatching is incompatible for no reason
+  meth <- methods::getMethod(fn,signature=signature,optional=TRUE,...) # try S4 first
+  if(is.null(meth)) { meth <- utils::getS3method(fn,signature[1],optional=TRUE,...) } # then try S3
+  # due to new CRAN policy, we can no longer have internal S3 methods
+  # work around here with '_' dispatch method names
+  if(is.null(meth)) { try( meth <- get(paste0(fn,"_",signature)) , silent=TRUE) }
+  if(is.null(meth)) { stop('Cannot find method ',fn,' for class ',signature) }
+  return(meth)
+}
+
+
 # base match.arg cannot match NA ???
 match.arg <- function(arg,choices,...)
 {
   if(is.na(arg) && any(is.na(choices))) { return(NA) }
   else { return(base::match.arg(arg,choices,...)) }
 }
+
+# sort arguments by class
+# sort.arg <- function(arg,sig)
+# {
+#
+# }
 
 
 # does this thing exist and, if so, is it true
@@ -62,7 +82,7 @@ zoom.list <- function(x,...)
 {
   CLASS <- class(x[[1]])[1]
   #utils::getS3method("zoom",CLASS)(x,...)
-  methods::getMethod("zoom",signature=CLASS)(x,...)
+  getMethod("zoom",signature=CLASS)(x,...)
 }
 methods::setMethod("zoom",signature(x="list"), function(x,...) zoom.list(x,...))
 
@@ -73,7 +93,7 @@ methods::setMethod("zoom",signature(x="list"), function(x,...) zoom.list(x,...))
 log.list <- function(x,...)
 {
   CLASS <- class(x[[1]])[1]
-  utils::getS3method("log",CLASS)(x,...)
+  getMethod("log",CLASS)(x,...)
 }
 # this doesn't work outside of ctmm
 
@@ -82,7 +102,7 @@ log.list <- function(x,...)
 mean.list <- function(x,...)
 {
   CLASS <- class(x[[1]])[1]
-  utils::getS3method("mean",CLASS)(x,...)
+  getMethod("mean",CLASS)(x,...)
 }
 #methods::setMethod("mean",signature(x="list"), function(x,...) mean.list(x,...))
 
@@ -90,14 +110,14 @@ mean.list <- function(x,...)
 median.list <- function(x,na.rm=FALSE,...)
 {
   CLASS <- class(x[[1]])[1]
-  utils::getS3method("median",CLASS)(x,na.rm=na.rm,...)
+  getMethod("median",CLASS)(x,na.rm=na.rm,...)
 }
 
 # forwarding function for list of a particular datatype
 plot.list <- function(x,...)
 {
   CLASS <- class(x[[1]])[1]
-  utils::getS3method("plot",CLASS)(x,...)
+  getMethod("plot",CLASS)(x,...)
 }
 #methods::setMethod("plot",signature(x="list"), function(x,...) plot.list(x,...))
 
@@ -113,15 +133,20 @@ summary.list <- function(object,...)
     CLASS <- class(DATA)
   }
 
-  utils::getS3method("summary",CLASS)(object,...)
+  getMethod("summary",CLASS)(object,...)
 }
 
 # forwarding function for list of a particular datatype
-writeShapefile.list <- function(object,folder,file=NULL,...)
+writeVector.list <- function(x,filename,...)
 {
-  CLASS <- class(object[[1]])[1]
-  utils::getS3method("writeShapefile",CLASS)(object,folder,file=file,...)
+  CLASS <- class(x[[1]])[1]
+  if(missing(filename))
+  { getMethod("writeVector",methods::signature(x=CLASS,filename="missing"))(x,filename=filename,...) }
+  else
+  { getMethod("writeVector",methods::signature(x=CLASS,filename="character"))(x,filename=filename,...) }
 }
+methods::setMethod("writeVector",methods::signature(x="list",filename="character"), function(x,filename,...) writeVector.list(x,filename,...) )
+methods::setMethod("writeVector",methods::signature(x="list",filename="missing"), function(x,filename,...) writeVector.list(x,filename,...) )
 
 
 # replace NA elements
@@ -129,6 +154,35 @@ na.replace <- function(x,rep)
 {
   REP <- is.na(x)
   x[REP] <- rep[REP]
+  return(x)
+}
+
+########################
+# 0/0 -> NaN -> to
+# fixes a priori known limits
+nant <- function(x,to)
+{
+  NAN <- is.na(x) # TRUE for NaN and NA
+  if(any(NAN))
+  {
+    to <- array(to,length(x))
+    x[NAN] <- to[NAN]
+  }
+  return(x)
+}
+
+# fix for infite PD matrix
+# useful after nant(x,Inf)
+inft <- function(x,to=0)
+{
+  INF <- diag(x)==Inf
+  if(any(INF))
+  {
+    # force positive definite
+    x[INF,] <- x[,INF] <- 0
+    # restore infinite variance
+    diag(x)[INF] <- Inf
+  }
   return(x)
 }
 
@@ -275,4 +329,15 @@ mid <- function(x)
 {
   n <- length(x)
   (x[-1]+x[-n])/2
+}
+
+
+name.list <- function(x)
+{
+  if(class(x)[1]=="list" && !length(names(x)))
+  {
+    NAMES <- sapply(x,function(y){attr(y,"info")$identity})
+    if(class(NAMES)[1]=="character") { names(x) <- NAMES }
+  }
+  return(x)
 }

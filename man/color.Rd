@@ -14,7 +14,7 @@ color(object,by="time",col.fn=NULL,alpha=1,dt=NULL,cores=1,...)
 }
 %- maybe also 'usage' for other objects documented here.
 \arguments{
-  \item{object}{A \code{telemetry} object or list of objects. \code{color} can also take \code{ctmm} and \code{UD} objects. }
+  \item{object}{A \code{telemetry} object or list of objects. \code{color} can also take \code{ctmm} and \code{UD} objects.}
   \item{by}{What to \code{annotate} or \code{color} times by. Options include \code{"individual"}, \code{"time"}, \code{"sun"}, \code{"moon"}, \code{"season"}, and \code{"tropic"} (see Details below). \code{ctmm} and \code{UD} objects can only be colored by \code{"individual"}.}
   \item{col.fn}{Optional coloring function that can take a [0,1] interval and alpha channel argument.}
   \item{alpha}{Base alpha channel value.}
@@ -30,7 +30,7 @@ Annotated \code{telemetry} objects are required for \code{color} \code{by} argum
 \code{by="sun"} colors according to the sine of the sun's altitude, which is proportional to solar flux during daylight hours.
 \code{by="moon"} colors according to the illuminated fraction of the moon.
 \code{by="season"} colors according to the length of the day, and therefore corresponds to the local season.
-\code{by="tropic"} currently colors according to the calender day, but will eventually be upgraded to tropical-year cycle.
+\code{by="tropic"} currently colors according to the calender day, but will eventually be upgraded to tropical-year cycle. The default \code{col.fn} argument runs from blue to red with increasing time, sunlight, moonlight, or day length.
 
 \code{by="individual"} assigns colors to minimize the maximum combined spatial and color overlap.
 Finding the best color assignment is an \eqn{NP}-hard problem that is here approximated in \eqn{O(N^3)} time with a custom greedy algorithm.

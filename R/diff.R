@@ -1,11 +1,14 @@
 # location difference vector
 # data is a list of two telemetry objects
 # CTMM is a list of two ctmm fit objects corresponding to data
-difference <- function(data,CTMM,t=NULL,...)
+difference <- function(data,CTMM,t=NULL,...) { combine(data,CTMM,t=t,method="diff",...) }
+midpoint <- function(data,CTMM,t=NULL,complete=FALSE,...) { combine(data,CTMM,t=t,complete=complete,method="mean",...) }
+
+combine <- function(data,CTMM,t=NULL,complete=FALSE,method="diff",...)
 {
   check.projections(data)
-  INFO <- mean.info(data)
-  INFO$identity <- paste0(data[[1]]@info$identity,'-',data[[2]]@info$identity)
+  INFO <- mean_info(data)
+  INFO$identity <- paste0(method,"(",data[[1]]@info$identity,",",data[[2]]@info$identity,")")
 
   if(is.null(t))
   {
@@ -13,12 +16,28 @@ difference <- function(data,CTMM,t=NULL,...)
     t1 <- max(data[[1]]$t[1],data[[2]]$t[1])
     t2 <- min(last(data[[1]]$t),last(data[[2]]$t))
 
+    t <- c(t1,t2)
+  }
+
+  if(length(t)==2)
+  {
+    t1 <- t[1]
+    t2 <- t[2]
+
     # shared times
     t <- c( data[[1]]$t , data[[2]]$t )
     t <- t[t>=t1]
     t <- t[t<=t2]
     t <- sort(t)
     t <- unique(t)
+
+    if(!length(t))
+    {
+      warning("No overlapping times.")
+      data <- data.frame(t=numeric(),x=numeric(),y=numeric())
+      data <- new.telemetry(data,info=INFO)
+      return(data)
+    }
   }
 
   # predict over fine grid
@@ -26,7 +45,13 @@ difference <- function(data,CTMM,t=NULL,...)
   data[[2]] <- predict(data[[2]],CTMM[[2]],t=t)
 
   axes <- CTMM[[1]]$axes
-  for(z in axes) { data[[1]][[z]] <- data[[1]][[z]] - data[[2]][[z]] }
+  for(z in axes)
+  {
+    if(method=="diff")
+    { data[[1]][[z]] <- data[[1]][[z]] - data[[2]][[z]] }
+    else if(method=="mean")
+    { data[[1]][[z]] <- data[[1]][[z]] + data[[2]][[z]] }
+  }
 
   VAR <- DOP.LIST$horizontal$VAR
   COV <- DOP.LIST$horizontal$COV
@@ -67,6 +92,13 @@ difference <- function(data,CTMM,t=NULL,...)
   }
   data <- data.frame(data[[1]][,COLS])
 
+  if(method=="mean")
+  {
+    data[,axes] <- data[,axes]/2
+    data[,VAR] <- data[,VAR]/4
+    if(all(COV %in% COLS)) { data[,COV] <- data[,COV]/4 }
+  }
+
   # make this a telemetry object
   data <- new.telemetry(data,info=INFO)
 
@@ -90,15 +122,24 @@ difference <- function(data,CTMM,t=NULL,...)
   rownames(data@UERE$UERE) <- "all"
   rownames(data@UERE$DOF) <- "all"
 
+  if(complete) { data <- pseudonymize(data,tz=INFO$timezone,proj=INFO$projection,origin=EPOCH) }
+
   return(data)
 }
 
 
 # simple correlation test
-proximity <- function(data,CTMM,GUESS=ctmm(error=TRUE),debias=TRUE,level=0.95,...)
+proximity <- function(data,CTMM,t=NULL,GUESS=ctmm(error=TRUE),debias=TRUE,level=0.95,...)
 {
   # difference vector with uncertainties
-  data.diff <- difference(data,CTMM)
+  data.diff <- difference(data,CTMM,t=t,...)
+
+  if(!nrow(data.diff))
+  {
+    INF <- c(0,1,Inf)
+    names(INF) <- NAMES.CI
+    return(INF)
+  }
 
   GUESS <- ctmm.guess(data.diff,CTMM=GUESS,interactive=FALSE)
   # # fit an autocorrelation model to the difference
@@ -141,7 +182,7 @@ distances <- function(data,CTMM,t=NULL,level=0.95,...)
   t <- data$t
 
   # estimate distances
-  DISTS <- abs.data(data)
+  DISTS <- abs_data(data)
   M1 <- DISTS$M1
   M2 <- DISTS$M2
   DOF <- DISTS$DOF

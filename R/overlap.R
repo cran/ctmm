@@ -3,6 +3,7 @@
 # forwarding function for list of a particular datatype
 overlap <- function(object,method="Bhattacharyya",level=0.95,debias=TRUE,...)
 {
+  object <- name.list(object)
   check.projections(object)
 
   CLASS <- class(object[[1]])[1]
@@ -87,7 +88,7 @@ soft.clamp <- function(n,DIM)
 
 
 #####################
-overlap.ctmm <- function(object,level=0.95,debias=TRUE,COV=TRUE,method="Bhattacharyya",distance=FALSE,...)
+overlap.ctmm <- function(object,level=0.95,debias=TRUE,COV=TRUE,method="Bhattacharyya",distance=FALSE,sqrt=FALSE,...)
 {
   CTMM1 <- object[[1]]
   CTMM2 <- object[[2]]
@@ -98,7 +99,7 @@ overlap.ctmm <- function(object,level=0.95,debias=TRUE,COV=TRUE,method="Bhattach
   MLE <- c(STUFF$MLE)
   VAR <- c(STUFF$COV)
   # this quantity is roughly chi-square
-  DOF <- 2*MLE^2/VAR
+  DOF <- nant(2*MLE^2/VAR,1/VAR)
 
   # approximate debiasing, correct for IID, equal covariance, REML
   ########################
@@ -119,13 +120,14 @@ overlap.ctmm <- function(object,level=0.95,debias=TRUE,COV=TRUE,method="Bhattach
   # the above can be flaky
   n1 <- DOF.area(CTMM1)
   n2 <- DOF.area(CTMM2)
-  # using mean variance - additive & rotationally invariant
-  n0 <- 4 * s0^2 / (s1^2/n1 + s2^2/n2)
-  # dim cancels out
 
   # hard clamp before soft clamp
   n1 <- clamp(n1,1,Inf)
   n2 <- clamp(n2,1,Inf)
+
+  # using mean variance - additive & rotationally invariant
+  n0 <- 4 * s0^2 / (s1^2/n1 + s2^2/n2)
+  n0 <- nant(n0,0)
   n0 <- clamp(n0,2,Inf)
 
   # clamp the DOF not to diverge <=DIM+1
@@ -134,12 +136,15 @@ overlap.ctmm <- function(object,level=0.95,debias=TRUE,COV=TRUE,method="Bhattach
   n2 <- soft.clamp(n2,DIM)
 
   # expectation value of log det Wishart
-  ElogW <- function(s,n) { log(det(s)) + mpsigamma(n/2,dim=DIM) - DIM*log(n/2) }
+  ElogW <- function(s,n,add=TRUE) { add*PDlogdet(s) + mpsigamma(n/2,dim=DIM) - DIM*log(n/2) }
 
   # inverse Wishart expectation value pre-factor
-  BIAS <- n0/(n0-DIM-1)
-  if(method=="Euclidean") { BIAS <- 0 } # don't include this term
-  # BIAS <- clamped.bias(n0,DIM)
+  BIAS <- nant( n0/(n0-DIM-1) ,1)
+  if(method=="Euclidean")
+  { BIAS <- 0 } # don't include first term
+  else if(method=="Rate")
+  { BIAS <- BIAS - 1 } # subtractive rather than multiplicative treatment
+
   # mean terms
   BIAS <- sum(diag((BIAS*outer(mu) + COV.mu) %*% PDsolve(sigma)))
   if(method=="Bhattacharyya")
@@ -147,26 +152,26 @@ overlap.ctmm <- function(object,level=0.95,debias=TRUE,COV=TRUE,method="Bhattach
     BIAS <- BIAS/8
     # AMGM covariance terms
     BIAS <- BIAS + max( ElogW(sigma,n0)/2 - ElogW(CTMM1$sigma,n1)/4 - ElogW(CTMM2$sigma,n2)/4 , 0)
-    # this is actually the expectation value?
+    # this is actually the expectation value
   }
-  else if(method=="Encounter")
+  else if(method=="Encounter") # encounter-probability overlap measure
   {
     BIAS <- BIAS/4
     # AMGM covariance terms
     BIAS <- BIAS + max( ElogW(sigma,n0)/2 - ElogW(CTMM1$sigma,n1)/4 - ElogW(CTMM2$sigma,n2)/4 , 0)
-    # this is actually the expectation value?
+    # this is actually the expectation value
   }
-  else if(method=="Rate")
+  else if(method=="Rate") # encounter probability
   {
     BIAS <- BIAS/4
     # covariance terms
-    BIAS <- BIAS + max( ElogW(sigma,n0)/2 , 0)
-    # this is actually the expectation value?
+    BIAS <- BIAS + max( ElogW(sigma,n0,FALSE)/2 , ElogW(CTMM1$sigma,n1,FALSE)/4 + ElogW(CTMM2$sigma,n2,FALSE)/4 )
   }
 
   # relative bias instead of absolute bias
-  BIAS <- BIAS/MLE
+  if(method!="Rate") { BIAS <- nant(BIAS/MLE,MLE) }
   # would subtract off estimate to get absolute bias
+  if(distance) { BIAS <- 1 + BIAS } # didn't include first term
 
   # error corrections
   BIAS <- as.numeric(BIAS)
@@ -175,16 +180,39 @@ overlap.ctmm <- function(object,level=0.95,debias=TRUE,COV=TRUE,method="Bhattach
 
   if(level)
   {
-    if(debias) { MLE <- MLE/BIAS }
+    if(method!="Rate")
+    {
+      if(debias) { MLE <- MLE/BIAS }
 
-    DOF <- 2*MLE^2/VAR
-    CI <- chisq.ci(MLE,DOF=DOF,alpha=1-level)
-    if(distance) { return(CI) } # return distance
+      DOF <- 2*MLE^2/VAR
+      CI <- chisq.ci(MLE,DOF=DOF,alpha=1-level)
 
-    # transform from (square) distance to overlap measure
-    CI <- exp(-rev(CI))
+      if(distance) # return distance
+      {
+        if(sqrt) # sqrt and debias
+        {
+          CI <- sqrt(CI)
+          if(debias) { CI <- CI/chi.bias(max(DOF,1)) }
+        }
+
+        return(CI)
+      }
+
+      # transform from (square) distance to overlap measure
+      CI <- exp(-rev(CI))
+    }
+    else # method=="Rate" # can be negative
+    {
+      if(debias) { MLE <- MLE - BIAS }
+
+      MLE <- exp(-MLE) # this is more chi^2
+      VAR <- MLE^2 * VAR
+
+      DOF <- 2*MLE^2/VAR
+      CI <- chisq.ci(MLE,DOF=DOF,alpha=1-level)
+    }
+
     names(CI) <- NAMES.CI
-
     R <- list(DOF=DOF,CI=CI)
     return(R)
   }
@@ -228,17 +256,41 @@ overlap.UD <- function(object,level=0.95,debias=TRUE,method="Bhattacharyya",...)
     CI <- overlap.ctmm(CTMM,method=method,level=FALSE)
 
     # Bhattacharyya distances
-    D <- -log(OVER)
+    if(OVER>0) { D <- -log(OVER) }
+    else { D <- CI$MLE }
 
-    # relative debias
-    if(debias){ D <- D/CI$BIAS }
+    if(method=="Rate") # D can be negative
+    {
+      # additive bias
+      if(debias)
+      {
+        D <- D - CI$BIAS
+        D <- nant(D,Inf) # Inf - Inf
+        OVER <- exp(-D)
+      }
 
-    # calculate new distance^2 with KDE point estimate
-    DOF <- 2*D^2/CI$VAR
-    CI <- chisq.ci(D,DOF=DOF,alpha=1-level)
+      VAR <- CI$VAR
+      # CI <- norm.ci(D,VAR=VAR,alpha=1-level)
+      # CI <- exp(-rev(CI))
 
-    # transform from (square) distance to overlap measure
-    CI <- exp(-rev(CI))
+      VAR <- VAR*OVER^2 # VAR[D] -> VAR[OVER]
+      DOF <- 2*OVER^2/VAR
+
+      # if(CI[3]<Inf) { CI <- chisq.ci(OVER,DOF=DOF,alpha=1-level) }
+      CI <- chisq.ci(OVER,DOF=DOF,alpha=1-level)
+    }
+    else # normalized overlap # can't be negative
+    {
+      # relative debias
+      if(debias){ D <- D/CI$BIAS }
+
+      # calculate new distance^2 with KDE point estimate
+      DOF <- 2*D^2/CI$VAR
+      CI <- chisq.ci(D,DOF=DOF,alpha=1-level)
+
+      # transform from (square) distance to overlap measure
+      CI <- exp(-rev(CI))
+    }
   }
   else
   {

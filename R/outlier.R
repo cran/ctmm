@@ -150,7 +150,7 @@ plot.outlie <- function(x,level=0.95,units=TRUE,axes=c('d','v'),xlim=NULL,ylim=N
   UNITS <- unit(d,dimension='length',concise=TRUE,SI=!units)
   d.scale <- UNITS$scale
   d <- d/UNITS$scale
-  d.lab <- paste0("Core deviation (",UNITS$name,")")
+  d.lab <- paste0("Median deviation (",UNITS$name,")")
 
   UNITS <- unit(v,dimension='length',concise=TRUE,SI=!units)
   v.scale <- UNITS$scale
@@ -162,7 +162,7 @@ plot.outlie <- function(x,level=0.95,units=TRUE,axes=c('d','v'),xlim=NULL,ylim=N
     UNITS <- unit(dz,dimension='length',concise=TRUE,SI=!units)
     dz.scale <- UNITS$scale
     dz <- dz/UNITS$scale
-    dz.lab <- paste0("Core vertical deviation (",UNITS$name,")")
+    dz.lab <- paste0("Median vertical deviation (",UNITS$name,")")
 
     UNITS <- unit(vz,dimension='length',concise=TRUE,SI=!units)
     vz.scale <- UNITS$scale
@@ -183,7 +183,11 @@ plot.outlie <- function(x,level=0.95,units=TRUE,axes=c('d','v'),xlim=NULL,ylim=N
   ylab <- get(paste0(axes[2],".lab"))
 
   if(is.null(xlim))
-  { xlim <- range(x) }
+  {
+    xlim <- x
+    xlim[3,] <- pmin(x[3,],x[2,]*2)
+    xlim <- range(xlim)
+  }
   else
   {
     SCALE <- get(paste0(axes[1],".scale"))
@@ -191,7 +195,11 @@ plot.outlie <- function(x,level=0.95,units=TRUE,axes=c('d','v'),xlim=NULL,ylim=N
   }
 
   if(is.null(ylim))
-  { ylim <- range(y) }
+  {
+    ylim <- y
+    ylim[3,] <- pmin(y[3,],y[2,]*2)
+    ylim <- range(ylim)
+  }
   else
   {
     SCALE <- get(paste0(axes[2],".scale"))
@@ -387,7 +395,7 @@ distanceMLE <- function(dr,error,axes=c('x','y'),return.VAR=FALSE)
 {
   if(length(dim(error))==3) # error ellipse
   {
-    dr <- sapply(1:nrow(dr),function(i){ abs.bivar(dr[i,],error[i,,],return.VAR=TRUE) })
+    dr <- sapply(1:nrow(dr),function(i){ abs_bivar(dr[i,],error[i,,],return.VAR=TRUE) })
     dr <- t(dr) #
   }
   else # error circle or interval

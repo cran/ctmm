@@ -22,15 +22,16 @@ Noonan & Fleming et al (2019) <doi:10.1186/s40462-019-0177-1>,
 Fleming et al (2020) <doi:10.1101/2020.06.12.130195>,
 Noonan et al (2021) <doi:10.1111/2041-210X.13597>,
 Fleming et al (2022) <doi:10.1111/2041-210X.13815>,
+Silva et al (2022) <doi:10.1111/2041-210X.13786>,
 and
-and Silva et al (2022) <doi:10.1111/2041-210X.13786>.
+Alston & Fleming et al (2023) <doi:10.1111/2041-210X.14025>.
 }
 \details{
 \tabular{ll}{
 Package: \tab ctmm\cr
 Type: \tab Package\cr
-Version: \tab 1.1.0 \cr
-Date: \tab 2022-11-03 \cr
+Version: \tab 1.2.0 \cr
+Date: \tab 2023-09-22\cr
 License: \tab GPL-3 \cr
 }
 
@@ -70,7 +71,7 @@ C. H. Fleming, W. F. Fagan, T. Mueller, K. A. Olson, P. Leimgruber, J. M. Calabr
 ``Rigorous home-range estimation with movement data: A new autocorrelated kernel-density estimator'',
 Ecology 96:5 1182-1188 (2015) \doi{10.1890/14-2010.1}.
 
-J. M. Calabrese, C. H. Fleming,
+J. M. Calabrese, C. H. Fleming, E. Gurarie,
 ``ctmm: an R package for analyzing animal relocation data as a continuous-time stochastic process'',
 Methods in Ecology and Evolution 7:9 1124-1132 (2016) \doi{10.1111/2041-210X.12559}.
 
@@ -116,9 +117,9 @@ M. J. Noonan R. Martinez-Garcia, G. H. Davis, M. C. Crofoot, R. Kays, B. T. Hirs
 
 C. H. Fleming, I. Deznabi, S. Alavi, M. C. Crofoot, B. T. Hirsch, E. P. Medici, M. J. Noonan, R. Kays, W. F. Fagan, D. Sheldon, J. M. Calabrese,
 ``Population-level inference for home-range areas'',
-Methods in Ecology and Evolution  13 1027-1041 (2022) \doi{10.1111/2041-210X.13815}.
+Methods in Ecology and Evolution 13:5 1027-1041 (2022) \doi{10.1111/2041-210X.13815}.
 
-I. Silva, C. H. Fleming, M. J. Noonan, J. Alston, C. Folta, W. F. Fagan, J. M. Calabrese. ``Autocorrelation-informed home range estimation: A review and practical guide'', Methods in Ecology and Evolution 13 534-544 (2022) \doi{10.1111/2041-210X.13786}.
+I. Silva, C. H. Fleming, M. J. Noonan, J. Alston, C. Folta, W. F. Fagan, J. M. Calabrese. ``Autocorrelation-informed home range estimation: A review and practical guide'', Methods in Ecology and Evolution 13:3 534-544 (2022) \doi{10.1111/2041-210X.13786}.
 }
 
 %~~ Optionally other standard keywords, one per line, from file KEYWORDS in ~~

@@ -82,7 +82,18 @@ attr(prototype.drift,"summary") <- drift.summary
 attr(prototype.drift,"velocity") <- function(t,CTMM) { rep(0,length(t)) }
 
 new.drift <- methods::setClass("drift",
-              representation("function",energy="function",init="function",is.stationary="function",name="function",refine="function",scale="function",shift="function",speed="function",summary="function",svf="function",velocity="function"),
+              representation("function",
+                             energy="function",
+                             init="function",
+                             is.stationary="function",
+                             name="function",
+                             refine="function",
+                             scale="function",
+                             shift="function",
+                             speed="function",
+                             summary="function",
+                             svf="function",
+                             velocity="function"),
               prototype=prototype.drift)
 
 ########################################
@@ -127,7 +138,12 @@ stationary.speed <- function(CTMM) { list(EST=0,VAR=0) }
 stationary.energy <- function(CTMM) { list(UU=1,VV=0) }
 
 # combine this all together for convenience
-stationary <- new.drift(stationary.drift,is.stationary=stationary.is.stationary,energy=stationary.energy,speed=stationary.speed,svf=stationary.svf,velocity=stationary.velocity)
+stationary <- new.drift(stationary.drift,
+                        is.stationary=stationary.is.stationary,
+                        energy=stationary.energy,
+                        speed=stationary.speed,
+                        svf=stationary.svf,
+                        velocity=stationary.velocity)
 
 ############################
 # mean zero process
@@ -137,7 +153,12 @@ zero.drift <- function(t,CTMM) { cbind( array(0,length(t)) ) }
 
 zero.energy <- function(CTMM) { list(UU=1,VV=0) }
 
-zero <- new.drift(zero.drift,is.stationary=stationary.is.stationary,energy=zero.energy,speed=stationary.speed,svf=stationary.svf,velocity=stationary.velocity)
+zero <- new.drift(zero.drift,
+                  is.stationary=stationary.is.stationary,
+                  energy=zero.energy,
+                  speed=stationary.speed,
+                  svf=stationary.svf,
+                  velocity=stationary.velocity)
 
 ############################
 # Periodic drift function
@@ -443,7 +464,267 @@ periodic.stuff <- function(CTMM)
 }
 
 # combine this all together for convenience
-periodic <- new.drift(periodic.drift,is.stationary=periodic.is.stationary,energy=periodic.energy,init=periodic.init,name=periodic.name,refine=periodic.drift.complexify,scale=periodic.scale,speed=periodic.speed,summary=periodic.summary,svf=periodic.svf,velocity=periodic.velocity)
+periodic <- new.drift(periodic.drift,
+                      is.stationary=periodic.is.stationary,
+                      energy=periodic.energy,
+                      init=periodic.init,
+                      name=periodic.name,
+                      refine=periodic.drift.complexify,
+                      scale=periodic.scale,
+                      speed=periodic.speed,
+                      summary=periodic.summary,
+                      svf=periodic.svf,
+                      velocity=periodic.velocity)
+
+##################################
+# change-point mean functions
+##################################
+# change.point slot is a data.frame with columns: start, stop, state
+
+change.point.is.stationary <- function(CTMM)
+{
+  CP <- CTMM$change.point.mu # change points
+  if(is.null(CP)) { CP <- CTMM$change.point } # default
+  nlevels(CP$state)==1
+}
+
+
+# periodic mean/drift function
+change.point.drift <- function(t,CTMM,velocity=FALSE)
+{
+  CP <- CTMM$change.point.mu # change points
+  if(is.null(CP)) { CP <- CTMM$change.point } # default
+
+  COL <- 0
+  NAMES <- NULL
+  for(s in levels(CP$state))
+  {
+    M <- CTMM[[s]]
+    N <- nrow(M$mu)
+    COL <- COL + N
+    NAMES <- c(NAMES,paste0(s,".",1:N) )
+  }
+
+  U <- array(0,c(length(t),COL))
+  colnames(U) <- NAMES
+
+  # get drift function for each contributing state
+  i1 <- i2 <- 1
+  for(j in 1:nrow(CP))
+  {
+    while(t[i2+1]<CP$stop[j]) { i2 <- i2+1 }
+    SUB <- i1:i2
+
+    s <- as.character(CP$state[j])
+    M <- CTMM[[s]]
+
+    NAME <- paste0(s,".",1:nrow(M$mu)) # mu column names
+
+    D <- get(M$mean)
+
+    if(!velocity)
+    { U[SUB,NAME] <- D$drift(t[SUB],M) }
+    else
+    { U[SUB,NAME] <- D$velocity(t[SUB],M) }
+
+    i1 <- i2 <- i2+1
+  }
+
+  return(U)
+}
+
+# periodic velocity mean
+change.point.velocity <- function(t,CTMM)
+{ change.point.drift(t=t,CTMM=CTMM,velocity=TRUE) }
+
+# guess parameters
+change.point.init <- function(data,CTMM)
+{
+  CP <- CTMM$change.point.mu # change points
+  if(is.null(CP)) { CP <- CTMM$change.point } # default
+
+  # get times for each state
+  SUBS <- list()
+  i1 <- i2 <- 1
+  for(j in 1:nrow(CP))
+  {
+    while(t[i2+1]<CP$stop[j]) { i2 <- i2+1 }
+    SUB <- i1:i2
+
+    s <- as.character(CP$state[j])
+    SUBS[[s]] <- c(SUBS[[2]],SUB)
+
+    i1 <- i2 <- i2+1
+  }
+
+  for(s in levels(CP$state))
+  {
+    SUB <- data[SUBS[[s]],]
+    M <- CTMM[[s]]
+    CTMM[[s]] <- get(M$mean)$init(SUB,M)
+  }
+
+  return(CTMM)
+}
+
+# how do we rescale time
+change.point.scale <- function(CTMM,time)
+{
+  CP <- CTMM$change.point.mu # change points
+  if(is.null(CP)) { CP <- CTMM$change.point } # default
+
+  for(s in levels(CP$state))
+  {
+    M <- CTMM[[s]]
+    CTMM[[s]] <- get(M$mean)$scale(M,time)
+  }
+
+  return(CTMM)
+}
+
+# SVF of mean function
+change.point.svf <- function(CTMM,speed=FALSE)
+{
+  CP <- CTMM$change.point.mu # change points
+  if(is.null(CP)) { CP <- CTMM$change.point } # default
+
+  # get mixture weights (for approximate SVF)
+  W <- array(0,nlevels(CP$state))
+  names(W) <- levels(CP$state)
+  for(i in 1:nrow(CP))
+  {
+    s <- as.character(CP$state[i])
+    W[s] <- W[s] + CP$stop[i]-CP$start[i]
+  }
+  W <- W/sum(W)
+
+  FNS <- list()
+  for(s in levels(CP$state))
+  {
+    M <- CTMM[[s]]
+
+    if(!speed)
+    { FNS[[s]] <- get(M$mean)$svf(M) }
+    else
+    { FNS[[s]] <- get(M$mean)$speed(M) }
+  }
+
+  EST <- function(t) { rowSums( sapply(levels(CP$state),function(s){W[s]*FNS[[s]]$EST(t)}) ) }
+  VAR <- function(t) { rowSums( sapply(levels(CP$state),function(s){W[s]^2*FNS[[s]]$VAR(t)}) ) }
+
+  return(list(EST=EST,VAR=VAR))
+}
+
+
+# name of mean function
+change.point.name <- function(CTMM)
+{
+  CP <- CTMM$change.point.mu # change points
+  if(is.null(CP)) { CP <- CTMM$change.point } # default
+
+  NAME <- NULL
+  for(s in levels(CP$state))
+  {
+    M <- CTMM[[s]]
+    N <- get(M$mean)$name(M)
+    if(length(N)) { NAME <- paste0(NAME,N,sep="-") }
+  }
+
+  return(NAME)
+}
+
+# calculate deterministic mean square speed and its variance
+change.point.speed <- function(CTMM)
+{ change.point.svf(CTMM,speed=TRUE) }
+
+# UU and VV terms
+change.point.energy <- function(CTMM)
+{
+  CP <- CTMM$change.point.mu # change points
+  if(is.null(CP)) { CP <- CTMM$change.point } # default
+
+  uu <- vv <- list()
+  for(s in levels(CP$state))
+  {
+    M <- CTMM[[s]]
+    STUFF <- get(M$mean)$energy(M)
+    uu[[s]] <- STUFF$UU
+    vv[[s]] <- STUFF$VV
+  }
+
+  # make a giant block-diagonal matrix
+  DIM <- sapply(uu,nrow)
+  DIM <- sum(DIM)
+  UU <- VV <- array(0,c(DIM,DIM))
+
+  # fill matrix
+  offset <- 0
+  for(i in 1:length(UU))
+  {
+    DIM <- 1:nrow(uu[[i]])
+    DIM <- c(DIM,DIM)
+    UU[offset+DIM] <- uu[[i]]
+    VV[offset+DIM] <- vv[[i]]
+    offset <- offset + nrow(uu[[i]])
+  }
+
+  return(list(UU=UU,VV=VV))
+}
+
+
+# calculate rotational indices
+change.point.summary <- function(CTMM,level,level.UD)
+{
+  CP <- CTMM$change.point.mu # change points
+  if(is.null(CP)) { CP <- CTMM$change.point } # default
+
+  CI <- NULL
+  for(s in levels(CP$state))
+  {
+    M <- CTMM[[s]]
+    CI <- rbind(CI, get(M$mean)$summary(M,level,level.UD) )
+  }
+
+  return(CI)
+}
+
+# increase number of harmonics in model
+change.point.drift.complexify <- function(CTMM,simplify=FALSE)
+{
+  CP <- CTMM$change.point.mu # change points
+  if(is.null(CP)) { CP <- CTMM$change.point } # default
+
+  GUESS <- list()
+  for(s in levels(CP$state))
+  {
+    M <- CTMM[[s]]
+    if(!simplify)
+    { GUESS <- c(GUESS, get(M$mean)$complexify(M) ) }
+    else
+    { GUESS <- c(GUESS, get(M$mean)$simplify(M) ) }
+  }
+
+  if(!length(GUESS)) { GUESS <- NULL }
+  return(GUESS)
+}
+
+# reduce number of harmonics in model
+change.point.drift.simplify <- function(CTMM)
+{ change.point.drift.complexify(CTMM,simplify=TRUE) }
+
+# combine this all together for convenience
+change.point <- new.drift(change.point.drift,
+                          is.stationary=change.point.is.stationary,
+                          energy=change.point.energy,
+                          init=change.point.init,
+                          name=change.point.name,
+                          refine=change.point.drift.complexify,
+                          scale=change.point.scale,
+                          speed=change.point.speed,
+                          summary=change.point.summary,
+                          svf=change.point.svf,
+                          velocity=change.point.velocity)
+
 
 #################################
 # continuous uniform spline mean functions
@@ -605,7 +886,13 @@ uspline.stuff <- function(CTMM)
 }
 
 # convenience function
-uspline <- new.drift(uspline.drift,is.stationary=uspline.is.stationary,init=uspline.init,scale=uspline.scale,shift=uniform.shift,refine=uspline.refine,name=uspline.name)
+uspline <- new.drift(uspline.drift,
+                     is.stationary=uspline.is.stationary,
+                     init=uspline.init,
+                     scale=uspline.scale,
+                     shift=uniform.shift,
+                     refine=uspline.refine,
+                     name=uspline.name)
 
 #################################
 # piecewise-stationary mean/drift function
@@ -660,4 +947,8 @@ pwstationary.scale <- function(CTMM,time)
 }
 
 # combine this all together for convenience
-pwstationary <- new.drift(pwstationary.drift,is.stationary=pwstationary.is.stationary,shift=uniform.shift,speed=stationary.speed,svf=stationary.svf)
+pwstationary <- new.drift(pwstationary.drift,
+                          is.stationary=pwstationary.is.stationary,
+                          shift=uniform.shift,
+                          speed=stationary.speed,
+                          svf=stationary.svf)

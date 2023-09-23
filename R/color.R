@@ -4,6 +4,11 @@ annotate <- function(object,by="all",cores=1,...)
   if(class(object)[1]=="list") { return(plapply(object,annotate,cores=cores,fast=FALSE)) }
   # else one at a time below
 
+  if(class(by)[1]=="list")
+  {
+    # for the future
+  }
+
   #
   if(class(by)[1]=="data.frame")
   {
@@ -132,6 +137,30 @@ color <- function(object,by="time",col.fn=NULL,alpha=1,dt=NULL,cores=1,...)
 
   names(index) <- names(object)
   return(index)
+}
+
+
+simplify.color <- function(object)
+{
+  if(class(object)[1]=="list")
+  {
+    NAMES <- names(object)
+    for(i in 1:length(object))
+    {
+      col <- object[[i]]
+      col <- grDevices::col2rgb(col,alpha=TRUE)
+      # opacity weighted average
+      w <- col['alpha',]
+      w <- w/sum(w)
+      col <- col[1:3,] %*% w
+      col <- grDevices::rgb(red=col[1],green=col[2],blue=col[3],maxColorValue=255)
+      object[[i]] <- col
+    }
+    object <- unlist(object)
+    names(object) <- NAMES
+  }
+
+  return(object)
 }
 
 

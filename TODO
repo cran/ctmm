@@ -1,11 +1,43 @@
 ** PRIORITY
+* rsf.select require quadratic model over linear model (require even order polynomial)
+* clip raster before rsf.fit calculation
+* composite resolutions in gridding
+* rsf.fit argument to drop NA locations
+* EPSG interpreter for projection warnings/errors
+* pkde error on individual object arguments
+* plot.overlap from ctmmweb
+* intensity() needs kernel regression for interactions
+* uere()<- documentation RMS standard deviation note
+* change default mean.OD/mean.UD to weight by sampling period (as an option)
+* time change point model
+** state model preps
+** mean function for state dynamics models
+** change.point.guess check for repeated states
+** likelihood wrapper for state dynamics models
+** get, set parameters for state dynamics models
+** selection: mean, speed, diffusion, ...
+** mean.svf is a function of mixture weights
+* variogram.fit error on wrong class
+* uere<- warning message when location classes do not intersect
+* as.telemetry example
+* rsf.fit ~=0 exact weighted Gaussian fit (!SP && !NA)
+* population averaging of non-stationary mean functions
+* rsf.fit: categorical modifiers -> categorical normalizations
+** optimize integrator="Riemann" for categorical modifiers -> categorical integrals
+* rsf.fit: Riemann integrator can be to coarse
+* units="unit string"
+* update all one-pass mean/var calculations to numerically stable d=x-mu, mu=mu+d/i, s=...
+* export sundial
+* plot.rsf method
+* plot.overlap method
 * add ctmmlearn to FAQ
+* RShiny zoom() and variogram.fit()
 * color data in data example man files
 * convenience functions like dof()<- for UERE models
 * update R.suit to use matrix.model
 * shift normalize suitability()
 * proximity with multiple individuals
-* user rater::project() in agde, akde, ...
+* user raster::project() in agde, akde, ...
 * predict() individual from population ctmm
 * posterior model predictions
 * pkde weights choice, bandwidth choice, RSF choice - wouldn't be necessary with posterior model predictions

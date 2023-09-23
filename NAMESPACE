@@ -1,19 +1,30 @@
 #IMPORTED GENERIC FUNCTIONS TO OVERLOAD
 importFrom("graphics",plot)
 importFrom("methods",new)
+importFrom("raster",extent,projection,"projection<-",raster,writeRaster,zoom)
+importFrom("stats",median,predict,simulate)
+importFrom("terra",writeVector)
 importFrom("utils",head,tail)
-importFrom("stats",simulate,predict,median)
-importFrom("raster",extent,raster,writeRaster,zoom)
-importFrom("raster",projection,"projection<-")
 
 #importClassesFrom("Matrix",dpoMatrix)
 
 # non-base generics to export
-export(plot,simulate,predict,median,head,tail)
+export(plot)
+export(head,tail)
+export(extent,projection,"projection<-",raster,writeRaster,zoom)
+export(simulate,predict,median)
+export(writeVector)
+
+export(as.sf,cluster,compass,emulate,funnel,meta,speed,speeds,video)
+
+export(Log,Exp) # base R methods are not made to be generic
+#S3method(log,list) # this stuff doesn't work, but CRAN requires it?
+#S3method(log,area)
+#S3method(log,ctmm)
+#S3method(log,speed)
+#S3method(log,UD)
+
 #export(modes,ridges)
-export(extent,raster,writeRaster,zoom)
-export(projection,"projection<-")
-export(as.sf,cluster,compass,emulate,meta,speed,speeds,video,writeShapefile)
 #export(SpatialPoints,SpatialPolygonsDataFrame)
 #S3method(SpatialPoints,matrix)
 #S3method(SpatialPoints,data.frame)
@@ -22,8 +33,6 @@ export(as.sf,cluster,compass,emulate,meta,speed,speeds,video,writeShapefile)
 #GENERAL FUNCTIONS
 #S3method(det,numeric)
 #S3method(determinant,numeric) # can't get these to work???
-#S3method(log,list) # this doesn't work
-export(Log,Exp)
 S3method(mean,list)
 S3method(median,list)
 S3method(plot,list)
@@ -92,15 +101,12 @@ S3method(str,ctmm)
 #MEAN FUNCTIONS
 
 #AKDE FUNCTIONS
-export(agde,akde,bandwidth,homerange,pkde,SpatialPolygonsDataFrame.UD,suitability,writeShapefile)
+export(agde,akde,bandwidth,homerange,pkde,SpatialPolygonsDataFrame.UD,suitability)
 #S3method(akde,list)
 #S3method(akde,telemetry)
 S3method(mean,UD)
 S3method(plot,UD)
 S3method(summary,UD)
-S3method(writeShapefile,list)
-S3method(writeShapefile,telemetry)
-S3method(writeShapefile,UD)
 #S3method(log,area)
 
 #S3method(plot,RS)
@@ -141,17 +147,17 @@ export(annotate,color)
 export(lasso,marquee,cleave)
 
 # ENCOUNTER FUNCTIONS
-export(encounter,rates)
+export(encounter,cde)
 
 # RSF functions
-export(rsf.fit)
+export(rsf.fit,rsf.select,sdm.fit,sdm.select,sdm.integrate,intensity)
 
 # revisitation
 export(revisitation)
 export(npr)
 
 # difference vector
-export(difference,proximity,distances)
+export(difference,midpoint,proximity,distances)
 
 # pretty units and significant figures
 export(sigfig,dimfig)

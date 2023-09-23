@@ -12,7 +12,7 @@
 
 <meta name="author" content="Guillaume Péron, Christen H. Fleming, and Justin M. Calabrese" />
 
-<meta name="date" content="2022-11-04" />
+<meta name="date" content="2023-09-22" />
 
 <title>Periodic movement models</title>
 
@@ -326,7 +326,7 @@ code > span.er { color: #a61717; background-color: #e3d2d2; }
 
 <h1 class="title toc-ignore">Periodic movement models</h1>
 <h4 class="author">Guillaume Péron, Christen H. Fleming, and Justin M. Calabrese</h4>
-<h4 class="date">2022-11-04</h4>
+<h4 class="date">2023-09-22</h4>
 
 
 
@@ -369,24 +369,24 @@ code > span.er { color: #a61717; background-color: #e3d2d2; }
 <p>With <code>verbose=TRUE</code>, we obtain a list fitted <code>ctmm</code> objects, one for each relevant combination of effects, where the first element of that list is the preferred model.</p>
 <div class="sourceCode" id="cb10"><pre class="sourceCode r"><code class="sourceCode r"><a class="sourceLine" id="cb10-1" title="1"><span class="kw">summary</span>(FITS)</a></code></pre></div>
 <pre><code>##                                               ΔAICc  ΔRMSPE (m) DOF[area]
-## OUF anisotropic harmonic 2 0               0.000000   60.815823  175.8871
-## OUF anisotropic harmonic 1 0              20.689425   63.785893  179.2759
-## OUF anisotropic harmonic 2 1               5.493885   89.639609  169.4066
-## OUF anisotropic harmonic 1 1              26.103585   91.796922  172.8667
-## OUF anisotropic harmonic 0 0             123.673098  157.298558  205.5584
-## OUF anisotropic harmonic 0 1             128.448440  177.809090  200.7891
+## OUF anisotropic harmonic 2 0               0.000000   60.815821  175.8871
+## OUF anisotropic harmonic 1 0              20.689425   63.785897  179.2759
+## OUF anisotropic harmonic 2 1               5.493885   89.639598  169.4066
+## OUF anisotropic harmonic 1 1              26.103584   91.796919  172.8667
+## OUF anisotropic harmonic 0 0             123.673098  157.298556  205.5584
+## OUF anisotropic harmonic 0 1             128.448440  177.809091  200.7891
 ## OUF anisotropic harmonic 3 0             -17.231893 2496.228990  174.7865
 ## OUf anisotropic harmonic 2 0              19.477244    0.000000  237.2510
-## OUf anisotropic harmonic 1 0              39.906174    5.147748  240.7653
-## OUf anisotropic harmonic 0 0             124.354647  131.232070  233.3833
+## OUf anisotropic harmonic 1 0              39.906174    5.147749  240.7653
+## OUf anisotropic harmonic 0 0             124.354647  131.232071  233.3833
 ## OU anisotropic harmonic 2 0               34.440063   67.757512  146.6522
-## OU anisotropic harmonic 1 0               51.739611   69.857170  150.1455
-## OU anisotropic harmonic 0 0              193.520195  177.510805  163.4152
-## OUF harmonic 2 0                          88.869590  236.982416  163.4619
-## OUF harmonic 1 0                         113.063969  238.575577  166.0153
-## OUF harmonic 0 0                         230.160697  323.668025  196.4268
-## OUF anisotropic circulation harmonic 0 0 124.411899  157.179606  205.5747
-## OUF circulation harmonic 0 0             231.126333  323.504935  196.4744</code></pre>
+## OU anisotropic harmonic 1 0               51.739611   69.857171  150.1455
+## OU anisotropic harmonic 0 0              193.520195  177.510804  163.4152
+## OUF harmonic 2 0                          88.869590  236.982372  163.4619
+## OUF harmonic 1 0                         113.063969  238.575576  166.0153
+## OUF harmonic 0 0                         230.160697  323.668042  196.4268
+## OUF anisotropic circulation harmonic 0 0 124.411899  157.179394  205.5748
+## OUF circulation harmonic 0 0             231.126332  323.504552  196.4746</code></pre>
 <p>From the first model, We see that the velocity autocorrelation (OUF), anisotropy, and <code>2</code> harmonics of daily periodicity were all selected. Given how we specified the prototype, <code>harmonic 2 0</code> means that this preferred model has no lunar periodicity, but has two harmonics of the one-day periodicity. This fittingly corresponds to what the periodogram was saying. If there was some moon-related pattern of space use and given how we specified our prototype, we would have had a non-zero value as the second <code>harmonic</code> value.</p>
 <p>The sorting of our candidate models is more complex than in previous stationary examples. For a given autocovariance model, the different non-stationary models are sorted by mean square predictive error (MSPE) and not the information criterion. As we will demonstrate, likelihood-based model selection can badly overfit with these types of models. For sorting between the autocovariance models (each with best non-stationary model), the information criterion is used. MSPE is not valid for general purpose selection.</p>
 <div class="sourceCode" id="cb12"><pre class="sourceCode r"><code class="sourceCode r"><a class="sourceLine" id="cb12-1" title="1"><span class="co"># these are sorted by MSPE</span></a>
@@ -394,22 +394,22 @@ code > span.er { color: #a61717; background-color: #e3d2d2; }
 <a class="sourceLine" id="cb12-3" title="3"><span class="kw">summary</span>(FITS[SUB])</a></code></pre></div>
 <pre><code>##                                   ΔAICc  ΔRMSPE (m) DOF[area]
 ## OUF anisotropic harmonic 2 0   0.000000    0.000000  175.8871
-## OUF anisotropic harmonic 1 0  20.689425    2.970071  179.2759
-## OUF anisotropic harmonic 2 1   5.493885   28.823787  169.4066
-## OUF anisotropic harmonic 1 1  26.103585   30.981099  172.8667
-## OUF anisotropic harmonic 0 0 123.673098   96.482736  205.5584
-## OUF anisotropic harmonic 0 1 128.448440  116.993267  200.7891
-## OUF anisotropic harmonic 3 0 -17.231893 2435.413167  174.7865</code></pre>
+## OUF anisotropic harmonic 1 0  20.689425    2.970076  179.2759
+## OUF anisotropic harmonic 2 1   5.493885   28.823776  169.4066
+## OUF anisotropic harmonic 1 1  26.103584   30.981098  172.8667
+## OUF anisotropic harmonic 0 0 123.673098   96.482735  205.5584
+## OUF anisotropic harmonic 0 1 128.448440  116.993269  200.7891
+## OUF anisotropic harmonic 3 0 -17.231893 2435.413169  174.7865</code></pre>
 <div class="sourceCode" id="cb14"><pre class="sourceCode r"><code class="sourceCode r"><a class="sourceLine" id="cb14-1" title="1"><span class="co"># these are sorted by IC</span></a>
 <a class="sourceLine" id="cb14-2" title="2">SUB &lt;-<span class="st"> </span><span class="kw">grepl</span>(<span class="st">&#39;0 0&#39;</span>,<span class="kw">names</span>(FITS))</a>
 <a class="sourceLine" id="cb14-3" title="3"><span class="kw">summary</span>(FITS[SUB])</a></code></pre></div>
 <pre><code>##                                                ΔAICc ΔRMSPE (m) DOF[area]
 ## OUF anisotropic harmonic 0 0               0.0000000   26.06649  205.5584
 ## OUf anisotropic harmonic 0 0               0.6815490    0.00000  233.3833
-## OUF anisotropic circulation harmonic 0 0   0.7388015   25.94754  205.5747
+## OUF anisotropic circulation harmonic 0 0   0.7388011   25.94732  205.5748
 ## OU anisotropic harmonic 0 0               69.8470969   46.27873  163.4152
-## OUF harmonic 0 0                         106.4875995  192.43595  196.4268
-## OUF circulation harmonic 0 0             107.4532352  192.27286  196.4744</code></pre>
+## OUF harmonic 0 0                         106.4875995  192.43597  196.4268
+## OUF circulation harmonic 0 0             107.4532338  192.27248  196.4746</code></pre>
 <p>If only the information criterion was used, we would have selected <code>harmonic 3 0</code> over <code>harmonic 2 0</code>.</p>
 <div class="sourceCode" id="cb16"><pre class="sourceCode r"><code class="sourceCode r"><a class="sourceLine" id="cb16-1" title="1"><span class="co"># sorting by IC only</span></a>
 <a class="sourceLine" id="cb16-2" title="2"><span class="kw">summary</span>(FITS,<span class="dt">MSPE=</span><span class="ot">NA</span>)</a></code></pre></div>
@@ -418,7 +418,7 @@ code > span.er { color: #a61717; background-color: #e3d2d2; }
 ## OUF anisotropic harmonic 2 0              17.23189 105.76775
 ## OUF anisotropic harmonic 2 1              22.72578 103.79740
 ## OUf anisotropic harmonic 2 0              36.70914 149.25890
-## OUF anisotropic harmonic 1 0              37.92132 107.66572
+## OUF anisotropic harmonic 1 0              37.92132 107.66571
 ## OUF anisotropic harmonic 1 1              43.33548 105.71558
 ## OU anisotropic harmonic 2 0               51.67196  79.90435
 ## OUf anisotropic harmonic 1 0              57.13807 151.46287
@@ -431,7 +431,7 @@ code > span.er { color: #a61717; background-color: #e3d2d2; }
 ## OUF anisotropic harmonic 0 1             145.68033 129.27965
 ## OU anisotropic harmonic 0 0              210.75209  88.86910
 ## OUF harmonic 0 0                         247.39259 119.70643
-## OUF circulation harmonic 0 0             248.35823 120.85055</code></pre>
+## OUF circulation harmonic 0 0             248.35823 120.85057</code></pre>
 <p>Next we do some sanity checking on our results. The sampling interval for Gamba is fairly steady at</p>
 <div class="sourceCode" id="cb18"><pre class="sourceCode r"><code class="sourceCode r"><a class="sourceLine" id="cb18-1" title="1"><span class="st">&quot;hour&quot;</span> <span class="op">%#%</span><span class="st"> </span>stats<span class="op">::</span><span class="kw">median</span>(<span class="kw">diff</span>(Gamba<span class="op">$</span>t))</a></code></pre></div>
 <pre><code>## [1] 4</code></pre>
@@ -444,7 +444,7 @@ code > span.er { color: #a61717; background-color: #e3d2d2; }
 ## 
 ## $DOF
 ##        mean        area   diffusion       speed 
-## 106.6798345 174.7864583 300.0860948   0.8479798 
+## 106.6798346 174.7864588 300.0860954   0.8479798 
 ## 
 ## $CI
 ##                                         low        est      high

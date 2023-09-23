@@ -84,7 +84,14 @@ akde <- function(data,CTMM,VMM=NULL,R=list(),SP=NULL,SP.in=TRUE,variable="utiliz
   AXES <- length(axes)
 
   n <- length(data)
-  weights <- array(weights,n)
+  if(class(weights)[1]!="list")
+  {
+    # assume numerical or boolean / by individual or by time
+    if(length(weights)==1 || length(weights)==n) # by individual
+    { weights <- as.list(array(weights,n)) }
+    else # by time
+    { weights <- list(weights) }
+  }
 
   # loop over individuals for bandwidth optimization
   CTMM0 <- VMM0 <- list()
@@ -121,7 +128,7 @@ akde <- function(data,CTMM,VMM=NULL,R=list(),SP=NULL,SP.in=TRUE,variable="utiliz
       }
 
       # calculate individual optimal bandwidth and some other information
-      if(is.null(UD)) { KDE[[i]] <- bandwidth(data=data[[i]],CTMM=CTMM[[i]],VMM=VMM[[i]],weights=weights[i],verbose=TRUE,error=error,...) }
+      if(is.null(UD)) { KDE[[i]] <- bandwidth(data=data[[i]],CTMM=CTMM[[i]],VMM=VMM[[i]],weights=weights[[i]],verbose=TRUE,error=error,...) }
     }
     else if(class(CTMM)[1]=="bandwidth") # bandwidth information was precalculated
     {
@@ -140,7 +147,7 @@ akde <- function(data,CTMM,VMM=NULL,R=list(),SP=NULL,SP.in=TRUE,variable="utiliz
     }
   } # end loop over individuals
 
-  grid <- format.grid(grid,axes=axes)
+  grid <- format_grid(grid,axes=axes)
   COL <- length(axes)
 
   if(!is.null(UD)) # format population KDE as an individual # then set resolution
@@ -148,6 +155,8 @@ akde <- function(data,CTMM,VMM=NULL,R=list(),SP=NULL,SP.in=TRUE,variable="utiliz
     i <- 1 # one population
     # weights and bandwidth
     KDE[[i]] <- bandwidth.pop(data,UD,weights=weights,...)
+    kernel <- list(...)$kernel
+    if(is.null(kernel)) { kernel <- "individual" }
 
     DOF <- DOF.area(KDE[[i]]$CTMM)
     if(DOF<error)
@@ -164,11 +173,14 @@ akde <- function(data,CTMM,VMM=NULL,R=list(),SP=NULL,SP.in=TRUE,variable="utiliz
     # bandwidth [d,d,n]
     H <- KDE[[i]]$h^2
 
-    # assemble bandwidth
+    # assemble bandwidths
     KDE[[i]]$H <- list()
     for(j in 1:n)
     {
-      KDE[[i]]$H[[j]] <- prepare.H(H*CTMM[[j]]$sigma,nrow(data[[j]]))
+      if(kernel=="individual")
+      { KDE[[i]]$H[[j]] <- prepare.H(H*CTMM[[j]]$sigma,nrow(data[[j]])) }
+      else if(kernel=="population")
+      { KDE[[i]]$H[[j]] <- prepare.H(H*KDE[[i]]$CTMM$sigma,nrow(data[[j]])) }
       DIM <- dim(KDE[[i]]$H[[j]])
       dim(KDE[[i]]$H[[j]]) <- c(DIM[1],AXES^2)
     }
@@ -215,10 +227,10 @@ akde <- function(data,CTMM,VMM=NULL,R=list(),SP=NULL,SP.in=TRUE,variable="utiliz
     { EXT <- CTMM[[i]] }
     else
     { EXT <- list(horizontal=CTMM[[i]],vertical=VMM[[i]]) }
-    EXT <- extent(EXT,level=1-error)[,axes] # Gaussian extent (includes uncertainty)
+    EXT <- extent(EXT,level=1-error)[,axes,drop=FALSE] # Gaussian extent (includes uncertainty)
     GRID <- kde.grid(data[[i]],H=KDE[[i]]$H,axes=axes,alpha=error,res=res,dr=dr,grid=grid,EXT.min=EXT) # individual grid
 
-    KDE[[i]] <- c(KDE[[i]],kde(data[[i]],H=KDE[[i]]$H,axes=axes,CTMM=CTMM0[[i]],SP=SP,SP.in=SP.in,RASTER=R,bias=DEBIAS[[i]],W=KDE[[i]]$weights,alpha=error,dr=dr,grid=GRID))
+    KDE[[i]] <- c(KDE[[i]],kde(data[[i]],H=KDE[[i]]$H,axes=axes,CTMM=CTMM0[[i]],SP=SP,SP.in=SP.in,RASTER=R,bias=DEBIAS[[i]],W=KDE[[i]]$weights,alpha=error,dr=dr,grid=GRID,...))
 
     if(!is.null(UD))
     {
@@ -247,7 +259,7 @@ prepare.H <- function(H,n,axes=c('x','y'))
 
   # one variance given - promote to matrix first - then passes to later stage
   if(length(H)==1)
-  { H <- H*diag(d) }
+  { H <- c(H)*diag(d) }
   else if(is.null(dim(H))) # array of variances given
   {
     H <- sapply(H,function(h) h * diag(d),simplify='array') # [d,d,n]
@@ -269,8 +281,10 @@ prepare.H <- function(H,n,axes=c('x','y'))
 # construct my own KDE objects
 # was using ks-package but it has some bugs
 # alpha is the error goal in my total probability
-kde <- function(data,H,axes=c("x","y"),CTMM=list(),SP=NULL,SP.in=TRUE,RASTER=list(),bias=FALSE,W=NULL,alpha=0.001,res=NULL,dr=NULL,grid=NULL,variable=NA,normalize=TRUE,trace=FALSE)
+kde <- function(data,H,axes=c("x","y"),CTMM=list(),SP=NULL,SP.in=TRUE,RASTER=list(),bias=FALSE,W=NULL,alpha=0.001,res=NULL,dr=NULL,grid=NULL,variable=NA,normalize=TRUE,trace=FALSE,grad=FALSE,...)
 {
+  DIM <- length(axes)
+
   if(!is.na(variable))
   {
     if(variable %in% c("revisitation"))
@@ -330,10 +344,15 @@ kde <- function(data,H,axes=c("x","y"),CTMM=list(),SP=NULL,SP.in=TRUE,RASTER=lis
     # otherwise we calculate one suitability per time/kernel
   }
 
-  if(length(SP))
+  if(length(SP) && DIM==2)
   {
     proj <- CTMM@info$projection
-    SP <- sp::spTransform(SP,proj)
+    # this is inaccurate
+    # SP <- sp::spTransform(SP,proj)
+    if(!any(grepl('sf',class(SP)))) { SP <- sf::st_as_sf(SP) }
+    SP <- sf::st_transform(SP,crs=sf::st_crs(proj))
+    # sf methods are slow
+    SP <- sf::as_Spatial(SP)
 
     # create raster template
     dx <- grid$dr[1]
@@ -349,11 +368,12 @@ kde <- function(data,H,axes=c("x","y"),CTMM=list(),SP=NULL,SP.in=TRUE,RASTER=lis
     RSP <- raster::raster(RSP,xmn=xmn,xmx=xmx,ymn=ymn,ymx=ymx,crs=proj)
 
     # rasterize SP -> RSP
-    RSP <- raster::rasterize(SP,RSP,background=0)
+    RSP <- raster::rasterize(SP,RSP,background=NA)
     RSP <- raster::as.matrix(RSP)
     RSP <- t(RSP)[,dim(RSP)[1]:1]
+    RSP <- !is.na(RSP)
 
-    if(!SP.in) { RSP <- 1-RSP }
+    if(!SP.in) { RSP <- !RSP }
 
     # incorporate into RASTER
     if(length(RASTER))
@@ -376,6 +396,14 @@ kde <- function(data,H,axes=c("x","y"),CTMM=list(),SP=NULL,SP.in=TRUE,RASTER=lis
   PMF <- array(0,sapply(R,length))
   # Nadaraya-Watson numerator (for regressions)
   if(!is.na(variable)) { NUM <- PMF }
+  # gradient information
+  if(grad)
+  {
+    GRAD <- array(0,c(dim(PMF),2))
+    HESS <- array(0,c(dim(PMF),2,2))
+  }
+
+  SUB <- lapply(1:length(dim(PMF)),function(d){1:dim(PMF)[d]})
 
   if(trace) { pb <- utils::txtProgressBar(style=3) } # time loops
   for(i in 1:n)
@@ -393,10 +421,17 @@ kde <- function(data,H,axes=c("x","y"),CTMM=list(),SP=NULL,SP.in=TRUE,RASTER=lis
 
     SUB <- lapply(1:length(i1),function(d){ i1[d]:i2[d] })
 
-    # I can't figure out how to do these cases in one line
-    if(length(SUB)==1) # 1D
-    { PMF[SUB[[1]]] <- PMF[SUB[[1]]] + W[i]*pnorm1(R[[1]][SUB[[1]]]-r[i,1],H[i,,],dr,alpha) }
-    else if(length(SUB)==2) # 2D
+    # I can't figure out how to do these cases in one line?
+    if(DIM==1) # 1D
+    {
+      dPMF <- pnorm1(R[[1]][SUB[[1]]]-r[i,1],H[i,,],dr,alpha)
+
+      # assume grid has exact bounds
+      if(length(SP)) { dPMF <- dPMF / sum(dPMF) }
+
+      PMF[SUB[[1]]] <- PMF[SUB[[1]]] + W[i]*dPMF
+    }
+    else if(DIM==2) # 2D
     {
       # extract suitability sub-grid
       if(length(RASTER))
@@ -429,7 +464,9 @@ kde <- function(data,H,axes=c("x","y"),CTMM=list(),SP=NULL,SP.in=TRUE,RASTER=lis
         } # end non-stationary suitability calculation
       } # end suitability modulus
 
-      dPMF <- pnorm2(R[[1]][SUB[[1]]]-r[i,1],R[[2]][SUB[[2]]]-r[i,2],H[i,,],dr,alpha)
+      X <- R[[1]][SUB[[1]]]-r[i,1]
+      Y <- R[[2]][SUB[[2]]]-r[i,2]
+      dPMF <- pnorm2(X,Y,H[i,,],dr,alpha)
 
       # apply suitability and re-normalize
       if(length(RASTER))
@@ -442,10 +479,35 @@ kde <- function(data,H,axes=c("x","y"),CTMM=list(),SP=NULL,SP.in=TRUE,RASTER=lis
       dPMF <- W[i]*dPMF
 
       PMF[SUB[[1]],SUB[[2]]] <- PMF[SUB[[1]],SUB[[2]]] + dPMF
+
       if(!is.na(variable))
       { NUM[SUB[[1]],SUB[[2]]] <- NUM[SUB[[1]],SUB[[2]]] + data[[VARIABLE]][i]*dPMF }
+
+      if(grad)
+      {
+        iH <- PDsolve(H[i,,])
+        DIM <- c(length(X),length(Y))
+        G <- array(0,c(DIM,2))
+        G[,,1] <- array(X,DIM)
+        G[,,2] <- t( array(Y,rev(DIM)) )
+        G <- G %.% iH
+
+        dG <- G
+        dG[,,1] <- dPMF * dG[,,1]
+        dG[,,2] <- dPMF * dG[,,2]
+
+        GRAD[SUB[[1]],SUB[[2]],] <- GRAD[SUB[[1]],SUB[[2]],] - dG
+
+        GG <- array(G,c(DIM,2,2))
+        GG[,,1,1] <- dPMF * G[,,1] * G[,,1]
+        GG[,,1,2] <- dPMF * G[,,1] * G[,,2]
+        GG[,,2,1] <- dPMF * G[,,2] * G[,,1]
+        GG[,,2,2] <- dPMF * G[,,2] * G[,,2]
+
+        HESS[SUB[[1]],SUB[[2]],,] <- HESS[SUB[[1]],SUB[[2]],,] - (dPMF %o% iH) + GG
+      }
     }
-    else if(length(SUB)==3) # 3D
+    else if(DIM==3) # 3D
     { PMF[SUB[[1]],SUB[[2]],SUB[[3]]] <- PMF[SUB[[1]],SUB[[2]],SUB[[3]]] + W[i]*pnorm3(R[[1]][SUB[[1]]]-r[i,1],R[[2]][SUB[[2]]]-r[i,2],R[[3]][SUB[[3]]]-r[i,3],H[i,,],dr,alpha) }
 
     if(trace) { utils::setTxtProgressBar(pb,i/n) }
@@ -456,14 +518,14 @@ kde <- function(data,H,axes=c("x","y"),CTMM=list(),SP=NULL,SP.in=TRUE,RASTER=lis
 
   if(sum(bias)) # debias area/volume
   {
-    if(length(dr)==2) # AREA debias
+    if(DIM<=2) # AREA or WIDTH debias
     {
-      # debias the area
+      # debias the area (2D) or width (1D)
       PMF <- debias.volume(PMF,bias=min(bias))
       CDF <- PMF$CDF
       PMF <- PMF$PMF
     }
-    else if(length(dr)==3) # VOLUME debias
+    else if(DIM==3) # VOLUME debias
     {
       # I'm assuming z-bias is smallest
       vbias <- min(bias)
@@ -489,6 +551,7 @@ kde <- function(data,H,axes=c("x","y"),CTMM=list(),SP=NULL,SP.in=TRUE,RASTER=lis
   { CDF <- pmf2cdf(PMF) }
 
   result <- list(PDF=PMF/dV,CDF=CDF,axes=axes,r=R,dr=dr)
+  if(grad) { result$grad <- GRAD; result$hess <- HESS }
   if(trace) { close(pb) }
   return(result)
 }
@@ -768,13 +831,22 @@ pnorm2 <- function(X,Y,sigma,dr,alpha=0.001)
 # This function is not ready for Kriging
 pnorm3 <- function(X,Y,Z,sigma,dr,alpha=0.001)
 {
+  # !!! EXPAND INTO DIFFERENT RESOLUTION INTEGRATORS
+
   cdf <- prod(dr) * Gauss3(X,Y,Z,sigma)
 
   return(cdf)
 }
 
 # UNFINISHED
-pnorm1 <- function(X,sigma,dr,alpha=0.001) { 0 }
+pnorm1 <- function(X,sigma,dr,alpha=0.001)
+{
+  # !!! EXPAND INTO DIFFERENT RESOLUTION INTEGRATORS
+
+  cdf <- dr * Gauss1(X,sigma)
+
+  return(cdf)
+}
 
 
 #################
@@ -811,7 +883,7 @@ NewtonCotes <- function(X,Y,sigma,W,dx=mean(diff(X)),dy=mean(diff(Y)))
 
 
 #####################
-# gaussian pdf
+# 2D Gaussian pdf
 Gauss <- function(X,Y,sigma=NULL,sigma.inv=solve(sigma),sigma.GM=sqrt(det(sigma)))
 {
   cdf <- outer(X^2*sigma.inv[1,1],Y^2*sigma.inv[2,2],"+")/2
@@ -822,15 +894,21 @@ Gauss <- function(X,Y,sigma=NULL,sigma.inv=solve(sigma),sigma.GM=sqrt(det(sigma)
 
 
 #####################
-# gaussian pdf
+# 3D Gaussian pdf
 # assumes uncorrelated z-axis
 Gauss3 <- function(X,Y,Z,sigma=NULL,sigma.inv=solve(sigma[1:2,1:2]),sigma.GM=sqrt(det(sigma[1:2,1:2])))
 {
   cdf <- Gauss(X,Y,sigma=sigma[1:2,1:2],sigma.inv=sigma.inv,sigma.GM=sigma.GM)
-  cdf <- cdf %o% (exp(-Z^2/(2*sigma[3,3]))/sqrt(2*pi*sigma[3,3]))
+  cdf <- cdf %o% Gauss1(Z,sigma[3,3])
 
   return(cdf)
 }
+
+
+#####################
+# 1D Gaussian pdf
+Gauss1 <- function(X,sigma=NULL)
+{ exp(-X^2/(2*sigma))/sqrt(2*pi*sigma) }
 
 
 #####################
@@ -847,7 +925,7 @@ CI.UD <- function(object,level.UD=0.95,level=0.95,P=FALSE,convex=FALSE)
   interpolate <- function(y,val)
   {
     x <- last(which(y < val))
-    if(is.null(x))
+    if(!length(x))
     { x <- 0 }
     else if(x==length(y))
     { x <- length(y) }
@@ -916,12 +994,12 @@ summary.UD <- function(object,convex=FALSE,level=0.95,level.UD=0.95,units=TRUE,.
   if(length(area)==1) { stop("Object is not a range distribution.") }
 
   DOF <- c(object$DOF.area[1],object$DOF.H)
-  R <- summary.UD.format(area,DOF=DOF,units=units)
+  R <- summary_UD_format(area,DOF=DOF,units=units)
   return(R)
 }
 #methods::setMethod("summary",signature(object="UD"), function(object,...) summary.UD(object,...))
 
-summary.UD.format <- function(CI,DOF,units=TRUE)
+summary_UD_format <- function(CI,DOF,units=TRUE)
 {
   # pretty units
   # do we convert base units?

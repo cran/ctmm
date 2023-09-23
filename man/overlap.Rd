@@ -22,11 +22,11 @@
 
 \details{The default \code{method="Bhattacharyya"} estimates the standard overlap measure \eqn{\int\int \sqrt{p(x,y) \, q(x,y)} \, dx \, dy} between the distributions \eqn{p(x,y)} and \eqn{q(x,y)},
 while \code{method="encounter"} estimates the non-standard measure \eqn{\frac{\int\int p(x,y) \, q(x,y) \, dx \, dy}{\sqrt{\int\int p(x',y')^2 \, dx' dy' \int\int q(x'',y'')^2 \, dx'' dy''}}},
-which has a numerator proportional to the uncorrelated encounter rate.
+which has a numerator proportional to the uncorrelated encounter probability.
 Both measures lie between 0 and 1, where 0 indicates no shared support and 1 indicates identical distributions.
 }
 
-\value{A table of confidence intervals on the overlap estimate. A value of \code{1} implies that the two distributions are identical, while a value of \code{0} implies that the two distributions share no area in common.}
+\value{An object with slots \code{DOF}, containing the effective sample sizes, and \code{CI} containing a table of confidence intervals on the overlap estimates. A value of \code{1} implies that the two distributions are identical, while a value of \code{0} implies that the two distributions share no area in common.}
 
 %% ~put references to the literature/web site here ~
 \references{

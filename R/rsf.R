@@ -1,7 +1,8 @@
-rsf.fit <- function(data,UD,beta=NULL,R=list(),formula=NULL,integrated=TRUE,reference="auto",level.UD=0.99,isotropic=TRUE,debias=TRUE,smooth=TRUE,standardize=TRUE,integrator="MonteCarlo",error=0.01,max.mem="1 Gb",interpolate=TRUE,trace=TRUE,...)
+rsf.fit <- function(data,UD,R=list(),formula=NULL,integrated=TRUE,level.UD=0.99,reference="auto",debias=TRUE,smooth=TRUE,standardize=TRUE,integrator="MonteCarlo",error=0.01,max.mem="1 Gb",interpolate=TRUE,trace=TRUE,...)
 {
   STATIONARY <- TRUE
   CTMM <- UD@CTMM
+  isotropic <- CTMM$isotropic
   axes <- CTMM$axes
   GEO <- c('longitude','latitude')
   max.mem <- ustring(max.mem)
@@ -17,19 +18,38 @@ rsf.fit <- function(data,UD,beta=NULL,R=list(),formula=NULL,integrated=TRUE,refe
   {
     if(class(level.UD)[1]=="numeric")
     {
+      # level.UD <- as.sf(UD,level.UD=level.UD)
       level.UD <- SpatialPolygonsDataFrame.UD(UD,level.UD=level.UD)
       # subset to point estimate contour
       level.UD <- level.UD@polygons[[2]]
     }
-    else # project polygon to data's
-    { level.UD <- sp::spTransform(level.UD,sp::CRS(projection(data))) }
+    else
+    {
+      # project polygon to data's (spTransform is bad)
+      if(!any(grepl('sf',class(level.UD)))) { level.UD <- sf::st_as_sf(level.UD) }
+      level.UD <- sf::st_transform(level.UD,sf::st_crs(projection(data)))
+
+      # sf sampling below is too slow, so now have to convert back to sp!
+      level.UD <- sf::as_Spatial(level.UD)@polygons[[1]]
+    }
+    # AREA <- as.numeric(sf::st_area(level.UD))
+    # level.UD should now be class Polygons in projection of data
     AREA <- level.UD@area
   }
-  else if(isotropic && !CTMM$isotropic) # until rsf.select() is coded
+
+  if(!CTMM$isotropic)
   {
-    message('RSF code is isotropic for the moment.')
-    CTMM <- simplify.ctmm(CTMM,'minor')
-    CTMM <- ctmm.fit(data,CTMM,trace=trace)
+    if("ISO" %in% names(CTMM))
+    { ISO <- CTMM$ISO }
+    else
+    {
+      ISO <- simplify.ctmm(CTMM,'minor')
+      if(trace) { message("Fitting isotropic autocorrelation model.") }
+      ISO <- ctmm.fit(data,ISO,trace=max(trace-1,0))
+    }
+    CTMM <- ISO
+    UD@CTMM <- ISO
+    UD$DOF.area <- DOF.area(ISO)
   }
 
   # smooth the data, but don't drop
@@ -76,17 +96,6 @@ rsf.fit <- function(data,UD,beta=NULL,R=list(),formula=NULL,integrated=TRUE,refe
     formula <- STUFF$formula
   }
 
-  if(!is.null(formula) && standardize)
-  {
-    message("Users are responsible for standardizing rasters when formula argument is supplied.")
-    standardize <- FALSE
-  }
-  else
-  {
-    RSCALE <- rep(1,length(R))
-    names(RSCALE) <- names(R)
-  }
-
   # how to sample rasters
   interpolate <- rep(interpolate,length(R))
   interpolate <- ifelse(interpolate,"bilinear","simple")
@@ -122,23 +131,35 @@ rsf.fit <- function(data,UD,beta=NULL,R=list(),formula=NULL,integrated=TRUE,refe
     VARS <- all.vars(formula)
     DVARS <- VARS[ VARS %nin% RVARS ]
 
+    for(D in DVARS) { data[[D]] <- as.numeric(data[[D]]) } # model.matrix will rename otherwise
+
     # this doesn't work with poly(), etc.
     # TERMS <- attr(stats::terms(formula),"term.labels")
     # dummy data for model parameter names
     DATA <- data.frame(data)
     DATA[RVARS] <- as.list(rep(0,length(RVARS)))
-    DATA[['rr']] <- 0
+    # DATA[['rr']] <- 0 # why was this here?
     TERMS <- colnames(stats::model.matrix(formula,data=DATA))
     TERMS <- TERMS[TERMS!="(Intercept)"]
 
     CVARS <- TERMS[ TERMS %nin% VARS ] # terms that are not simple variables
 
-    OFFSET <- stats::terms(formula)
-    OFFSET <- attr(OFFSET,"variables")[ attr(OFFSET,"offset") ]
+    OFFSET <- get.offset(formula)
 
     if(attr(stats::terms(formula),"response")[1]>0) { stop("Response variable not yet supported.") }
   }
-  environment(formula) <- NULL
+  environment(formula) <- globalenv()
+
+  if(length(DVARS)+length(CVARS)>0 && standardize)
+  {
+    message("Users are responsible for standardizing rasters when interactions are supplied.")
+    standardize <- FALSE
+  }
+  else
+  {
+    RSCALE <- rep(1,length(R))
+    names(RSCALE) <- names(R)
+  }
 
   VARS <- c(RVARS,CVARS) # vars that need to be recorded per location
   if(length(DVARS)) { STATIONARY <- FALSE }
@@ -151,17 +172,28 @@ rsf.fit <- function(data,UD,beta=NULL,R=list(),formula=NULL,integrated=TRUE,refe
   }
 
   # evaluate term on data.frame
+  # term can be multiple\
+  # offset does not work with model.matrix code
   evaluate <- function(term,envir,offset=FALSE)
   {
     if(length(dim(envir))==2) # (term,DATA[time,var])
     {
-      # term <- gsub(":","*",term) # multiplication
-      # term <- gsub("I(","(",term) # function evaluations # don't think this is necessary
+      NAS <- which(apply(envir,1,function(r){any(is.na(r[VARS]))}))
+      envir[NAS,VARS] <- 0
       envir <- data.frame(envir) # matrices can't be environments, but data.frames can't matrix multiply...
       if(!STATIONARY) { envir <- cbind(envir,data) }
-      # RET <- eval(parse(text=term),envir=envir)
-      RET <- stats::model.matrix(formula,envir)[,term]
-      if(offset) { RET <- apply(RET,1,prod) }
+      if(offset)
+      {
+        RET <- stats::model.frame(formula,envir)
+        RET <- stats::model.offset(RET)
+        RET[NAS] <- 0
+      }
+      else
+      {
+        # NAs will be dropped silently here
+        RET <- stats::model.matrix(formula,envir)[,term,drop=FALSE]
+        RET[NAS,] <- NA
+      }
     }
     else # [space,time,var] loop over runs
     {
@@ -170,38 +202,42 @@ rsf.fit <- function(data,UD,beta=NULL,R=list(),formula=NULL,integrated=TRUE,refe
         DIM <- dim(envir)
         dim(envir) <- c(DIM[1]*DIM[2],DIM[3])
         colnames(envir) <- VARS
-        RET <- evaluate(term,envir)
+        RET <- evaluate(term,envir,offset=offset)
         dim(RET) <- c(DIM[1:2],length(term))
       }
       else # !STATIONARY
       {
-        RET <- sapply(1:dim(envir)[1],function(i)
+        RET <- vapply(1:dim(envir)[1],function(i)
                 {
                   ENVIR <- envir[i,,]; # [time,var]
                   dim(ENVIR) <- dim(envir)[-1];
                   colnames(ENVIR) <- VARS
                   ENVIR <- cbind(ENVIR,data); # [time,vars]
-                  evaluate(term,ENVIR)
-                }) # [time,space,terms]
-        dim(RET) <- c(nrow(data),dim(envir)[1],length(term))
-        RET <- aperm(RET,c(2,1,3)) # [space,time,terms]
+                  evaluate(term,ENVIR,offset=offset)
+                },array(0,c(nrow(data),length(term)))) # [time,terms,space]
+        dim(RET) <- c(nrow(data),length(term),dim(envir)[1])
+        RET <- aperm(RET,c(3,1,2)) # [space,time,terms]
       }
     }
     return(RET)
   }
 
   ## prepare raster data ##
-  # I would like to save with raw raster objects to save memory
-  # but raster::getValuesBlock is strangely slow
-  # and rescaling is good for numerics
-  PROJ <- ""
-  X <- Y <- Z <- Z.ind <- list()
-  dX <- dY <- dZ <- Xo <- Yo <- Zo <- rep(NA,length(R))
+  # will write over the assigned values
+  PROJ <- projection(data)
+  X <- list(UD$r$x)
+  Y <- list(UD$r$y)
+  Z <- Z.ind <- list()
+  dX <- UD$dr['x']
+  dY <- UD$dr['y']
+  dZ <- Xo <- Yo <- Zo <- rep(NA,length(R))
   for(i in 1 %:% length(R))
   {
     PROJ[i] <- raster::projection(R[[i]])
+    RANGE <- raster::cellStats(R[[i]],'range',na.rm=TRUE)
 
-    if(standardize)
+    # don't standardize logical variables
+    if(standardize && abs(RANGE[[1]]-0)>.Machine$double.eps && abs(RANGE[[2]]-1)>.Machine$double.eps)
     {
       # # raster::median is not defined correctly
       # R[[i]] <- R[[i]] - raster::median(R[[i]],na.rm=TRUE)
@@ -218,8 +254,8 @@ rsf.fit <- function(data,UD,beta=NULL,R=list(),formula=NULL,integrated=TRUE,refe
       Y[[i]] <- raster::yFromRow(R[[i]],1:DIM[1])
 
       # resolution
-      dX[i] <- stats::median(diff(X[[i]]))
-      dY[i] <- stats::median(diff(Y[[i]]))
+      dX[i] <- abs( stats::median( diff(X[[i]]) ) )
+      dY[i] <- abs( stats::median( diff(Y[[i]]) ) )
 
       # origin
       Xo[i] <- X[[i]][1] %% dX[i]
@@ -244,7 +280,7 @@ rsf.fit <- function(data,UD,beta=NULL,R=list(),formula=NULL,integrated=TRUE,refe
       Z.ind[[i]] <- (data$t - Z[[i]][1])/dZ[i] + 1
     } # end XYZ
   } # end R loop
-  if(length(X)) { names(X) <- names(Y) <- names(dX) <- names(dY) <- names(Xo) <- names(Yo) <- RVARS[1:length(X)] }
+  if(length(R)) { names(X) <- names(Y) <- names(dX) <- names(dY) <- names(Xo) <- names(Yo) <- RVARS[1:length(X)] }
   if(length(Z)) { names(Z) <- names(dZ) <- names(Z.ind) <- RVARS[1:length(Z)] }
 
   # check for compatible raster grids
@@ -254,18 +290,31 @@ rsf.fit <- function(data,UD,beta=NULL,R=list(),formula=NULL,integrated=TRUE,refe
 
     if(length(R)>1)
     {
-      if(max(abs(c(diff(dX)/mid(dX),diff(dY)/mid(dY),diff(Xo)/mid(Xo),diff(Yo)/mid(Yo))))>.Machine$double.eps) # check for consistent resolution, origin
+      TEST <- c(diff(dX)/mid(dX),diff(dY)/mid(dY),diff(Xo)/mid(dX),diff(Yo)/mid(dY))
+      # TEST <- nant(TEST,0)
+      if(max(abs(TEST))>.Machine$double.eps) # check for consistent resolution, origin
       { CONSISTENT <- FALSE }
     }
 
     if(CONSISTENT) # extract pixel areas for integration
-    { dA <- raster::area(R[[1]]) } # TODO generalize this for projected covariates
+    {
+      dA <- raster::area(R[[1]])
+      # raster outputs km^2 sometimes and m^2 others? WTF?
+      if(grepl("longlat",projection(R[[1]]))) { dA <- dA * 1000^2 }
+
+      TEST <- raster::cellStats(dA,'min') / sqrt(det.covm(CTMM$sigma))
+      if(TEST>0.1) # HR^2
+      { warning("Raster resolution is ",round(TEST,digits=1),"\u00D7 coarse compared to home-range size.") }
+
+    } # TODO generalize this for projected covariates
     else # choose minimum resolution for integration grid
     {
       dx <- min(UD$dr['x'],dX)
       dy <- min(UD$dr['y'],dY)
     }
   }
+  else if(!length(R))
+  { CONSISTENT <- TRUE }
 
   # setup integrated spatial covariates
   if(!integrated)
@@ -295,6 +344,7 @@ rsf.fit <- function(data,UD,beta=NULL,R=list(),formula=NULL,integrated=TRUE,refe
       NSPA <- NSPA + 3
       SCALE <- c(SCALE,std[1]^2,std[2]^2,prod(std))
       theta <- CTMM$sigma@par['angle']
+      ROT <- rotate(theta) # rotate theta from left and -theta from right
     }
 
     names(SCALE) <- SVARS
@@ -322,24 +372,26 @@ rsf.fit <- function(data,UD,beta=NULL,R=list(),formula=NULL,integrated=TRUE,refe
     { lower[c('xx','yy')] <- LOV }
   }
 
-  # initial estimates
-  BETA <- rep(0,length(TERMS))
-  names(BETA) <- TERMS
-  if(!is.null(beta))
-  {
-    if(class(beta)[1]=="ctmm") { beta <- beta$beta }
+  # might not use all rasters
+  if(standardize) { RSCALE <- RSCALE[names(RSCALE) %in% TERMS] }
 
-    if(is.null(names(beta))) # integrated terms default to 0
-    { BETA <- pad(beta,length(TERMS)) }
-    else # use relevant initial estimates
-    {
-      beta <- beta[names(beta) %in% TERMS]
-      BETA[names(beta)] <- beta
-    }
+  # minimal assignment
+  beta.null <- numeric(length(TERMS))
+  names(beta.null) <- TERMS
+  if(isotropic)
+  { beta.null['rr'] <- 1 }
+  else
+  { beta.null[c('xx','yy')] <- c(1,1) }
+
+  # initial estimates
+  beta <- beta.null
+  if(length(CTMM$beta))
+  {
+    COPY <- TERMS[TERMS %in% names(CTMM$beta)]
+    beta[COPY] <- CTMM$beta[COPY]
+
+    if(standardize) { beta[names(RSCALE)] <- beta[names(RSCALE)] * RSCALE }
   }
-  beta <- BETA
-  names(BETA) <- TERMS
-  # beta <- beta * SCALE
 
   # store raster covariates
   for(i in 1%:%length(RVARS))
@@ -380,8 +432,8 @@ rsf.fit <- function(data,UD,beta=NULL,R=list(),formula=NULL,integrated=TRUE,refe
     DATA[,'x'] <- data$x - mu['x']
     DATA[,'y'] <- data$y - mu['y']
 
-    # rotate to major-minor axes
-    if(!isotropic) { DATA[,axes] <- rotate.vec(DATA[,axes],-theta) }
+    # rotate -theta to major-minor axes
+    if(!isotropic) { DATA[,axes] <- DATA[,axes] %*% ROT }
 
     # standardize
     DATA[,'x'] <- DATA[,'x']/std['x']
@@ -389,25 +441,12 @@ rsf.fit <- function(data,UD,beta=NULL,R=list(),formula=NULL,integrated=TRUE,refe
 
     # variance/covariance terms (relative to pilot estimate)
     if(isotropic) # beta is correction to standardized 1/sigma
-    {
-      DATA[,'rr'] <- -( DATA[,'x']^2 + DATA[,'y']^2 )/2
-
-      # initial guess
-      if(integrator!="MonteCarlo")
-      { beta['rr'] <- 1 }
-    }
+    { DATA[,'rr'] <- -( DATA[,'x']^2 + DATA[,'y']^2 )/2 }
     else # beta is correction to standardized solve(sigma)
     {
       DATA[,'xx'] <- -DATA[,'x']^2 /2
       DATA[,'yy'] <- -DATA[,'y']^2 /2
       DATA[,'xy'] <- -DATA[,'x']*DATA[,'y']
-
-      # initial guess
-      if(integrator!="MonteCarlo")
-      {
-        beta['xx'] <- 1
-        beta['yy'] <- 1
-      }
     }
   } # end if(integrated)
 
@@ -419,9 +458,10 @@ rsf.fit <- function(data,UD,beta=NULL,R=list(),formula=NULL,integrated=TRUE,refe
     VARS <- paste0(VARS[NAS],collapse=",")
 
     IND <- rowSums(is.na(DATA))
+    IND <- which(IND>0)
     HEAD <- head(IND)
     if(length(HEAD)<length(IND))
-    { HEAD <- paste0(HEAD,",...",collapse=",") }
+    { HEAD <- paste0(c(HEAD,"..."),collapse=",") }
     else
     { HEAD <- paste0(HEAD,collapse=",") }
 
@@ -435,15 +475,22 @@ rsf.fit <- function(data,UD,beta=NULL,R=list(),formula=NULL,integrated=TRUE,refe
   nloglike <- function(beta,zero=0,verbose=FALSE)
   {
     SAMP <- SATA[,,TERMS,drop=FALSE] %.% beta # [track,time]
-    SHIFT <- mean(SAMP,na.rm=TRUE)
+
+    # SHIFT <- stats::median(SAMP,na.rm=TRUE)
+    # SHIFT <- nant(SHIFT,0)
+
+    SHIFT <- max(SAMP,na.rm=TRUE)
+    if(abs(SHIFT)==Inf) { SHIFT <- 0 }
+
     SAMP <- SAMP - SHIFT
     SAMP <- exp(SAMP) # + exp(SHIFT)
     SAMP[] <- nant(SAMP,0) # treat NA as inaccessible region
 
     if(length(OFFSET))
     {
-      ONE <- rep(TRUE,nrow(SATA))
+      # ONE <- rep(TRUE,nrow(SATA))
       ONE <- evaluate(OFFSET,SATA,offset=TRUE)
+      dim(ONE) <- dim(ONE)[1:2]
       SAMP <- ONE * SAMP
     }
 
@@ -531,11 +578,13 @@ rsf.fit <- function(data,UD,beta=NULL,R=list(),formula=NULL,integrated=TRUE,refe
       }
       else
       {
+        ## sf::st_sample is waaaay toooo slooooow
+        # SIM <- sf::st_sample(level.UD,size=N*nrow(data),type="random",exact=TRUE)
+        # SIM <- sf::st_transform(SIM,sf::st_crs(DATUM))
+        # SIM <- sf::st_coordinates(SIM)
         SIM <- sp::spsample(level.UD,n=N*nrow(data),type="random")
-        # sp::spsample drops projection information and throws annoying warning when trying to fix
-        suppressWarnings( sp::proj4string(SIM) <- sp::CRS(projection(data)) )
-        SIM <- sp::spTransform(SIM,sp::CRS(DATUM))
         SIM <- SIM@coords
+        SIM <- project(SIM,from=projection(data),to=DATUM)
         colnames(SIM) <- GEO
       }
 
@@ -555,6 +604,7 @@ rsf.fit <- function(data,UD,beta=NULL,R=list(),formula=NULL,integrated=TRUE,refe
         else # only sample within available area
         { AVAIL <- level.UD@Polygons[[1]]@coords }
         colnames(AVAIL) <- c('x','y')
+
         # switch to raster projection
         AVAIL <- project(AVAIL,from=projection(CTMM),to=PROJ[1])
 
@@ -594,8 +644,10 @@ rsf.fit <- function(data,UD,beta=NULL,R=list(),formula=NULL,integrated=TRUE,refe
         SIM <- SIM[SUB,] # in CTMM projection
         xy <- xy[SUB,] # in raster projection
 
-        # this is for unprojected rasters !!!! incomplete otherwise
-        dA <- raster::extract(dA,xy,method="bilinear")
+        if(length(R))
+        { dA <- raster::extract(dA,xy,method="bilinear") }
+        else
+        { dA <- array(prod(UD$dr),nrow(xy)) }
 
         N <- nrow(xy)
       }
@@ -635,10 +687,7 @@ rsf.fit <- function(data,UD,beta=NULL,R=list(),formula=NULL,integrated=TRUE,refe
 
       DIM <- dim(R[[i]])
       if(DIM[3]==1)
-      {
-        SATA[SUB,,r] <- raster::extract(R[[i]],xy,method=interpolate[i])
-        #SATA[SUB,,r] <- bint(R[[r]],t(xy))
-      }
+      { SATA[SUB,,r] <- raster::extract(R[[i]],xy,method=interpolate[i]) }
       else
       {
         XY <- xy
@@ -658,9 +707,8 @@ rsf.fit <- function(data,UD,beta=NULL,R=list(),formula=NULL,integrated=TRUE,refe
       SATA[SUB,,'x'] <- SIM[,'x'] - mu['x']
       SATA[SUB,,'y'] <- SIM[,'y'] - mu['y']
 
-      # rotate
-      if(!isotropic)
-      { SATA[SUB,,axes] <- rotate.vec(SATA[SUB,axes],-theta) }
+      # rotate -theta
+      if(!isotropic) { SATA[SUB,,axes] <- SATA[SUB,,axes] %.% ROT }
 
       # standardize
       SATA[SUB,,'x'] <- SATA[SUB,,'x']/std['x']
@@ -668,9 +716,7 @@ rsf.fit <- function(data,UD,beta=NULL,R=list(),formula=NULL,integrated=TRUE,refe
 
       # variance/covariance terms
       if(isotropic)
-      {
-        SATA[SUB,,'rr'] <- -( SATA[SUB,,'x']^2 + SATA[SUB,,'y']^2 )/2
-      }
+      { SATA[SUB,,'rr'] <- -( SATA[SUB,,'x']^2 + SATA[SUB,,'y']^2 )/2 }
       else
       {
         SATA[SUB,,'xx'] <- -SATA[SUB,,'x']^2/2
@@ -697,10 +743,19 @@ rsf.fit <- function(data,UD,beta=NULL,R=list(),formula=NULL,integrated=TRUE,refe
     else # STATIONARY ONLY FOR NOW !!!!!!!!!
     { if(trace) { message("Maximizing likelihood @ n=",N) } }
 
+    NLL <- nloglike(beta)
+
+    # fix bad prior model
+    if(any(beta!=beta.null))
+    {
+      if(nloglike(beta.null)<=NLL)
+      { beta <- beta.null }
+    }
+
     # fix bad early runs
     if(any(beta!=beta.init))
     {
-      if(nloglike(beta.init)<=nloglike(beta))
+      if(nloglike(beta.init)<=NLL)
       { beta <- beta.init }
     }
 
@@ -806,7 +861,8 @@ rsf.fit <- function(data,UD,beta=NULL,R=list(),formula=NULL,integrated=TRUE,refe
 
         beta[c('xx','yy','xy')] <- covm(sigma)@par # (major,minor,angle)
 
-        beta[axes] <- c(sigma %*% beta[axes]) + c(CTMM$mu)
+        # rotate +theta
+        beta[axes] <- c(ROT %*% sigma %*% beta[axes]) + c(CTMM$mu)
       }
 
       return(beta)
@@ -886,9 +942,10 @@ rsf.fit <- function(data,UD,beta=NULL,R=list(),formula=NULL,integrated=TRUE,refe
   }
 
   # unstandardize
-  if(standardize)
+  if(standardize && length(RSCALE))
   {
     beta <- beta/RSCALE
+    RVARS <- names(RSCALE)
     COV[RVARS,] <- COV[RVARS,,drop=FALSE] / RSCALE
     COV[,RVARS] <- t( t(COV[,RVARS,drop=FALSE]) / RSCALE )
   }
@@ -961,6 +1018,21 @@ rsf.fit <- function(data,UD,beta=NULL,R=list(),formula=NULL,integrated=TRUE,refe
   RSF$range <- TRUE
 
   return(RSF)
+}
+
+
+get.offset <- function(formula,variable=TRUE)
+{
+  OFFSET <- stats::terms(formula)
+  OFF <- attr(OFFSET,"offset")
+  if(is.null(OFF)) { return(OFF) }
+  OFFSET <- rownames(attr(OFFSET,"factors"))[OFF]
+  if(variable)
+  {
+    OFFSET <- sub("offset(","",OFFSET,fixed=TRUE)
+    OFFSET <- substr(OFFSET,1,nchar(OFFSET)-1)
+  }
+  return(OFFSET)
 }
 
 
@@ -1085,7 +1157,7 @@ expand.factors <- function(R,formula,reference="auto",data=NULL,DVARS=NULL,fixed
     }
   } # end telemetry expansion
 
-  environment(formula) <- NULL
+  if(!is.null(formula)){ environment(formula) <- globalenv() }
   RETURN <- list(data=data,R=R,formula=formula)
 }
 
@@ -1137,31 +1209,21 @@ R.extract <- function(xy,proj,R,X,Y,Z=NULL,PROJ,dX,dY,dZ=NULL)
 
   if(length(DIM)==2)
   {
-    E <- bint(R,t(xy))
+    E <- bint(R,t(xy),ext=NA)
   }
   else # xyt
   {
     # missing t axis
     # this is not fully coded yet, but it is not used either
-    E <- tint(R,t(xy))
+    E <- tint(R,t(xy),ext=NA)
   }
 
   return(E)
 }
 
 # Evaluate raster on new spatial grid
-R.grid <- function(r,proj,R)
+R.grid <- function(r,proj,R,interpolate='bilinear')
 {
-  R <- R.prepare(R)
-  PROJ <- R$PROJ
-  X <- R$X
-  Y <- R$Y
-  Z <- R$Z
-  dX <- R$dX
-  dY <- R$dY
-  dZ <- R$dZ
-  R <- R$R
-
   DIM <- c(length(r$x),length(r$y))
   xy <- array(0,c(DIM,2))
   xy[,,1] <- r$x
@@ -1169,95 +1231,30 @@ R.grid <- function(r,proj,R)
   xy[,,2] <- r$y
   xy <- aperm(xy,c(2,1,3))
   dim(xy) <- c(prod(DIM),2)
-
-  # xy <- array(0,c(prod(DIM),2))
-  # for(i in 1:DIM[1]) { for(j in 1:DIM[2]) { xy[i+(j-1)*DIM[1],] <- c(r$x[i],r$y[j]) } }
   colnames(xy) <- c('x','y')
 
-  if(length(dim(R))==2)
+  PROJ <- projection(R)
+  xy <- project(xy,from=proj,to=PROJ)
+
+  if(dim(R)[3]==1)
   {
-    G <- R.extract(xy,proj=proj,R=R,X=X,Y=Y,PROJ=PROJ,dX=dX,dY=dY)
-    G <- array(G,DIM)
+    G <- raster::extract(R,xy,method=interpolate)
+    dim(G) <- DIM
+    # G <- R.extract(xy,proj=proj,R=R,X=X,Y=Y,PROJ=PROJ,dX=dX,dY=dY)
+    # G <- array(G,DIM)
   }
-  else if(length(dim(R))==3)
+  else
   {
-    G <- array(0,c(DIM,length(Z)))
-    for(i in 1:length(Z))
-    { G[,,i] <- R.extract(xy,proj,R=R[,,i],X=X,Y=Y,PROJ=PROJ,dX=dX,dY=dY) }
+    G <- array(NA,dim(xy))
+    for(i in 1:dim(R)[3])
+    {
+      G[,i] <- raster::extract(R[,,i],xy,method=interpolate)
+      # G[,,i] <- R.extract(xy,proj,R=R[,,i],X=X,Y=Y,PROJ=PROJ,dX=dX,dY=dY)
+    }
+    dim(G) <- c(DIM,dim(R)[3])
   }
 
   return(G)
-}
-
-# evaluate habitat suitability raster(s)
-R.suit <- function(R,CTMM,data=NULL)
-{
-  DIM <- dim(R[[1]])
-  beta <- CTMM$beta
-
-  offset <- stats::terms(CTMM$formula)
-  offset <- attr(offset,"variables")[ attr(offset,"offset") ]
-
-  PREP <- FALSE
-  S <- 1
-
-  if(length(beta))
-  {
-    BETA <- names(beta)
-
-    PREP <- !all(BETA %in% names(R))
-    if(!PREP)
-    {
-      # these will never be raster stacks
-      S <- vapply(BETA,function(B){beta[B]*R[[B]]},R[[1]])
-      dim(S) <- c(prod(DIM),length(beta))
-    }
-    else # formula required
-    {
-      R <- lapply(R,c)
-      R <- data.frame(R)
-      # need to copy over data if time varying formula
-      if(!is.null(data)) { for(COL in names(data)) { R[[COL]] <- data[[COL]] } }
-
-      n <- length(beta)
-
-      # fix formula multiplication
-      for(i in 1:n) { BETA[i] <- gsub(":","*",BETA[i]) }
-
-      S <- sapply(1:n,function(i){beta[i]*eval(parse(text=BETA[i]),envir=R)})
-    }
-    S <- rowSums(S)
-    S <- array(S,DIM)
-    S <- exp(S)
-  } # end beta
-
-  if(length(offset))
-  {
-    if(all(offset %in% names(R)))
-    { for(off in offset) { S <- S * R[[off]] } }
-    else # formula required
-    {
-      # didn't prepare data before
-      if(!PREP)
-      {
-        R <- lapply(R,c)
-        R <- data.frame(R)
-        # need to copy over data if time varying formula
-        if(!is.null(data)) { for(COL in names(data)) { R[[COL]] <- data[[COL]] } }
-      }
-
-      # fix formula multiplication
-      for(i in 1:length(offset)) { offset[i] <- gsub(":","*",offset[i]) }
-
-      O <- sapply(1:length(offset),function(i){eval(parse(text=offset[i]),envir=R)})
-      O <- apply(O,1,prod)
-      O <- array(O,DIM)
-
-      S <- O*S
-    }
-  } # end offset
-
-  return(S)
 }
 
 

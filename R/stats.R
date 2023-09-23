@@ -1,6 +1,8 @@
 # generalized covariance from negative-log-likelihood derivatives
-cov.loglike <- function(hess,grad=rep(0,sqrt(length(hess))),tol=.Machine$double.eps)
+cov.loglike <- function(hess,grad=rep(0,sqrt(length(hess))),tol=.Machine$double.eps,WARN=TRUE)
 {
+  EXCLUDE <- c("ctmm.boot","cv.like","ctmm.select")
+
   # in case of bad derivatives, use worst-case numbers
   grad <- nant(grad,Inf)
   hess <- nant(hess,0)
@@ -25,28 +27,36 @@ cov.loglike <- function(hess,grad=rep(0,sqrt(length(hess))),tol=.Machine$double.
 
   W <- V %o% V
 
-  grad <- grad/V
-  hess <- hess/W
+  grad <- nant(grad/V,1)
+  hess <- nant(hess/W,1)
+
+  # clamp off-diagonal
+  MAX <- sqrt(abs(diag(hess)))
+  MAX <- MAX %o% MAX
+  hess[] <- clamp(hess,-MAX,MAX)
 
   EIGEN <- eigen(hess)
   values <- EIGEN$values
   if(any(values<=0))
   {
-    # shouldn't need to warn if using ctmm.select
-    WARN <- TRUE
-    N <- sys.nframe()
-    if(N>=2)
+    # shouldn't need to warn if using ctmm.select, but do if using ctmm.fit directly
+    if(WARN)
     {
-      for(i in 2:N)
+      N <- sys.nframe()
+      if(N>=2)
       {
-        CALL <- deparse(sys.call(-i))[1]
-        CALL <- grepl("ctmm.select",CALL) || grepl("cv.like",CALL) || grepl("ctmm.boot",CALL) || grepl("mean.mu",CALL) || grepl("mean.features",CALL)
-        if(CALL)
+        for(i in 2:N)
         {
-          WARN <- FALSE
-          break
-        }
-      }
+          CALL <- deparse(sys.call(-i))[1]
+          CALL <- sapply(EXCLUDE,function(E){grepl(E,CALL,fixed=TRUE)})
+          CALL <- any(CALL)
+          if(CALL)
+          {
+            WARN <- FALSE
+            break
+          }
+        } # 2:N
+      } # N >= 2
     }
     # warn if weren't using ctmm.select
     if(WARN) { warning("MLE is near a boundary or optimizer failed.") }
@@ -75,6 +85,7 @@ cov.loglike <- function(hess,grad=rep(0,sqrt(length(hess))),tol=.Machine$double.
       values[i] <- 1/(2*grad[i])^2
     }
   }
+  values <- nant(values,0)
 
   COV <- array(0,dim(hess))
   values <- nant(values,Inf) # worst case NaN fix
@@ -91,116 +102,6 @@ cov.loglike <- function(hess,grad=rep(0,sqrt(length(hess))),tol=.Machine$double.
 }
 
 
-# interpolate vector by continuous index (vectorized by index)
-# vec is a vector, ind is a continuous index
-vint <- function(vec,ind,return.ind=FALSE)
-{
-  n <- length(vec)
-
-  lo <- floor(ind)
-  hi <- ceiling(ind)
-
-  # extrapolate
-  lo <- pmax(1,lo)
-  hi <- pmax(2,hi)
-  # extrapolate
-  lo <- pmin(n-1,lo)
-  hi <- pmin(n,hi)
-
-  if(return.ind) { return(rbind(lo,hi)) }
-
-  # IND <- abs(vec[c(lo,hi)])
-  # if(any(IND==Inf))
-  # {
-  #   IND <- which.max(IND)
-  #   return(vec[c(lo,hi)[IND]])
-  # }
-
-  # linear interpolation
-  vec <- vec[lo] + (vec[hi]-vec[lo])*(ind-lo)
-
-  # fix NaNs (should be +/- Inf)
-  INF <- abs(lo)==Inf
-  if(any(INF)) { vec[INF] <- lo[INF] }
-  INF <- abs(hi)==Inf
-  if(any(INF)) { vec[INF] <- hi[INF] }
-
-  return(vec)
-}
-
-
-# same thing as above but with a block-vector mat
-mint <- function(mat,ind)
-{
-  IND <- vint(mat[1,],ind,return.ind=TRUE)
-  mat <- mat[,IND[1,]] + (mat[,IND[2,]]-mat[,IND[1,]])*(ind-IND[1,])
-  return(mat)
-}
-
-
-# bi-linear interpolation
-bint <- function(M,ind)
-{
-  ind <- cbind(ind) # vectorize
-  # rownames(ind) <- c('x','y')
-
-  # index each dimension
-  INDx <- vint(M[,1],ind[1,],return.ind=TRUE)
-  INDy <- vint(M[1,],ind[2,],return.ind=TRUE)
-
-  BINT <- function(i)
-  {
-    dX <- c(INDx[2,i]-ind[1,i],ind[1,i]-INDx[1,i]) / (INDx[2,i]-INDx[1,i])
-    dX <- nant(dX,1) # in case of 0/0
-    dX <- dX/sum(dX) # in case of two NaNs
-
-    dY <- c(INDy[2,i]-ind[2,i],ind[2,i]-INDy[1,i]) / (INDy[2,i]-INDy[1,i])
-    dY <- nant(dY,1)
-    dY <- dY/sum(dY)
-
-    c( dX %*% M[INDx[,i],INDy[,i]] %*% dY )
-  }
-
-  M <- vapply(1:ncol(ind),BINT,0)
-  return(M)
-}
-
-
-# tri-linear interpolation
-tint <- function(M,ind)
-{
-  ind <- cbind(ind) # vectorize
-  # rownames(ind) <- c('x','y','z')
-
-  # index each dimension
-  INDx <- vint(M[,1,1],ind[1,],return.ind=TRUE)
-  INDy <- vint(M[1,,1],ind[2,],return.ind=TRUE)
-  INDz <- vint(M[1,1,],ind[3,],return.ind=TRUE)
-
-  CINT <- function(i)
-  {
-    dX <- c(INDx[2,i]-ind[1,i],ind[1,i]-INDx[1,i]) / (INDx[2,i]-INDx[1,i])
-    dX <- nant(dX,1)
-    dX <- dX/sum(dX) # in case of two NaNs
-
-    dY <- c(INDy[2,i]-ind[2,i],ind[2,i]-INDy[1,i]) / (INDy[2,i]-INDy[1,i])
-    dY <- nant(dY,1)
-    dY <- dY/sum(dY) # in case of two NaNs
-
-    dZ <- c(INDz[2,i]-ind[3,i],ind[3,i]-INDz[1,i]) / (INDz[2,i]-INDz[1,i])
-    dZ <- nant(dZ,1)
-    dZ <- dZ/sum(dZ) # in case of two NaNs
-
-    M <- M[INDx[,i],INDy[,i],INDz[,i]] # tensor block
-    M <- dX %.% M # tensor contraction of first index
-    M <- dY %*% M %*% dZ
-    c(M)
-  }
-
-  M <- vapply(1:ncol(ind),CINT,0)
-  return(M)
-}
-
 # confidence interval functions
 CI.upper <- Vectorize(function(k,Alpha){stats::qchisq(Alpha/2,k,lower.tail=FALSE)/k})
 CI.lower <- Vectorize(function(k,Alpha){stats::qchisq(Alpha/2,k,lower.tail=TRUE)/k})
@@ -213,6 +114,14 @@ chisq.ci <- function(MLE,VAR=NULL,level=0.95,alpha=1-level,DOF=2*MLE^2/VAR,robus
   # try to do something reasonable on failure cases
   if(is.nan(DOF) || is.na(DOF)) { DOF <- 0 } # NaN comes from infinite variance divsion
   if(is.na(MLE)) { MLE <- Inf }
+
+  if(is.na(level))
+  {
+    VAR <- 2*MLE^2/DOF
+    CI <- c(DOF,MLE,VAR)
+    names(CI) <- c("DOF","est","VAR")
+    return(CI)
+  }
 
   if(DOF==Inf)
   { CI <- c(1,1,1)*MLE }
@@ -478,6 +387,7 @@ chi.dof <- function(M1,M2,precision=1/2)
 
   # solve for chi^2 DOF consistent with M1 & M2
   R <- M1^2/M2 # == 2*pi/DOF / Beta(DOF/2,1/2)^2 # 0 <= R <= 1
+  if(M1==0 && M2==0) { R <- 1 }
   if(1-R <= 0) { return(Inf) } # purely deterministic
   if(R <= 0) { return(0) }
 
@@ -512,8 +422,30 @@ chi.dof <- function(M1,M2,precision=1/2)
 # variance of chi variable, given dof
 chi.var <- function(DOF,M1=1)
 {
-  R <- 2*pi/DOF/beta(DOF/2,1/2)^2
+  R <- DOF
+
+  fn <- function(DOF){ 2*pi/DOF/beta(DOF/2,1/2)^2 }
+
+  # Laurent expansion (large DOF)
+  MAX <- 26 # switch over point in numerical accuracy
+  coef <- c( 1, -(1/2), 1/8, 1/16, -(5/128), -(23/256), 53/1024, 593/2048, -(5165/32768), -(110123/65536), 231743/262144 )
+  pn <- Vectorize( function(DOF) { series(1/DOF,coef) } )
+  SUB <- DOF>=MAX
+  if(any(SUB)) { R[SUB] <- pn(DOF[SUB]) }
+
+  # Taylor expansion (small DOF)
+  MIN <- 0.000002
+  coef <- c(0, 1/2, -log(2), pi^2/24 + log(2)^2) * pi # further terms require gsl::zeta()
+  pn <- Vectorize( function(DOF) { series(DOF,coef) } )
+  SUB <- DOF<=MIN
+  if(any(SUB)) { R[SUB] <- pn(DOF[SUB]) }
+
+  SUB <- DOF>MIN & DOF<MAX
+  if(any(SUB)) { R[SUB] <- fn(DOF[SUB]) }
+
   VAR <- (1/R-1)*M1^2
+  # VAR <- nant(VAR,1/DOF)
+
   return(VAR)
 }
 
@@ -521,9 +453,21 @@ chi.var <- function(DOF,M1=1)
 # 1 is no bias
 chi.bias <- function(DOF)
 {
-  BIAS <- sqrt(2/DOF)*exp(lgamma((DOF+1)/2)-lgamma(DOF/2))
+  fn <- function(DOF) { sqrt(2/DOF)*exp(lgamma((DOF+1)/2)-lgamma(DOF/2)) }
+  # Laurent expansion
+  coef <- c(1, -(1/4), 1/32, 5/128, -(21/2048), -(399/8192), 869/65536, 39325/262144, -(334477/8388608), -(28717403/33554432), 59697183/268435456)
+  pn <- Vectorize( function(DOF) { series(1/DOF,coef) } )
+  # switch over
+  MAX <- 45
+
+  BIAS <- rep(1,length(DOF))
+  SUB <- DOF<MAX
+  if(any(SUB)) { BIAS[SUB] <- fn(DOF[SUB]) }
+  SUB <- DOF>=MAX
+  if(any(SUB)) { BIAS[SUB] <- pn(DOF[SUB]) }
+
   BIAS <- ifelse(DOF==0,0,BIAS)
-  BIAS <- ifelse(DOF==Inf,1,BIAS)
+  # BIAS <- ifelse(DOF==Inf,1,BIAS)
   return(BIAS)
 }
 
@@ -596,6 +540,13 @@ tnorm.hdr <- function(mu=0,VAR=1,lower=0,upper=Inf,level=0.95)
 # inverse Gaussian CIs
 IG.ci <- function(mu,VAR,k=VAR/mu^3,level=0.95,precision=1/2)
 {
+  if(is.na(level))
+  {
+    CI <- c(2*mu^2/VAR,mu,VAR)
+    names(CI) <- c("DOF","est","VAR")
+    return(CI)
+  }
+
   if(k==Inf)
   { CI <- c(0,mu,Inf) }
   else if(k>0)

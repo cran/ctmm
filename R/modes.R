@@ -127,7 +127,7 @@ modes.UD <- function(object,...)
         GRAD <- STUFF$GRAD
         HESS <- STUFF$HESS
         HESS <- HESS + (GRAD %o% GRAD) # logarithm correction
-        COV <- -PDsolve(HESS)
+        COV <- PDsolve(-HESS)
 
         # locate mode
         dr <- c(COV %*% GRAD)
@@ -164,57 +164,3 @@ modes.UD <- function(object,...)
 }
 
 
-# rewrite to work from CDF, via least steep descent
-
-#
-ridges.UD <- function(object,...)
-{
-  PDF <- object$PDF
-  PDF <- log(PDF) # log transform
-  COST <- array(Inf,dim(PDF))
-  POINT <- array(FALSE,dim(PDF))
-  dx <- object$dr['x']
-  dy <- object$dr['y']
-  dx2 <- dx^2
-  dy2 <- dy^2
-  dr2 <- dx^2+dy^2
-  dxdydr2 <- dx*dy/dr2
-
-  for(i in 2:(nrow(PDF)-1))
-  {
-    for(j in 2:(ncol(PDF)-1))
-    {
-      SUB <- PDF[i+(-1):1,j+(-1):1]
-      if(all(SUB>-Inf)) # non-zero density (under logarithm)
-      {
-        DIFF <- DiffGrid(SUB,dx,dy,dx2,dy2,dr2,dxdydr2)
-        GRAD <- DIFF$GRAD # 1/p D p # under log
-        HESS <- DIFF$HESS # 1/p DD p - 1/p^2 Dp Dp # under log
-        HESS <- HESS + (GRAD %o% GRAD) # logarithm correction
-        EIGEN <- eigen(-HESS)
-        if(EIGEN$values[1]>=0)
-        {
-          COST[i,j] <- (GRAD %*% EIGEN$vectors[,1])^2 / EIGEN$values[1]
-
-          # solve for ridge points
-          # (GRAD + HESS %*% DL ) %*% EIGEN$vectors[,1] == 0
-          # climbing directly up to the ridge
-          # DL == dl * EIGEN$vectors[,1]
-          # GRAD %*% EIGEN$vectors[,1] + (EIGEN$vectors[,1] %*% HESS %*% EIGEN$vectors[,1])*dl == 0
-          # GRAD %*% EIGEN$vectors[,1] + EIGEN$values[1]*dl == 0
-          dr <- -c(GRAD %*% EIGEN$vectors[,1])/EIGEN$values[1]
-          dr <- dr * EIGEN$vectors[,1]
-          # is this point within the pixel?
-          if(dr[1] > -dx/2 && dr[1] < dx/2 && dr[2] > -dy/2 && dr[2] < dy/2)
-          { POINT[i,j] <- TRUE }
-        }
-      } # end if non-zero density
-    } # end col loop
-  } # end row loop
-
-  CTMM <- object@CTMM
-  DOF <- DOF.mean(CTMM)
-  COST <- DOF * COST # now like grad^2/std.err^2 ~ F
-
-  return(POINT)
-}

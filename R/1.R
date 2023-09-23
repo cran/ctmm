@@ -16,10 +16,6 @@ methods::setOldClass("ctmm")
 new.ctmm <- methods::setClass("ctmm",contains="list",representation=methods::representation(info="list"),
                               prototype=methods::prototype(list(),info=list()))
 
-#methods::setOldClass("RS")
-#new.RS <- methods::setClass("RS",contains="list",representation=methods::representation(info="list",type="character",variable="character",CTMM="ctmm"),
-#                            prototype=methods::prototype(list(),info=list(),type=character(),variable=character(),CTMM=new.ctmm()) )
-
 methods::setOldClass("UD")
 new.UD <- methods::setClass("UD",contains="list",representation=methods::representation(info="list",type="character",variable="character",CTMM="ctmm"),
                             prototype=methods::prototype(list(),info=list(),type=character(),variable=character(),CTMM=new.ctmm()) )
@@ -53,16 +49,16 @@ methods::setGeneric("projection", getGeneric("projection", package="raster"))
 methods::setGeneric("projection<-", getGeneric("projection<-", package="raster"))
 methods::setGeneric("raster", getGeneric("raster", package="raster"))
 methods::setGeneric("zoom", getGeneric("zoom", package="raster"))
+methods::setGeneric("writeVector", getGeneric("writeVector", package="terra"))
 
 
 # new S3 generic functions
-writeShapefile <- function(object,folder,file=NULL,...) UseMethod("writeShapefile")
 emulate <- function(object,...) UseMethod("emulate")
 AICc <- function(object,...) UseMethod("AICc")
 speed <- function(object,...) UseMethod("speed")
 speeds <- function(object,...) UseMethod("speeds")
 mag <- function(x,...) UseMethod("mag")
-modes <- function(object,...) UseMethod("modes")
+#modes <- function(object,...) UseMethod("modes") # CRAN is annoying: do not declare generics for non-exported functions
 ridges <- function(object,...) UseMethod("ridges")
 
 # internal S3 generic function

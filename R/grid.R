@@ -10,6 +10,47 @@ is.grid.complete <- function(grid)
 }
 
 
+is.consistent <- function(grids)
+{
+  TEST <- logical(length(grids)-1)
+  for(i in 1:(length(TEST)))
+  { TEST[i] <- is.consistent.pair(grids[[i]],grids[[i+1]]) }
+  TEST <- all(TEST)
+  return(TEST)
+}
+
+
+is.consistent.pair <- function(grid1,grid2)
+{
+  dr1 <- grid1$dr
+  dr2 <- grid2$dr
+
+  MAX <- pmax(dr1,dr2)
+  MIN <- pmin(dr1,dr2)
+
+  TEST <- log2(MAX/MIN) # should be an integer
+  TEST <- abs( TEST - round(TEST) )
+  TEST <- any( TEST > .Machine$double.eps )
+  if(TEST) { return(FALSE) }
+
+  r1 <- c(grid1$r$x[1],grid1$r$y[1])
+  r2 <- c(grid2$r$x[1],grid2$r$y[1])
+
+  TEST <- (r1-r2)/MIN
+  TEST <- TEST - round(TEST)
+  TEST <- any( TEST > .Machine$double.eps )
+  return(!TEST)
+}
+
+
+grid.comp <- function(grids)
+{
+  DR <- sapply(grids,function(g){g$dr}) # [2,n]
+  dr <- apply(DR,1,min) # smallest (dx,dy)
+  DR <- t(t(DR)/dr)
+}
+
+
 ###########
 # returns grid information for union
 # assumes origin aligned grids with same resolution
@@ -60,34 +101,25 @@ grid.intersection <- function(UD)
 
   dr <- sapply(UD,function(ud){ud$dr}) # (axes,individuals)
   if(any(diff(dr[1,])!=0 | diff(dr[2,])!=0)) { stop("Inconsistent grid resolutions.") }
-  dr <- UD[[1]]$dr
+  dr <- dr[,1]
 
-  # are all grids the same?
-  TEST <- TRUE
-  for(i in 1:(n-1)) { TEST <- TEST && identical(r[[i]],r[[i+1]]) }
+  x.min <- max( sapply(r,function(R){first(R$x)}) )
+  x.max <- min( sapply(r,function(R){last(R$x)}) )
 
-  if(!TEST) # some grids are different
+  y.min <- max( sapply(r,function(R){first(R$y)}) )
+  y.max <- min( sapply(r,function(R){last(R$y)}) )
+
+  # R <- list()
+  # if(x.min<=x.max) { R$x <- seq(x.min,x.max,length.out=1+round((x.max-x.min)/dr['x'])) } # by fails with numerical error
+  # if(y.min<=y.max) { R$y <- seq(y.min,y.max,length.out=1+round((y.max-y.min)/dr['y'])) } # by fails with numerical error
+
+  SUB <- list()
+  for(i in 1:n)
   {
-    x.min <- max( sapply(r,function(R){first(R$x)}) )
-    x.max <- min( sapply(r,function(R){last(R$x)}) )
-
-    y.min <- max( sapply(r,function(R){first(R$y)}) )
-    y.max <- min( sapply(r,function(R){last(R$y)}) )
-
-    R <- list()
-    if(x.min<=x.max) { R$x <- seq(x.min,x.max,length.out=1+round((x.max-x.min)/dr['x'])) } # by fails with numerical error
-    if(y.min<=y.max) { R$y <- seq(y.min,y.max,length.out=1+round((y.max-y.min)/dr['y'])) } # by fails with numerical error
-
-    SUB <- list()
-    for(i in 1:n)
-    {
-      SUB[[i]] <- list()
-      SUB[[i]]$x <- (r[[i]]$x-x.min)/dr['x'] >= -tol & (x.max-r[[i]]$x)/dr['x'] >= -tol # careful with round-off error
-      SUB[[i]]$y <- (r[[i]]$y-y.min)/dr['y'] >= -tol & (y.max-r[[i]]$y)/dr['y'] >= -tol # careful with round-off error
-    }
+    SUB[[i]] <- list()
+    SUB[[i]]$x <- (r[[i]]$x-x.min)/dr['x'] >= -tol & (x.max-r[[i]]$x)/dr['x'] >= -tol # careful with round-off error
+    SUB[[i]]$y <- (r[[i]]$y-y.min)/dr['y'] >= -tol & (y.max-r[[i]]$y)/dr['y'] >= -tol # careful with round-off error
   }
-  else
-  { SUB <- lapply(1:n,function(i){list(x=TRUE,y=TRUE)}) }
 
   return(SUB)
 }
@@ -115,7 +147,7 @@ same.grids <- function(UD)
 
 ##############
 # give grid argument 1canonical formatting - returning list(r,dr,extent)
-format.grid <- function(grid,axes=c('x','y'))
+format_grid <- function(grid,axes=c('x','y'))
 {
   if(is.null(grid)) { grid <- list(axes=axes) }
 
@@ -172,12 +204,14 @@ format.grid <- function(grid,axes=c('x','y'))
 # non-grid arguments are merely suggestions
 kde.grid <- function(data,H,axes=c("x","y"),alpha=0.001,res=NULL,dr=NULL,EXT=NULL,EXT.min=NULL,grid=NULL)
 {
+  DIM <- length(axes)
   H <- prepare.H(H,n=length(data$t),axes=axes) # (times,dim,dim)
 
   # how far to extend range from data as to ensure alpha significance in total probability
-  z <- qmvnorm(1-alpha,length(axes))
+  z <- qmvnorm(1-alpha,DIM)
 
   dH <- z * apply(H,1,function(h){sqrt(diag(h))}) # (dim,times)
+  dim(dH) <- c(DIM,nrow(data))
   dH <- t(dH) # (times,dim)
 
   if(!is.null(grid$r)) ### grid fully pre-specified ###
@@ -192,7 +226,7 @@ kde.grid <- function(data,H,axes=c("x","y"),alpha=0.001,res=NULL,dr=NULL,EXT=NUL
   else if(!is.null(grid$dr) && !is.null(grid$extent)) ### grid fully pre-specified... with possible conflicts ###
   {
     # raster extents include pixel margins
-    MARGIN <- class(grid$extent)[1]=="Extent"
+    MARGIN <- class(grid$extent)[1]=="Extent" || DIM==1
 
     dr <- grid$dr
     EXT <- as.matrix(grid$extent)
@@ -214,12 +248,12 @@ kde.grid <- function(data,H,axes=c("x","y"),alpha=0.001,res=NULL,dr=NULL,EXT=NUL
     res <- round(dEXT/dr) # extent could be slightly off --- assuming mostly correct
 
     # preserve dr
-    R <- lapply(1:length(axes),function(i){seq(EXT[1,i],EXT[2,i],length.out=1+res[i])})
+    R <- lapply(1:DIM,function(i){seq(EXT[1,i],EXT[2,i],length.out=1+res[i])})
   }
   else if(!is.null(grid$extent)) ### grid extent specified, but not resolution ###
   {
     # raster extents include pixel margins
-    MARGIN <- class(grid$extent)[1]=="Extent"
+    MARGIN <- class(grid$extent)[1]=="Extent" || DIM==1
 
     # align.to.origin doesn't make sense without dr specified
     EXT <- as.matrix(grid$extent)
@@ -237,11 +271,12 @@ kde.grid <- function(data,H,axes=c("x","y"),alpha=0.001,res=NULL,dr=NULL,EXT=NUL
       EXT[2,] <- EXT[2,] - dr/2
     }
 
-    R <- lapply(1:length(axes),function(i){seq(EXT[1,i],EXT[2,i],length.out=1+res[i])})
+    R <- lapply(1:DIM,function(i){seq(EXT[1,i],EXT[2,i],length.out=1+res[i])})
   } ### end grid extent specified ###
   else if(!is.null(grid$dr)) ### grid resolution specified, but not extent ###
   {
     dr <- grid$dr
+    dr <- array(dr,DIM)
 
     R <- get.telemetry(data,axes) # (times,dim)
     # minimum extent
@@ -267,7 +302,7 @@ kde.grid <- function(data,H,axes=c("x","y"),alpha=0.001,res=NULL,dr=NULL,EXT=NUL
     }
 
     # add one cell buffer on all sides for occurrence with zero-error IID models
-    R <- lapply(1:length(axes),function(i){seq(EXT[1,i]-dr[i],EXT[2,i]+dr[i],length.out=1+res[i]+2)})
+    R <- lapply(1:DIM,function(i){seq(EXT[1,i]-dr[i],EXT[2,i]+dr[i],length.out=1+res[i]+2)})
   } ### end grid resolution specified ###
   else ### grid not specified at all ###
   {
@@ -276,7 +311,7 @@ kde.grid <- function(data,H,axes=c("x","y"),alpha=0.001,res=NULL,dr=NULL,EXT=NUL
 
     if(is.null(EXT)) { EXT <- rbind( apply(R-dH,2,min) , apply(R+dH,2,max) ) } # (ext,dim) }
     colnames(EXT) <- axes
-    if(!is.null(EXT.min)) { EXT <- as.matrix(extent(list(EXT,EXT.min),level=1))[,axes] }
+    if(!is.null(EXT.min)) { EXT <- as.matrix(extent(list(EXT,EXT.min),level=1))[,axes,drop=FALSE] }
     dEXT <- EXT[2,]-EXT[1,]
 
     # grid center
@@ -289,7 +324,7 @@ kde.grid <- function(data,H,axes=c("x","y"),alpha=0.001,res=NULL,dr=NULL,EXT=NUL
 
     # grid locations
     # add one cell buffer on all sides for occurrence with zero-error IID models
-    R <- lapply(1:length(axes),function(i){ seq(EXT[1,i]-dr[i],EXT[2,i]+dr[i],length.out=1+res[i]+2) } ) # (grid,dim)
+    R <- lapply(1:DIM,function(i){ seq(EXT[1,i]-dr[i],EXT[2,i]+dr[i],length.out=1+res[i]+2) } ) # (grid,dim)
   } ### end not grid specification at all ###
   ### END SPECIFY GRID ###
 

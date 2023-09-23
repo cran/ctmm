@@ -5,16 +5,17 @@
 %\alias{overlap.telemetry}
 %- Also NEED an '\alias' for EACH other topic documented here.
 
-\title{Calculate the square distance between two stationary distributions}
+\title{Calculate the square distance between two distributions or location estimates}
 
 \description{This function calculates various square distances measures between distributions,
 including the, Bhattacharyya distance, Mahalanobis distance, and Euclidean distance.}
 
-\usage{ distance(object,method="Mahalanobis",level=0.95,debias=TRUE,...) }
+\usage{ distance(object,method="Mahalanobis",sqrt=FALSE,level=0.95,debias=TRUE,...) }
 %- maybe also 'usage' for other objects documented here.
 \arguments{
-  \item{object}{A \code{list} of \code{ctmm} fit objects to compare.}
+  \item{object}{A \code{list} of \code{ctmm} fit objects or single-location \code{telemetry} objects to compare.}
   \item{method}{Square distance measure to return: \code{"Bhattacharyya"}, \code{"Mahalanobis"}, or \code{"Euclidean"}.}
+  \item{sqrt}{Return the linear distance.}
   \item{level}{The confidence level desired for the output.}
   \item{debias}{Approximate debiasing of the square distance.}
   \item{...}{Not currently used.}
@@ -22,7 +23,7 @@ including the, Bhattacharyya distance, Mahalanobis distance, and Euclidean dista
 
 %\details{}
 
-\value{A table of confidence intervals on the square distance estimate. A value of \code{0} implies that the two distributions have the same mean location, while larger values imply that the two distributions are farther apart. The square Euclidean distance has units of square meters. The square Mahalanobis and Bhattacharyya distances are unitless.
+\value{A list with tables \code{DOF}, containing the effective samples sizes of the estimates, and \code{CI}, containing the confidence intervals of the distance estimates. A value of \code{0} implies that the two distributions have the same mean location, while larger values imply that the two distributions are farther apart. The (square) Euclidean distance has units of square meters, if \code{sqrt=FALSE}. The square Mahalanobis and Bhattacharyya distances are unitless. For the Euclidean distance, only the centroids are compared.
 }
 
 %% ~put references to the literature/web site here ~

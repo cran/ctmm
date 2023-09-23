@@ -13,7 +13,7 @@ The fitting functions wrap around \code{optim} and \code{ctmm.loglike} to fit co
 ctmm(tau=NULL,omega=FALSE,isotropic=FALSE,range=TRUE,circle=FALSE,error=FALSE,
      axes=c("x","y"),...)
 
-ctmm.loglike(data,CTMM,REML=FALSE,profile=TRUE,zero=0,verbose=FALSE)
+ctmm.loglike(data,CTMM,REML=FALSE,profile=TRUE,zero=0,verbose=FALSE,compute=TRUE,...)
 
 ctmm.fit(data,CTMM=ctmm(),method="pHREML",COV=TRUE,control=list(),trace=FALSE)
 
@@ -35,10 +35,11 @@ ctmm.select(data,CTMM,verbose=FALSE,level=1,IC="AICc",MSPE="position",trace=FALS
   \item{profile}{Analytically solve for as many covariance parameters as possible.}
   \item{zero}{Calculates \eqn{log(likelihood) - zero}, instead of just \eqn{log(likelihood)}, in a way that maintains numerical precision if the constant \code{zero} is close to the log likelihood. Used internally by \code{ctmm.fit}.}
   \item{verbose}{Return additional information. See "Value" below.}
+  \item{compute}{Only return computational information if \code{FALSE}.}
   \item{method}{Fitting method to use: \code{"ML"}, \code{"HREML"}, \code{"pREML"}, \code{"pHREML"}, or \code{"REML"}. See "Description" below.}
   \item{COV}{Estimate the autocorrelation parameter covariance matrix.}
-  \item{control}{An optional argument list for the optimizer.}
-  \item{trace}{Report progress updates. Can be among \code{0:2} with increasing detail.}
+  \item{control}{An optional argument list for \code{\link{optimizer}}.}
+  \item{trace}{Report progress updates. Can be among \code{0:3} with increasing detail.}
   \item{level}{Attempt to simplify a model if a feature's non-existence falls within this level of confidence interval.}
   \item{IC}{Information criterion used for selection. Can be \code{"AICc"}, \code{"AIC"}, \code{"BIC"}, \code{"LOOCV"}, \code{"HSCV"}, or none (\code{NA}). AICc is approximate.}
   \item{MSPE}{Reject non-stationary features that increase the mean square predictive error of \code{"position"}, \code{"velocity"}, or not (\code{NA}).}
@@ -135,7 +136,7 @@ This is no longer feasible with current versions of \code{ctmm}, as the number o
 
 %% ~Make other sections like Warning with \section{Warning }{....} ~
 
-\seealso{ \code{\link{ctmm.boot}}, \code{\link{ctmm.guess}}, \code{\link{optim}}, \code{\link{summary.ctmm}}, \code{\link{variogram.fit}}. }
+\seealso{ \code{\link{ctmm.boot}}, \code{\link{ctmm.guess}}, \code{\link{optimizer}}, \code{\link{summary.ctmm}}, \code{\link{variogram.fit}}. }
 
 \examples{\donttest{
 # Load package and data
