@@ -79,8 +79,8 @@ ctmm <- function(tau=NULL,omega=FALSE,isotropic=FALSE,range=TRUE,circle=FALSE,er
   #if(!is.null(List$COV.mu)) { dimnames(List$COV.mu) <- list(axes,axes) }
 
   # supply default parameters / check sanity / label dimensions
-  # drift <- get(List$mean)
-  # List <- drift@clean(List)
+  #
+  #
 
   result <- new.ctmm(List,info=info)
 
@@ -241,7 +241,7 @@ pars_tauv <- function(tau,tauc=tau)
 
 
 ###########################
-ctmm.prepare <- function(data,CTMM,precompute=TRUE,tau=TRUE,DIM=length(CTMM$axes),calibrate=FALSE,...)
+ctmm.prepare <- function(data,CTMM,precompute=TRUE,tau=TRUE,dt=TRUE,DIM=length(CTMM$axes),calibrate=FALSE,verbose=TRUE,...)
 {
   axes <- CTMM$axes
 
@@ -284,13 +284,10 @@ ctmm.prepare <- function(data,CTMM,precompute=TRUE,tau=TRUE,DIM=length(CTMM$axes
   } # otherwise leave this alone, as could be a proper subset of data$class levels
   if(any(CTMM$error>0)) { CTMM$errors <- TRUE }
 
-  # evaluate mean function for this data set if no vector is provided
-  if(precompute && (is.null(CTMM$mean.vec) || is.null(CTMM$error.mat) || is.null(CTMM$class.mat)))
+  # evaluate mean function for this data set if no vector is provided or vector can change
+  if(precompute && (is.null(CTMM$mean.vec) || length(drift.pars(CTMM))))
   {
-    CTMM$class.mat <- get.class.mat(data)
-
-    drift <- get(CTMM$mean)
-    U <- drift(data$t,CTMM)
+    U <- drift.mean(CTMM,data$t,verbose=verbose)
     CTMM$mean.vec <- U
 
     range <- CTMM$range
@@ -305,8 +302,14 @@ ctmm.prepare <- function(data,CTMM,precompute=TRUE,tau=TRUE,DIM=length(CTMM$axes
       UU <- t(U) %*% U
       if(!range) { UU[1,1] <- 0 } # zero stationary contribution (remove below)
       CTMM$UU <- UU
-      CTMM$REML.loglike <- AXES/2*log(det(UU[-1,-1])) # extra term for REML likelihood
+      CTMM$REML.loglike <- AXES/2*pd.logdet(UU[-1,-1]) # extra term for REML likelihood
     }
+  }
+
+  # evaluate error stuff
+  if(precompute && (is.null(CTMM$error.mat) || is.null(CTMM$class.mat)))
+  {
+    CTMM$class.mat <- get.class.mat(data)
 
     # construct error matrix, if UERE is unknown construct error matrix @ RMS UERE=1 for relative variances
     # ERROR <- CTMM
@@ -315,20 +318,35 @@ ctmm.prepare <- function(data,CTMM,precompute=TRUE,tau=TRUE,DIM=length(CTMM$axes
     # this is more of an error structure matrix (modulo variance)
   } # end precomputed matrices
 
+  # pre calculation of time-lag information
+  if(dt && !length(CTMM$timelink.par) && (is.null(CTMM$dt) || is.null(CTMM$dtl) || is.null(CTMM$dti)))
+  {
+    CTMM$dt <- c(Inf,diff(data$t))
+    dti <- sort(CTMM$dt,index.return=TRUE)
+    CTMM$dtl <- unique(dti$x) # dt levels
+    CTMM$dti <- dti$ix # sort indices
+  }
+
   return(CTMM)
 }
 
 # undo the above
-ctmm.repair <- function(CTMM,K=length(CTMM$tau))
+ctmm.repair <- function(CTMM,K=length(CTMM$tau),NAMES=CTMM$features)
 {
   # repair dropped zero timescales
-  if(K && length(CTMM$tau)) { CTMM$tau <- replace(numeric(K),1:length(CTMM$tau),CTMM$tau) }
+  if(K && length(CTMM$tau))
+  {
+    CTMM$tau <- replace(numeric(K),1:length(CTMM$tau),CTMM$tau)
+
+    if(is.null(NAMES)) { NAMES <- names(CTMM$tau) }
+    NAMES <- NAMES[grepl("tau",NAMES)]
+    NAMES <- substr(NAMES,5,nchar(NAMES))
+    names(CTMM$tau) <- NAMES
+  }
   else if(K) { CTMM$tau <- numeric(K) }
 
   if(FALSE && !CTMM$range) # no longer needed
-  {
-    K <- length(CTMM$tau) # why do I need this now?
-  }
+  { K <- length(CTMM$tau) } # why do I need this now?
   CTMM$K <- NULL
 
   # erase evaluated mean vector from ctmm.prepare
@@ -337,6 +355,11 @@ ctmm.repair <- function(CTMM,K=length(CTMM$tau))
   CTMM$UU <- NULL
   CTMM$REML.loglike <- NULL # deleted in ctmm.fit
   CTMM$error.mat <- NULL
+
+  # erase time-lag information from ctmm.prepare
+  CTMM$dt <- NULL
+  CTMM$dtl <- NULL # dt levels
+  CTMM$dti <- NULL # sort indices
 
   return(CTMM)
 }

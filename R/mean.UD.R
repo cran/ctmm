@@ -5,7 +5,14 @@ mean.UD <- function(x,weights=NULL,sample=TRUE,...)
   n <- length(x)
   axes <- x[[1]]$axes
 
-  if(is.null(weights)) { weights <- rep(1,length(x)) }
+  if(is.null(weights))
+  {
+    if(x[[1]]@type=="occurrence") # time weighted by default
+    { weights <- sapply(x,function(y){y$W}) }
+    else
+    { weights <- rep(1,length(x)) }
+  }
+
   weights <- weights/max(weights)
   names(weights) <- names(x)
   WEIGHT <- sum(weights)
@@ -19,9 +26,9 @@ mean.UD <- function(x,weights=NULL,sample=TRUE,...)
 
   # harmonic mean bandwidth matrix
   H <- 0
-  for(i in 1:n) { H <- H + weights[i] * PDsolve(x[[i]]$H) }
+  for(i in 1:n) { H <- H + weights[i] * pd.solve(x[[i]]$H) }
   H <- H/WEIGHT
-  H <- PDsolve(H)
+  H <- pd.solve(H)
 
   info <- mean_info(x)
   type <- unique(sapply(x,function(y){attr(y,"type")}))

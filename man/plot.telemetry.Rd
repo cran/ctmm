@@ -14,8 +14,8 @@ Produces simple plots of \code{telemetry} objects, possibly overlayed with a Gau
 plot(x,y,...)
 
 \S3method{plot}{telemetry}(x,CTMM=NULL,UD=NULL,col.bg="white",cex=NULL,col="red",lwd=1,pch=1,type='p',
-     error=TRUE,transparency.error=0.25,velocity=FALSE,DF="CDF",col.DF="blue",
-     col.grid="white",labels=NULL,convex=FALSE,level=0.95,level.UD=0.95,col.level="black",
+     error=TRUE,transparency.error=0.25,velocity=FALSE,DF="CDF",col.UD="blue",
+     col.grid="white",labels=NULL,level=0.95,level.UD=0.95,convex=FALSE,col.level="black",
      lwd.level=1,SP=NULL,border.SP=TRUE,col.SP=NA,R=NULL,col.R="green",legend=FALSE,
      fraction=1,xlim=NULL,ylim=NULL,ext=NULL,units=TRUE,add=FALSE,...)
 
@@ -27,7 +27,7 @@ plot(x,y,...)
 }
 %- maybe also 'usage' for other objects documented here.
 \arguments{
-  \item{x}{\code{telemetry} or \code{UD} object.}
+  \item{x}{\code{telemetry}, \code{ctmm} or \code{UD} object, or list of such objects.}
   \item{y}{Unused option.}
   \item{CTMM}{Optional Gaussian \code{ctmm} movement model from the output of \code{ctmm.fit} or list of such objects.}
   \item{UD}{Optional \code{UD} object such as from the output of \code{akde} or list of such objects.}
@@ -41,12 +41,12 @@ plot(x,y,...)
   \item{transparency.error}{Transparency scaling for erroneous locations when \code{error=1:2}. \code{trans=0} disables transparancy. Should be no greater than \code{1}.}
   \item{velocity}{Plot velocity vectors if present in the data.}
   \item{DF}{Plot the maximum likelihood probability density function \code{"PDF"} or cumulative distribution function \code{"CDF"}.}
-  \item{col.DF}{Color option for the density function. Can be an array.}
+  \item{col.UD}{Color option for the density function. Can be an array.}
   \item{col.grid}{Color option for the maximum likelihood \code{akde} bandwidth grid. \code{col.grid=NA} will disable the plotting of the bandwidth grid.}
   \item{labels}{Labels for UD contours. Can be an array or list of arrays.}
-  \item{convex}{Plot convex coverage-area contours if \code{TRUE}. By default, the highest density region (HDR) contours are plotted.}
   \item{level}{ Confidence levels placed on the contour estimates themselves. I.e., the above 50\% core home-range area can be estimated with 95\% confidence via \code{level=0.95}. \code{level=NA} will disable the plotting of confidence intervals.}
   \item{level.UD}{Coverage level of Gaussian \code{ctmm} model or \code{UD} estimate contours to be displayed. I.e., \code{level.UD=0.50} can yield the 50\% core home range within the rendered contours.}
+  \item{convex}{Plot convex coverage-area contours if \code{TRUE}. By default, the highest density region (HDR) contours are plotted. \code{convex=1} will plot the \code{level.UD} convex area, while \code{convex=2} will plot the convex hull of the \code{level.UD} HDR coverage area.}
   \item{col.level}{Color option for home-range contours. Can be an array.}
   \item{lwd.level}{Line widths of \code{UD} contours.}
   \item{SP}{\code{SpatialPolygonsDataFrame} object for plotting a shapefile base layer.}

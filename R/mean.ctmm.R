@@ -44,7 +44,7 @@ quad2lin <- function(M,diag=FALSE)
 }
 
 #############
-mean.features <- function(x,debias=TRUE,weights=NULL,trace=FALSE,IC="AICc",select="all",...)
+mean.features <- function(x,debias=TRUE,weights=NULL,trace=FALSE,IC="AICc",select="all",formula=FALSE,base=list(),...)
 {
   if(is.null(weights))
   { weights <- rep(1,length(x)) }
@@ -52,7 +52,7 @@ mean.features <- function(x,debias=TRUE,weights=NULL,trace=FALSE,IC="AICc",selec
   N <- length(x)
   axes <- x[[1]]$axes
 
-  ISO <- sapply(x,function(y){y$isotropic})
+  ISO <- sapply(x,function(y){y$isotropic[1]})
   ISO <- all(ISO)
 
   # only want biological parameters
@@ -100,8 +100,38 @@ mean.features <- function(x,debias=TRUE,weights=NULL,trace=FALSE,IC="AICc",selec
   colnames(MU) <- FEATURES
   dimnames(SIGMA) <- list(NULL,FEATURES,FEATURES)
 
+  # temporary code for linear functional response
+  if(class(formula)[1]=="formula")
+  { formula <- all.vars(formula) } # now character
+  if(class(formula)[1]=="character")
+  { formula <- BETA[BETA %in% formula] }
+  else # logical
+  {
+    formula <- array(formula,length(BETA))
+    formula <- BETA[formula]
+  }
+
+  if(length(formula)) # get predictors for model-II regression - linear response function
+  {
+    TERMS <- formula
+    X <- array(0,c(N,length(TERMS)))
+    colnames(X) <- TERMS
+    SX <- array(0,c(N,length(TERMS),length(TERMS)))
+    dimnames(SX) <- list(NULL,TERMS,TERMS)
+  }
+  else
+  { X <- SX <- FALSE }
+
   for(i in 1:N)
   {
+    if(length(formula) && length(x[[i]]$used.mean))
+    {
+      NAMES <- names(x[[i]]$used.mean)
+      NAMES <- NAMES[NAMES %in% TERMS]
+      X[i,NAMES] <- x[[i]]$used.mean[NAMES]
+      SX[i,NAMES,NAMES] <- x[[i]]$used.cov[NAMES,NAMES]
+    }
+
     x[[i]] <- log_ctmm(x[[i]],debias=debias)
     features <- names(x[[i]]$par)
 
@@ -184,7 +214,10 @@ mean.features <- function(x,debias=TRUE,weights=NULL,trace=FALSE,IC="AICc",selec
   # }
 
   # missing data / infinite uncertainties
-  INF <- t(apply(SIGMA,1,function(M){diag(M)==Inf})) # [ind,par]
+  INF <- apply(SIGMA,1,function(M){diag(M)==Inf}) # [par,ind]
+  dim(INF) <- dim(SIGMA)[2:1]
+  INF <- t(INF) # [ind,par]
+  colnames(INF) <- colnames(SIGMA)
 
   tJ <- t(J)
   MU[INF] <- 0 # zero out infinite uncertainties (point estimates could be infinite after log transform)
@@ -234,7 +267,7 @@ mean.features <- function(x,debias=TRUE,weights=NULL,trace=FALSE,IC="AICc",selec
     V <- FIT$VARS
     V <- V[upper.tri(V,diag=TRUE)]
     V <- sum(V)
-    if(mean) { V <- V + sum(FIT$MEANS) }
+    if(mean) { V <- V + sum(FIT$INT) }
     return(V)
   }
 
@@ -245,7 +278,7 @@ mean.features <- function(x,debias=TRUE,weights=NULL,trace=FALSE,IC="AICc",selec
   MEAN.MIN <- rep(TRUE,DIM)
   names(MEAN.MIN) <- FEATURES
   if("minor" %in% FEATURES) { MEAN.MIN[c("minor","angle")] <- FALSE } # can be mean zero
-  MEAN.MIN[BETA] <- FALSE # can be mean-zero
+  # MEAN.MIN[BETA] <- FALSE # can be mean-zero
 
   ##########
   ## build up phase
@@ -257,7 +290,7 @@ mean.features <- function(x,debias=TRUE,weights=NULL,trace=FALSE,IC="AICc",selec
 
   S <- make.names(MEANS,VARS)
   if(trace) { message("Fitting covariance model ",S) }
-  OLD[[S]] <- meta.normal(MU,SIGMA,debias=debias,weights=weights,VARS=diag(VARS,DIM),MEANS=MEANS,WARN=FALSE,...)
+  OLD[[S]] <- meta.normal(MU,SIGMA,X=X,SX=SX,debias=debias,weights=weights,VARS=diag(VARS,DIM),MEANS=MEANS,WARN=FALSE,...)
 
   ## add terms one by one
   GUESS <- OLD[[1]]
@@ -292,7 +325,7 @@ mean.features <- function(x,debias=TRUE,weights=NULL,trace=FALSE,IC="AICc",selec
       {
         S <- NAMES[i]
         if(trace) { message("Fitting covariance model ",S) }
-        NEW[[S]] <- meta.normal(MU,SIGMA,debias=debias,weights=weights,VARS=diag(TRYS[i,],DIM),MEANS=MEANS,GUESS=GUESS,WARN=FALSE,...)
+        NEW[[S]] <- meta.normal(MU,SIGMA,X=X,SX=SX,debias=debias,weights=weights,VARS=diag(TRYS[i,],DIM),MEANS=MEANS,GUESS=GUESS,WARN=FALSE,...)
       }
     }
 
@@ -323,7 +356,7 @@ mean.features <- function(x,debias=TRUE,weights=NULL,trace=FALSE,IC="AICc",selec
       {
         S <- NAMES[i]
         if(trace) { message("Fitting covariance model ",S) }
-        NEW[[S]] <- meta.normal(MU,SIGMA,debias=debias,weights=weights,VARS=diag(VARS,DIM),MEANS=TRYS[i,],GUESS=GUESS,WARN=FALSE,...)
+        NEW[[S]] <- meta.normal(MU,SIGMA,X=X,SX=SX,debias=debias,weights=weights,VARS=diag(VARS,DIM),MEANS=TRYS[i,],GUESS=GUESS,WARN=FALSE,...)
       }
     }
 
@@ -335,7 +368,7 @@ mean.features <- function(x,debias=TRUE,weights=NULL,trace=FALSE,IC="AICc",selec
     BEST <- which.min(ICS)
     BEST <- NEW[[BEST]]
     GUESS <- BEST
-    MEANS <- BEST$MEANS
+    MEANS <- BEST$INT
     VARS <- diag(BEST$VARS)
 
     OLD <- c(OLD,NEW)
@@ -356,7 +389,7 @@ mean.features <- function(x,debias=TRUE,weights=NULL,trace=FALSE,IC="AICc",selec
     BEST <- OLD[[BEST]]
   }
   GUESS <- BEST
-  MEANS <- BEST$MEANS
+  MEANS <- BEST$INT
   VARS <- diag(BEST$VARS)
 
   ##############
@@ -365,6 +398,7 @@ mean.features <- function(x,debias=TRUE,weights=NULL,trace=FALSE,IC="AICc",selec
   {
     NEW <- list()
     NAMES1 <- NAMES2 <- NULL
+    NEW1 <- NEW2 <- NULL
 
     #################
     ### var terms ###
@@ -382,7 +416,7 @@ mean.features <- function(x,debias=TRUE,weights=NULL,trace=FALSE,IC="AICc",selec
       NAMES <- NAMES1 <- make.names(MEANS,TRYS)
       # paired down models that we haven't attempted yet
       SUB <- NAMES %nin% names(OLD)
-      NEW.NAMES <- NAMES[SUB]
+      NEW.NAMES <- NEW1 <- NAMES[SUB]
       TRYS <- TRYS[SUB,,drop=FALSE]
 
       # fit all
@@ -390,7 +424,7 @@ mean.features <- function(x,debias=TRUE,weights=NULL,trace=FALSE,IC="AICc",selec
       {
         S <- NEW.NAMES[i]
         if(trace) { message("Fitting covariance model ",S) }
-        NEW[[S]] <- meta.normal(MU,SIGMA,debias=debias,weights=weights,VARS=diag(TRYS[i,],DIM),MEANS=MEANS,GUESS=GUESS,WARN=FALSE,...)
+        NEW[[S]] <- meta.normal(MU,SIGMA,X=X,SX=SX,debias=debias,weights=weights,VARS=diag(TRYS[i,],DIM),MEANS=MEANS,GUESS=GUESS,WARN=FALSE,...)
       }
     }
 
@@ -410,7 +444,7 @@ mean.features <- function(x,debias=TRUE,weights=NULL,trace=FALSE,IC="AICc",selec
       NAMES <- NAMES2 <- make.names(TRYS,VARS)
       # paired down models that we haven't attempted yet
       SUB <- NAMES %nin% names(OLD)
-      NEW.NAMES <- NAMES[SUB]
+      NEW.NAMES <- NEW2 <- NAMES[SUB]
       TRYS <- TRYS[SUB,,drop=FALSE]
 
       # fit all
@@ -418,7 +452,7 @@ mean.features <- function(x,debias=TRUE,weights=NULL,trace=FALSE,IC="AICc",selec
       {
         S <- NEW.NAMES[i]
         if(trace) { message("Fitting covariance model ",S) }
-        NEW[[S]] <- meta.normal(MU,SIGMA,debias=debias,weights=weights,VARS=diag(VARS,DIM),MEANS=TRYS[i,],GUESS=GUESS,WARN=FALSE,...)
+        NEW[[S]] <- meta.normal(MU,SIGMA,X=X,SX=SX,debias=debias,weights=weights,VARS=diag(VARS,DIM),MEANS=TRYS[i,],GUESS=GUESS,WARN=FALSE,...)
       }
     }
 
@@ -426,13 +460,13 @@ mean.features <- function(x,debias=TRUE,weights=NULL,trace=FALSE,IC="AICc",selec
     ## wrap up ##
     OLD <- c(OLD,NEW)
     NEW <- OLD[c(NAMES1,NAMES2)] # also consider models that we've already fitted (with the right number of parameters)
-    if(!length(NEW)) { break }
+    if(!length(c(NEW1,NEW2))) { break } # stopped trying new models
 
     ICS <- sapply(NEW,function(m){m[[IC]]})
     BEST <- which.min(ICS)
     BEST <- NEW[[BEST]]
     GUESS <- BEST
-    MEANS <- BEST$MEANS
+    MEANS <- BEST$INT
     VARS <- diag(BEST$VARS)
   } # finish pair down variances
 
@@ -447,13 +481,13 @@ mean.features <- function(x,debias=TRUE,weights=NULL,trace=FALSE,IC="AICc",selec
   if(NV>1 && sum(!INF)>=NP)
   {
     GUESS <- BEST
-    MEANS <- BEST$MEANS
+    MEANS <- BEST$INT
     VARS <- diag(BEST$VARS)
     S <- make.names(MEANS,VARS,OFF=TRUE)
     if(S %nin% names(OLD))
     {
       if(trace) { message("Fitting covariance model ",S) }
-      OLD[[S]] <- meta.normal(MU,SIGMA,debias=debias,weights=weights,VARS=VARS,MEANS=MEANS,GUESS=GUESS,WARN=FALSE,...)
+      OLD[[S]] <- meta.normal(MU,SIGMA,X=X,SX=SX,debias=debias,weights=weights,VARS=VARS,MEANS=MEANS,GUESS=GUESS,WARN=FALSE,...)
     }
   } # end correlation fit
 
@@ -474,20 +508,38 @@ mean.features <- function(x,debias=TRUE,weights=NULL,trace=FALSE,IC="AICc",selec
   }
 
   R <- OLD[[I]]
-  MEANS <- R$MEANS
+  MEANS <- R$INT
   VARS <- diag(R$VARS)
   R$name <- names(OLD)[I]
   R$isotropic <- !("minor" %in% FEATURES && MEANS["minor"]) # just the mean
   R$axes <- axes
 
+  R$mu <- c(R$beta,R$mu)
   names(R)[ which(names(R)=="mu") ] <- "par" # population mean of features
   names(R)[ which(names(R)=="COV.mu") ] <- "COV" # uncertainty in population mean
   names(R)[ which(names(R)=="sigma") ] <- "POV" # population dispersion of features (under log)
   names(R)[ which(names(R)=="COV.sigma") ] <- "COV.POV" # uncertainty in population dispersion of features (under log)
 
+  # new variables from functional response
+  NEW <- names(R$beta)
+
   # transform from diagonal-ish basis for covariance model
   if(any(VARS))
   {
+    JJ <- quad2lin(J)
+    dimnames(JJ) <- dimnames(R$COV.POV)
+    R$COV.POV <- JJ %*% R$COV.POV %*% t(JJ)
+
+    # functional response code
+    EXTRA <- length(formula)
+    if(EXTRA)
+    {
+      padnames <- rownames(R$COV)[1:length(NEW)]
+      J <- mpad(J,diff=length(NEW),side=-1,padname=padnames)
+      diag(J)[1:length(NEW)] <- 1
+      R$POV <- mpad(R$POV,diff=length(NEW),side=-1,padname=padnames)
+    }
+
     J <- solve(J)
     tJ <- t(J)
     R$par <- (R$par %*% tJ)[1,]
@@ -495,12 +547,86 @@ mean.features <- function(x,debias=TRUE,weights=NULL,trace=FALSE,IC="AICc",selec
     R$POV <- J %*% R$POV %*% tJ
     # SUB <- FEATURES[variance]
     # J <- J[SUB,SUB]
-    J <- quad2lin(J)
-    dimnames(J) <- dimnames(R$COV.POV)
-    R$COV.POV <- J %*% R$COV.POV %*% t(J)
   }
 
+  # set beta structure (empty)
+  BETA <- BETA[BETA %in% FEATURES]
+
+  # fix names
+  if(length(NEW))
+  {
+    # implement linear response
+    for(i in which(grepl('/',NEW,fixed=TRUE)))
+    {
+      Q <- strsplit(NEW[i],'/',fixed=TRUE)[[1]]
+      Q <- paste0(Q[1],":",Q[2])
+
+      names(R$beta)[i] <- Q
+      R$beta[i] <- R$beta[i] * 2
+      # this comes from integration:
+      # from beta(0) + beta'(0)*x          (slope meta-analysis)
+      #   to beta(0)*x + 1/2*beta'(0)*x^2  (RSF)
+
+      I <- which(names(R$par)==NEW[i])
+      names(R$par)[i] <- Q
+      R$par[i] <- R$par[i] * 2
+
+      I <- which(rownames(R$COV)==NEW[i])
+      rownames(R$COV)[I] <- colnames(R$COV)[I] <- Q
+      R$COV[I,] <- R$COV[,I] <- R$COV[I,] * 2
+
+      I <- rownames(R$POV)==NEW[i]
+      rownames(R$POV)[I] <- colnames(R$POV)[I] <- Q
+      R$POV[I,] <- R$POV[,I] <- R$POV[I,] * 2
+
+      for(I in which(grepl(NEW[i],rownames(R$COV.POV),fixed=TRUE)))
+      {
+        S <- strsplit(rownames(R$COV.POV)[I],"-",fixed=TRUE)[[1]]
+
+        if(S[1]==NEW[i])
+        { S[1] <- Q }
+
+        if(S[2]==NEW[i])
+        { S[2] <- Q }
+
+        S <- paste(S[1],"-",S[2])
+        rownames(R$COV.POV)[I] <- colnames(R$COV.POV)[I] <- S
+        R$COV.POV[I,] <-  R$COV.POV[,I] <- R$COV.POV[I,] * 4
+      }
+    } # end for NEW
+
+    NEW <- names(R$beta) # new slope of slopes
+
+    # add new population variances # this is now done back with Jacobian J
+    # R$POV <- mpad(R$POV,diff=length(NEW),side=-1,padname=NEW)
+    # add their uncertainties
+    ADD <- outer(NEW,NEW,function(a,b){paste0(a,'-',b)})
+    ADD <- ADD[ upper.tri(ADD,diag=TRUE) ] # unique terms
+    ADD <- c( ADD , outer(NEW,FEATURES,function(a,b){paste0(a,'-',b)}) )
+    R$COV.POV <- mpad(R$COV.POV,diff=length(ADD),side=-1,padname=ADD)
+
+    BETA <- c(NEW,BETA)
+    FEATURES <- c(NEW,FEATURES)
+
+    # resort
+    SORT <- outer(FEATURES,FEATURES,function(a,b){paste0(a,'-',b)})
+    SORT <- SORT[ upper.tri(SORT,diag=TRUE) ]
+    R$COV.POV <- R$COV.POV[SORT,SORT]
+  } # end if(length(BETA))
+
+  beta <- rep(0,length(BETA))
+  names(beta) <- BETA
+  R$beta <- beta
+
+  if(length(BETA))
+  { R$formula <- stats::as.formula(paste("~",paste(names(beta),collapse=" + "))) }
+
+  R$features <- FEATURES
+
   # information for fitting that we no longer use
+  NEW <- rep(TRUE,length(NEW))
+  MEANS <- c(NEW,MEANS)
+  VARS <- c(NEW,VARS)
   NIN <- !MEANS & !VARS
   if(any(NIN))
   {
@@ -517,109 +643,17 @@ mean.features <- function(x,debias=TRUE,weights=NULL,trace=FALSE,IC="AICc",selec
     FEAT <- !apply(FEAT,1,any)
     R$COV.POV <- R$COV.POV[FEAT,FEAT]
   }
-  R$features <- FEATURES
-
-  # set beta structure (empty)
-  BETA <- BETA[BETA %in% FEATURES]
-  beta <- rep(0,length(BETA))
-  names(beta) <- BETA
-  if(length(BETA))
-  {
-    R$beta <- beta
-    R$formula <- stats::as.formula(paste("~",paste(names(beta),collapse=" + ")))
-  }
 
   # reverse log transformation
   # R <- set.parameters(R,par,linear.cov=TRUE)
-  R <- exp_ctmm(R,debias=debias,variance=VARS)
+  R <- exp_ctmm(R,debias=debias,variance=VARS,base=base)
 
   return(R)
 }
 
 
-##########
-mean.mu <- function(x,debias=TRUE,weights=NULL,trace=FALSE,IC="AICc",...)
-{
-  if(is.null(weights))
-  { weights <- rep(1,length(x)) }
-
-  axes <- x[[1]]$axes
-  AXES <- length(axes)
-  N <- length(x)
-
-  # Gaussian-Gaussian in all cases
-  MU <- array(0,c(N,AXES))
-  SIGMA <- array(0,c(N,AXES,AXES))
-
-  colnames(MU) <- axes
-  dimnames(SIGMA) <- list(NULL,axes,axes)
-
-  for(i in 1:N)
-  {
-    MU[i,] <- x[[i]]$mu
-    SIGMA[i,,] <- x[[i]]$COV.mu
-
-    # TODO !!!
-    # fill in with zeroes for non-stationary means
-    # TODO !!!
-  }
-
-  # list of candidate models
-  MM <- list()
-
-  # no variance in mean location
-  S <- "Dirac-\u03B4(\u03BC)"
-  if(trace) { message("Fitting location-mean model ",S) }
-  MM[[S]] <- meta.normal(MU,SIGMA,VARS=FALSE,isotropic=TRUE,debias=debias,weights=weights,WARN=FALSE,...)
-  GUESS <- MM[[S]]
-
-  # symmetric mean distribution
-  if(2*N >= 2+1)
-  {
-    S <- "isotropic-\u03BC"
-    if(trace) { message("Fitting location-mean model ",S) }
-    MM[[S]] <- meta.normal(MU,SIGMA,isotropic=TRUE,debias=debias,weights=weights,GUESS=GUESS,WARN=FALSE,...)
-    GUESS <- MM[[S]]
-
-    # general distribution
-    if(2*N >= 2+3)
-    {
-      S <- "anisotropic-\u03BC"
-      if(trace) { message("Fitting location-mean model ",S) }
-      MM[[S]] <- meta.normal(MU,SIGMA,debias=debias,weights=weights,GUESS=GUESS,WARN=FALSE,...)
-    }
-  }
-
-  ICS <- sapply(MM,function(m){m[[IC]]})
-  names(ICS) <- names(MM)
-  i <- which.min(ICS)
-  i <- names(MM)[i]
-  MM <- MM[[i]]
-  MM$name <- i
-
-  # report model selection
-  if(trace)
-  {
-    i <- sort(ICS,index.return=TRUE)$ix
-    ICS <- ICS[i] # sorted
-    ICS <- ICS - ICS[1] # start at zero
-    ICS <- data.frame(ICS)
-    colnames(ICS) <- paste0("\u0394",IC)
-    message("* Model selection for location-mean \u03BC distribution.")
-    print(ICS)
-  }
-
-  # R$mu # population mean of mean locations
-  # R$COV.mu # uncertainty in mean of means estimate
-  names(MM)[ which(names(MM)=="sigma") ] <- "POV.mu" # dispersion of means
-  names(MM)[ which(names(MM)=="COV.sigma") ] <- "COV.POV.mu" # uncertainty in dispersion of means
-
-  return(MM)
-}
-
-
 ###########
-mean.ctmm <- function(x,weights=NULL,sample=TRUE,debias=TRUE,IC="AIC",trace=TRUE,...)
+mean.ctmm <- function(x,formula=FALSE,weights=NULL,sample=TRUE,debias=TRUE,IC="AIC",trace=TRUE,...)
 {
   select <- "all"
 
@@ -649,10 +683,11 @@ mean.ctmm <- function(x,weights=NULL,sample=TRUE,debias=TRUE,IC="AIC",trace=TRUE
     MM <- mean.mu(x,debias=debias,weights=weights,IC=IC,trace=trace,...)
     isotropic['mu'] <- MM$isotropic
 
-    FM <- mean.features(x,debias=debias,weights=weights,select=select,IC=IC,trace=trace,...)
+    FM <- mean.features(x,debias=debias,weights=weights,select=select,IC=IC,trace=trace,formula=formula,base=MM,...)
     isotropic['sigma'] <- FM$isotropic
 
-    x <- copy(from=FM,to=MM)
+    # x <- copy(from=FM,to=MM) # moved to base argument
+    x <- FM
     x$isotropic <- isotropic
 
     # STORE EVERYTHING
@@ -723,8 +758,6 @@ mean.ctmm <- function(x,weights=NULL,sample=TRUE,debias=TRUE,IC="AIC",trace=TRUE
   x$isotropic <- isotropic
   x$weights <- weights
 
-  # return final result
-  # x <- new.ctmm(x,info)
   return(x)
 }
 
@@ -732,6 +765,30 @@ mean.ctmm <- function(x,weights=NULL,sample=TRUE,debias=TRUE,IC="AIC",trace=TRUE
 ## population stationary distribution
 mean_pop <- function(CTMM)
 {
+  axes <- CTMM$axes
+
+  # take the stationary part for now
+  if(nrow(CTMM$mu)>1)
+  {
+    if(CTMM$isotropic['mu'])
+    { CTMM$COV.POV.mu <- CTMM$COV.POV.mu[1,1] }
+    else
+    {
+      P <- rownames(CTMM$mu)[1]
+      P <- paste(P,CTMM$axes,sep="-")
+      P <- outer(P,P,function(p,q){paste(p,q,sep="-")}) # (x-x,x-y,y-x,y-y)
+      P <- P[c(1,3,4)] # (x-x,x-y,y-y)
+      CTMM$COV.POV.mu <- CTMM$COV.POV.mu[P,P]
+
+      P <- outer(axes,axes,function(p,q){paste(p,q,sep="-")}) # (x-x,x-y,y-x,y-y)
+      P <- P[c(1,3,4)] # (x-x,x-y,y-y)
+      dimnames(CTMM$COV.POV.mu) <- list(P,P)
+    }
+
+    CTMM$mu <- CTMM$mu[1,,drop=FALSE]
+    CTMM$POV.mu <- CTMM$POV.mu[,1,1,] # [x,m,m,x]
+  }
+
   # spread (x,y)
   sigma <- CTMM$POV.mu + CTMM$sigma
   # uncertainty of spread (x-x,x-y,y-y)
@@ -751,7 +808,7 @@ mean_pop <- function(CTMM)
   else
   {
     P <- c('major','minor','angle')
-    J <- J.sigma.par(CTMM$sigma@par)
+    J <- J.sigma.par(CTMM$sigma)
     COV <- COV + J%*%(CTMM$COV[P,P]+CTMM$POV[P,P])%*%t(J)
   }
 
@@ -766,7 +823,7 @@ mean_pop <- function(CTMM)
   else
   {
     P <- c('major','minor','angle')
-    J <- J.par.sigma(sigma[c(1,4,2)])
+    J <- J.par.sigma(sigma)
     COV <- J %*% COV %*% t(J)
   }
   dimnames(COV) <- list(P,P)

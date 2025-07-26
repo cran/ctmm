@@ -62,11 +62,14 @@ emulate.ctmm <- function(object,data=NULL,fast=FALSE,...)
   }
 
   # variances should be comparable after transformation --- better condition number
-  TEST <- any( diag(COV) <= .Machine$double.eps ) # first test
-  TEST <- TEST || any( eigen(COV)$values <= .Machine$double.eps ) # only run eigen() if first passes
-  if(any(TEST)) { stop("Hessian not negative semidefinite. Try fast=FALSE.") }
-
-  par <- MASS::mvrnorm(mu=par,Sigma=COV)
+  if(!is.null(data))
+  {
+    TEST <- any( diag(COV) <= .Machine$double.eps ) # first test
+    TEST <- TEST || any( eigen(COV)$values <= .Machine$double.eps ) # only run eigen() if first passes
+    if(any(TEST)) { warning("Hessian not negative semidefinite. Consider fast=FALSE.") }
+    # par <- MASS::mvrnorm(mu=par,Sigma=COV)
+  }
+  par <- mvrnorm(par,COV) # safe for small eigen-values
 
   # transform log back to positive parameters
   par[PAR] <- exp(par[PAR])
@@ -134,12 +137,13 @@ ctmm.reduce <- function(CTMM)
 #####################################
 # multi-estimator parametric bootstrap
 # + concurrent double-bootstrap AICc
-ctmm.boot <- function(data,CTMM,method=CTMM$method,AICc=FALSE,iterate=FALSE,robust=FALSE,error=0.01,cores=1,trace=TRUE,...)
+ctmm.boot <- function(data,CTMM,method=CTMM$method,AICc=FALSE,iterate=FALSE,robust=FALSE,error=0.01,clamp=0.001,cores=1,trace=TRUE,...)
 {
   if("COV" %nin% names(CTMM)) { stop("CTMM needs to be output from ctmm.select or ctmm.fit.") }
+  if(!length(CTMM$COV)) { return(CTMM) } # nothing to do
+  if((!length(CTMM$tau) || all(!CTMM$tau)) && all(!CTMM$error)) { return(CTMM) } # already MVU
 
   CTMM <- ctmm.reduce(CTMM) # remove zero parameters
-  if(!length(CTMM$COV)) { return(CTMM) } # nothing to do
 
   # parameters to extract & debias
   NAMES <- dimnames(CTMM$COV)[[1]]
@@ -148,6 +152,15 @@ ctmm.boot <- function(data,CTMM,method=CTMM$method,AICc=FALSE,iterate=FALSE,robu
   POS <- POSITIVE.PARAMETERS
   # included variables that are positive
   POS <- POS[POS %in% NAMES]
+
+  prior <- clamp
+  if(prior)
+  {
+    DOF <- CTMM$COV
+    P <- get.parameters(CTMM,NAMES)
+    if(length(NAMES)>length(POS)) { P[NAMES %nin% POS] <- 1 }
+    DOF <- t(DOF/P)/P
+  }
 
   method <- match.arg(method,c('ML','HREML','pREML','pHREML','REML'),several.ok=FALSE)
   cores <- resolveCores(cores,fast=FALSE)
@@ -298,7 +311,7 @@ ctmm.boot <- function(data,CTMM,method=CTMM$method,AICc=FALSE,iterate=FALSE,robu
       {
         BIAS <- AVE - P0 # fixed for multiple iterations
         # ERROR <- sqrt(sum(BIAS^2/diag(COV))/length(NAMES)/N)
-        ERROR <- sqrt(c(BIAS %*% PDsolve(COV) %*% BIAS)/length(NAMES)/N)
+        ERROR <- sqrt(c(BIAS %*% pd.solve(COV) %*% BIAS)/length(NAMES)/N)
         if(is.nan(ERROR)) { ERROR <- Inf }
       }
 
@@ -309,7 +322,7 @@ ctmm.boot <- function(data,CTMM,method=CTMM$method,AICc=FALSE,iterate=FALSE,robu
 
     ## recalculate error & store best model
     ERROR <- AVE - EST # how far off were we?
-    ERROR <- sqrt(abs(c(ERROR %*% PDsolve(COV) %*% ERROR))/length(NAMES))
+    ERROR <- sqrt(abs(c(ERROR %*% pd.solve(COV) %*% ERROR))/length(NAMES))
     if(is.nan(ERROR)) { ERROR <- Inf }
 
     # check to make sure relative error is decreasing
@@ -373,6 +386,20 @@ ctmm.boot <- function(data,CTMM,method=CTMM$method,AICc=FALSE,iterate=FALSE,robu
 
   # store simulated AICc
   if(AICc) { CTMM$AICc <- AIC; CTMM$VAR.AICc <- VAR.AIC }
+
+  # crude fix to CIs at small N
+  if(prior)
+  {
+    DOF2 <- CTMM$COV
+    P <- get.parameters(CTMM,NAMES)
+    if(length(NAMES)>length(POS)) { P[NAMES %nin% POS] <- 1 } #!!! invalid argument type error
+    DOF2 <- t(DOF2/P)/P
+
+    R <- clamp*sqrt(N) # <= clamp/error
+
+    DOF <- ( DOF + R*DOF2 )/( 1 + R )
+    CTMM$COV <- t(DOF*P)*P
+  }
 
   if(trace) { close(pb) }
   return(CTMM)

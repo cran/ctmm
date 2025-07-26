@@ -49,11 +49,11 @@ tbind(...)
   \item{dt.hot}{Time-interval threshold at which GPS location fixes can be considered as ``hot'' and location estimate precisions may be smaller (regardless of DOP value) for assigning \code{"hot"} and \code{"cold"} location classes.}
   \item{timeout}{GPS location fix timeout value (seconds) for assigning a \code{"timed-out"} location class.}
   %\item{class.2D}{Assign location classes \code{"2D"} and \code{"3D"} to fixes with \code{3} and \code{>3} satellites.}
-  \item{na.rm}{If some values are \code{NA} in the data frame, are the rows (times) deleted or are the columns (data types) deleted.}
+  \item{na.rm}{If some entries are \code{NA} in the data frame, the rows (times) are deleted with \code{na.rm="row"}, the columns (data types) are deleted with \code{na.rm="col"}, and nothing is deleted otherwise, which you may consider if \code{keep=TRUE}.}
   \item{mark.rm}{Delete Movebank manually marked outliers. Also see \code{\link{outlie}}.}
   \item{keep}{Retain additonal columns after coercion. \code{keep=TRUE} retains all columns, while individual columns to retain can be specified by name.}
   \item{drop}{Only return a \code{telemetry} object for one individual if \code{TRUE}. Always return a \code{list} of telemetry objects if \code{FALSE}.}
-  \item{...}{\code{telemetry} objects or a list of such objects, for \code{tbind()}. Optional arguments to be fed to \code{\link{fread}} or \code{\link{read.csv}}, in the case of compressed files, for \code{as.telemetry()}.}
+  \item{...}{\code{telemetry} objects or a list of such objects, for \code{tbind()}. Optional arguments to be fed to \code{\link[data.table]{fread}} or \code{\link{read.csv}}, in the case of compressed files, for \code{as.telemetry()}.}
   \item{x}{\code{telemetry} object.}
   \item{n}{Number of rows to return, if positive, or number of rows to omit, if negative.}
 }
@@ -63,7 +63,7 @@ tbind(...)
 If no projection argument is specified, a two-point equidistant projection is calculated that should be good for most range resident and migratory species.
 Global migrations that are not along one geodesic (locally straight line) will probably suffer distortion.
 
-\code{as.telemetry()} assumes \href{https://www.movebank.org/node/2381}{Movebank naming conventions}.
+\code{as.telemetry()} assumes \href{https://www.movebank.org/cms/movebank-content/movebank-attribute-dictionary}{Movebank naming conventions}.
 Sufficient MoveBank columns include \code{individual.local.identifier} (or \code{tag.local.identifier}), \code{timestamp}, \code{location.long} and \code{location.lat}, while the optional Movebank columns include (e-obs) \code{eobs.horizontal.accuracy.estimate}, (Telonics) \code{GPS.Horizontal.Error}, \code{GPS.HDOP}, (Argos) \code{Argos.orientation}, \code{Argos.semi.minor} and \code{Argos.semi.major} or \code{Argos.location.class}, etc..
 To have all columns detected and not overwrite eachother's information, \bold{it is best to have only one tracking device model per file imported}.
 Multiple deployments on a single individual can be merged afterwards, using \code{tbind()}.

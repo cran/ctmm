@@ -3,6 +3,7 @@
 \alias{projection,telemetry-method}
 \alias{projection<-,telemetry-method}
 \alias{projection,ctmm-method}
+\alias{projection<-,ctmm-method}
 \alias{projection,UD-method}
 \alias{projection,list-method}
 \alias{projection<-,list-method}
@@ -28,6 +29,8 @@
 
 \S4method{projection}{telemetry}(x) <- value
 
+\S4method{projection}{ctmm}(x) <- value
+
 \S4method{projection}{list}(x) <- value
 
 \S3method{median}{telemetry}(x,na.rm=FALSE,...)
@@ -37,7 +40,7 @@ compass(loc=NULL,cex=3,...)
 %- maybe also 'usage' for other objects documented here.
 \arguments{
   \item{x}{A \code{telemetry}, \code{ctmm}, or \code{UD} object.}
-  \item{asText}{ If \code{TRUE}, the projection is returned as text. Otherwise a \code{\link{CRS}} object is returned.}
+  \item{asText}{ If \code{TRUE}, the projection is returned as text. Otherwise a \code{\link[sp]{CRS}} object is returned.}
   \item{value}{Projection to apply. Can also be a data.frame of longitude-latitude foci.}
   \item{na.rm}{Not used.}
   \item{...}{Arguments passed to \code{\link[Gmedian]{Gmedian}} or \code{\link[graphics]{text}}.}

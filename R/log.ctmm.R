@@ -26,9 +26,9 @@ log_ctmm <- function(CTMM,debias=FALSE,...)
 
   # convert log(eigen) to log(xy) in COV
   PARS <- SIGMA[SIGMA %in% features]
-  if(isotropic)
+  if(isotropic[1])
   { par[PARS] <- sigma@par[PARS] }
-  if(!isotropic)
+  if(!isotropic[1])
   {
     par[PARS] <- sigma[c(1,4,2)]  # log 'xx', 'yy', 'xy'
 
@@ -39,7 +39,7 @@ log_ctmm <- function(CTMM,debias=FALSE,...)
 
   ### log transform all positive parameters that haven't been logged
   # features to log transform
-  FEAT.ALL <- features[ features %in% POSITIVE.PARAMETERS | grepl("error",features) ]
+  FEAT.ALL <- features[ features %in% POSITIVE.PARAMETERS | grepl("error",features) | grepl("period",features) ]
   FEAT <- FEAT.ALL[FEAT.ALL %nin% SIGMA]
 
   if(length(FEAT))
@@ -66,12 +66,12 @@ log_ctmm <- function(CTMM,debias=FALSE,...)
     names(EIGEN$values) <- SUB
 
     # fix signs
-    if(isotropic) { PARS <- "major" } else { PARS <- c("major","minor") }
-    # VAR goes in log numerator for chi^2 variates: variance, diffusion, MS speed, ...
+    if(isotropic[1]) { PARS <- "major" } else { PARS <- c("major","minor") }
+    # VAR goes in log numerator for unbiased chi^2 estimates: variance, diffusion, MS speed, ...
     for(i in 1:ncol(EIGEN$vectors)) { if(sum(EIGEN$vectors[PARS,i])<0) { EIGEN$vectors[,i] <- -EIGEN$vectors[,i] } }
 
     # transform to diagonalized basis with VARs in log numerator
-    par[SUB] <- t(EIGEN$vectors) %*% par[SUB] # diagonalize parameters
+    par[SUB] <- t(EIGEN$vectors) %*% par[SUB] # diagonalize log parameters
     DOF <- 2/EIGEN$values # log-chi^2 VAR-DOF relation
     BIAS <- log_chi2_bias(DOF) # negative bias for log(chi^2) variates
     BIAS <- pmax(BIAS,log_chi2_bias(1)) # clamp to 1 DOF
@@ -97,7 +97,7 @@ log_ctmm <- function(CTMM,debias=FALSE,...)
 
 #####################
 # inverse transformation of above
-exp_ctmm <- function(CTMM,debias=FALSE,variance=TRUE)
+exp_ctmm <- function(CTMM,debias=FALSE,variance=TRUE,base=list())
 {
   SIGMA <- c("major","minor","angle")
   isotropic <- CTMM$isotropic
@@ -116,7 +116,7 @@ exp_ctmm <- function(CTMM,debias=FALSE,variance=TRUE)
   dimnames(JP) <- dimnames(COV)
 
   # log chi^2 bias correction
-  FEAT.ALL <- features[ features %in% POSITIVE.PARAMETERS | grepl("error",features) ]
+  FEAT.ALL <- features[ features %in% POSITIVE.PARAMETERS | grepl("error",features) | grepl("period",features) ]
   SUB <- features[features %in% c(FEAT.ALL,"angle")]
   if(debias && length(SUB))
   {
@@ -199,13 +199,13 @@ exp_ctmm <- function(CTMM,debias=FALSE,variance=TRUE)
 
       SCALE <- sqrt(EIGEN$values/SCALE)
       SCALE <- nant(SCALE,1)
-      JP[SUB,SUB] <- EIGEN$vectors %*% diag(SCALE) %*% t(EIGEN$vectors)
+      JP[SUB,SUB] <- EIGEN$vectors %*% diag(SCALE,nrow=length(SCALE)) %*% t(EIGEN$vectors)
     }
   }
 
   ### exp transform all positive parameters except sigma
   # features to log transform
-  FEAT <- features[features %in% POSITIVE.PARAMETERS]
+  FEAT <- features[features %in% POSITIVE.PARAMETERS| grepl("error",features) | grepl("period",features)]
   FEAT <- FEAT[FEAT %nin% SIGMA]
 
   if(length(FEAT))
@@ -276,6 +276,14 @@ exp_ctmm <- function(CTMM,debias=FALSE,variance=TRUE)
   CTMM$COV.POV <- COV.POV
 
   CTMM$par <- NULL
+
+  # copy to base object
+  for(s in names(CTMM)) { base[[s]] <- CTMM[[s]] }
+  CTMM <- base
+
+  # fix drift parameters for parameter assignment (harmonics)
+  CTMM <- drift.init(CTMM)
+
   CTMM <- set.parameters(CTMM,par)
 
   return(CTMM)

@@ -1,3 +1,42 @@
+ctmm 1.3.0 (2025-07-23)
+================
+* new revisitation() mean revisitation rate estimate
+* sdm.fit() and sdm.select() now support camera-trap and other count data
+* emulate() and simulate() can now draw individual ctmms from an estimated population
+* new dispatch method projection()<- for ctmm class objects
+* new functions pd.solve(), pd.logdet(), pd.sqrtm() for covariance matrix operations
+* new default method "ECDF" for function encounter()
+* periodic mean functions now estimate frequency
+* periodic mean summary now uses beta CIs
+* mean.ctmm() now works on periodic means
+* new mean.ctmm() argument 'formula' for functional response estimation
+* new grid argument dr.fn in akde(), occurrence(), pkde()
+* as.telemetry() now imports ATLAS error ellipses
+* new ctmm.boot() argument 'clamp'
+* new convex argument 'options'
+* new geometric mean ratio estimates in meta() and improvements for small DOFs
+* mean() of occurrence() now time weighted by default
+* mean() can now accept non-stationary mean models
+* new plot method: plot.ctmm()
+* new outlie() argument 'units'
+* plot() argument 'col.DF' renamed to 'col.UD'
+* speedups in Kalman filter for irregularly sampled 
+* improvements in ctmm.fit() method="pREML" on unsupported parameters
+* improvements DOF[area] calculations in mean() and pkde()
+* improvement to optimizer() when initial guess is on a boundary and hessian is bad
+* improvements to Argos-GPS importing in as.telemetry()
+* bugfix in annotate() by="sundial"
+* bugfix in plot.telemetry() argument error=3
+* bugfix in speed() for nearly fractal movement models
+* bugfix in polygon export from bad output from grDevices::contourLines()
+* bugfixes in rsf.select with formulas
+* bugfix in raster factor expansion with more than one raster factor
+* bugfix in normal meta-analysis REML correction
+* bugfixes in suitability with grid projection, NA raster values, and categorical variables
+* bugfixes in mean.ctmm()
+* bugfix in contour exports with convex=TRUE
+* bugfix in transition()
+
 ctmm 1.2.0 (2023-09-22)
 ================
 * new function names: cde() and encounter() replacing encounter() and rates()

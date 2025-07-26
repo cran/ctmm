@@ -16,7 +16,11 @@ suitability <- function(data=NULL,CTMM=NULL,R=list(),level=0.95,grid=NULL,log=FA
 
   R <- expand.factors(R,CTMM$formula,fixed=TRUE)$R
 
-  proj <- CTMM@info$projection
+  # grid projection could be different
+  proj <- grid$projection
+  # default assumption
+  if(is.null(proj)) { proj <- projection(CTMM) }
+
   # calculate RASTERs on spatial grid
   R <- lapply(R,function(S){R.grid(r=grid$r,proj=proj,S)})
 
@@ -85,19 +89,21 @@ R.suit <- function(R,CTMM,data=NULL,log=FALSE,VAR=FALSE)
 
   for(D in DVARS) { R[[D]] <- as.numeric(data[[D]])[1] } # model.matrix will rename otherwise; only use first data row
 
-  # working subset that model.matrix will return (NA will be skipped)
-  SUB <- apply(R,1,function(x){!any(is.na(x))})
-  # model.matrix - NA have been skipped
+  # skip most NA calculations (and work around model.matrix weirdness)
+  R <- stats::model.frame(formula,data=R,na.action=stats::na.pass)
   R <- stats::model.matrix(formula,data=R)
 
   TERMS <- colnames(R)
   TERMS <- TERMS[TERMS!="(Intercept)"]
   R <- R[,TERMS,drop=FALSE]
 
+  SUB <- !apply(is.na(R),1,any)
+  R <- R[SUB,,drop=FALSE]
+
   if(VAR)
   {
     COV <- CTMM$COV[TERMS,TERMS,drop=FALSE]
-    COV <- sapply(1:nrow(R),function(i){R[i,] %*% COV %*% R[i,]})
+    COV <- sapply(1:nrow(R),function(i){R[i,] %*% COV %*% R[i,]}) # now a variance
 
     if("POV" %in% names(CTMM))
     {
@@ -140,13 +146,12 @@ R.suit <- function(R,CTMM,data=NULL,log=FALSE,VAR=FALSE)
     if(VAR) { COV <- OFFSET * COV }
   }
 
-  # NA default
   if(log)
-  { FULL <- array(-Inf,DIM) }
+  { REPLACE <- -Inf }
   else
-  { FULL <- array(0,DIM) }
+  { REPLACE <- 0 }
 
-  # copy over non-NA values
+  FULL <- array(REPLACE,DIM)
   FULL[SUB] <- R
   R <- FULL
 
@@ -154,7 +159,6 @@ R.suit <- function(R,CTMM,data=NULL,log=FALSE,VAR=FALSE)
   {
     # NA default
     FULL <- array(0,DIM)
-
     FULL[SUB] <- COV
     COV <- FULL
 

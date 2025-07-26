@@ -8,7 +8,8 @@ FITS <- list()
 for(i in 1:length(buffalo))
 {
   GUESS <- ctmm.guess(buffalo[[i]],interactive=FALSE)
-  FITS[[i]] <- ctmm.select(buffalo[[i]],GUESS)
+  # in general, use ctmm.select rather than ctmm.fit
+  FITS[[i]] <- ctmm.fit(buffalo[[i]],GUESS)
 }
 names(FITS) <- names(buffalo)
 
@@ -37,7 +38,7 @@ OVER$CI["Queen","Toni",]
 plot(buffalo[c("Pepper", "Queen")],
      UD=AKDES[c("Pepper", "Queen")],
      col = c("#e76f51", "#264653"),
-     col.DF=c("#f4a261", "#2a9d8f"),
+     col.UD=c("#f4a261", "#2a9d8f"),
      col.grid = NA)
 
 ## -----------------------------------------------------------------------------
@@ -50,14 +51,14 @@ CDE <- cde(AKDES[c("Pepper", "Queen")])
 plot(buffalo[c("Pepper", "Queen")],
      col=c("#e76f51", "#264653"),
      UD=CDE,
-     col.DF="#046C9A",
+     col.UD="#046C9A",
      col.grid = NA)
 
 ## -----------------------------------------------------------------------------
 plot(buffalo[c("Cilla", "Mvubu")],
      UD=AKDES[c("Cilla", "Mvubu")],
      col = c("#e76f51", "#264653"),
-     col.DF=c("#f4a261", "#2a9d8f"),
+     col.UD=c("#f4a261", "#2a9d8f"),
      col.grid = NA)
 
 ## -----------------------------------------------------------------------------
@@ -124,7 +125,7 @@ plot(N ~ enc_rad,
      col = "#5e548e")
 
 ## -----------------------------------------------------------------------------
-RATES <- encounter(AKDES)
+RATES <- encounter(buffalo,AKDES,method="PDF")
 
 ## -----------------------------------------------------------------------------
 RATES$CI[,,"est"]

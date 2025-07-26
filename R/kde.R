@@ -49,7 +49,10 @@ akde <- function(data,CTMM,VMM=NULL,R=list(),SP=NULL,SP.in=TRUE,variable="utiliz
   if(variable!="utilization")
   { stop("variable=",variable," not yet supported by akde(). See npr() or revisitation().") }
 
-  if(length(projection(data))>1) { stop("Data not in single coordinate system.") }
+  if(length(projection(data))>1) { stop("Data not in the same coordinate system.") }
+  if(length(projection(CTMM))>1) { stop("Models not in the same coordinate system.") }
+  TEST <- projection(data)!=projection(CTMM)
+  if(length(TEST) && TEST) { stop("Data and models not in the same coordinate system.") }
   validate.grid(data,grid)
 
   # if called by pakde
@@ -66,6 +69,9 @@ akde <- function(data,CTMM,VMM=NULL,R=list(),SP=NULL,SP.in=TRUE,variable="utiliz
   data <- listify(data)
   CTMM <- listify(CTMM)
   VMM <- listify(VMM)
+
+  if(length(data)!=length(CTMM))
+  { stop("length(data)==",length(data),", but length(CTMM)==",length(CTMM)) }
 
   DOF <- sapply(CTMM,DOF.area)
   SUB <- DOF<error
@@ -212,12 +218,12 @@ akde <- function(data,CTMM,VMM=NULL,R=list(),SP=NULL,SP.in=TRUE,variable="utiliz
     dr <- sapply(1:n,function(i){sqrt(pmin(diag(KDE[[i]]$H),diag(CTMM0[[i]]$sigma)))/res}) # (axes,individuals)
     dim(dr) <- c(COL,n)
   }
-  dr <- apply(dr,1,min)
+  dr <- apply(dr,1,grid$dr.fn) # minimum by default
 
   if(COMPATIBLE) # force grids compatible
   {
     grid$align.to.origin <- TRUE
-    if(is.null(grid$dr)) { grid$dr <- dr }
+    if("dr" %nin% names(grid)) { grid$dr <- dr }
   }
 
   # loop over individuals
@@ -281,13 +287,15 @@ prepare.H <- function(H,n,axes=c('x','y'))
 # construct my own KDE objects
 # was using ks-package but it has some bugs
 # alpha is the error goal in my total probability
-kde <- function(data,H,axes=c("x","y"),CTMM=list(),SP=NULL,SP.in=TRUE,RASTER=list(),bias=FALSE,W=NULL,alpha=0.001,res=NULL,dr=NULL,grid=NULL,variable=NA,normalize=TRUE,trace=FALSE,grad=FALSE,...)
+kde <- function(data,H,axes=c("x","y"),CTMM=list(),SP=NULL,SP.in=TRUE,RASTER=list(),bias=FALSE,W=NULL,alpha=0.001,res=NULL,dr=NULL,grid=NULL,variable=NA,normalize=TRUE,trace=FALSE,grad=FALSE,truncate=TRUE,...)
 {
   DIM <- length(axes)
 
   if(!is.na(variable))
   {
-    if(variable %in% c("revisitation"))
+    if(variable=="utilization")
+    { variable <- NA }
+    else if(variable %in% c("revisitation"))
     { VARIABLE <- "speed" }
     else # data column better have the name given
     { VARIABLE <- variable }
@@ -408,18 +416,21 @@ kde <- function(data,H,axes=c("x","y"),CTMM=list(),SP=NULL,SP.in=TRUE,RASTER=lis
   if(trace) { pb <- utils::txtProgressBar(style=3) } # time loops
   for(i in 1:n)
   {
-    # sub-grid lower/upper bound indices
-    i1 <- floor((r[i,]-dH[i,]-R0)/dr) + 1
-    i2 <- ceiling((r[i,]+dH[i,]-R0)/dr) + 1
+    if(truncate)
+    {
+      # sub-grid lower/upper bound indices
+      i1 <- floor((r[i,]-dH[i,]-R0)/dr) + 1
+      i2 <- ceiling((r[i,]+dH[i,]-R0)/dr) + 1
 
-    # constrain to within grid
-    i1 <- pmax(i1,1)
-    i2 <- pmin(i2,dim(PMF))
+      # constrain to within grid
+      i1 <- pmax(i1,1)
+      i2 <- pmax(i2,1)
 
-    CHECK <- i2>=i1
-    if(any(!CHECK)) { stop("Grid incompatible with data.") }
+      i1 <- pmin(i1,dim(PMF))
+      i2 <- pmin(i2,dim(PMF))
 
-    SUB <- lapply(1:length(i1),function(d){ i1[d]:i2[d] })
+      SUB <- lapply(1:length(i1),function(d){ i1[d]:i2[d] })
+    }
 
     # I can't figure out how to do these cases in one line?
     if(DIM==1) # 1D
@@ -485,11 +496,11 @@ kde <- function(data,H,axes=c("x","y"),CTMM=list(),SP=NULL,SP.in=TRUE,RASTER=lis
 
       if(grad)
       {
-        iH <- PDsolve(H[i,,])
-        DIM <- c(length(X),length(Y))
-        G <- array(0,c(DIM,2))
-        G[,,1] <- array(X,DIM)
-        G[,,2] <- t( array(Y,rev(DIM)) )
+        iH <- pd.solve(H[i,,])
+        RES <- c(length(X),length(Y))
+        G <- array(0,c(RES,2))
+        G[,,1] <- array(X,RES)
+        G[,,2] <- t( array(Y,rev(RES)) )
         G <- G %.% iH
 
         dG <- G
@@ -498,7 +509,7 @@ kde <- function(data,H,axes=c("x","y"),CTMM=list(),SP=NULL,SP.in=TRUE,RASTER=lis
 
         GRAD[SUB[[1]],SUB[[2]],] <- GRAD[SUB[[1]],SUB[[2]],] - dG
 
-        GG <- array(G,c(DIM,2,2))
+        GG <- array(G,c(RES,2,2))
         GG[,,1,1] <- dPMF * G[,,1] * G[,,1]
         GG[,,1,2] <- dPMF * G[,,1] * G[,,2]
         GG[,,2,1] <- dPMF * G[,,2] * G[,,1]
@@ -514,7 +525,12 @@ kde <- function(data,H,axes=c("x","y"),CTMM=list(),SP=NULL,SP.in=TRUE,RASTER=lis
   } # end time loop
 
   if(!is.na(variable)) # revisitation is treated separately
-  { return(NUM/PMF) } # E[variable|data]
+  {
+    R <- list()
+    R$NPR <- NUM/PMF # E[variable|data]
+    R$P <- sum(PMF)
+    return(R)
+  }
 
   if(sum(bias)) # debias area/volume
   {
@@ -873,9 +889,9 @@ NewtonCotes <- function(X,Y,sigma,W,dx=mean(diff(X)),dy=mean(diff(Y)))
 
   # coarsen grid
   # index order is (x,y)
-  cdf <- vapply(1:length(X)-1,function(i){colSums(cdf[1:n+m*i,])},rep(0,length(y)))
+  cdf <- vapply(1:length(X)-1,function(i){colSums(cdf[1:n+m*i,,drop=FALSE])},rep(0,length(y)))
   # index order is (y,X)
-  cdf <- vapply(1:length(Y)-1,function(i){colSums(cdf[1:n+m*i,])},rep(0,length(X)))
+  cdf <- vapply(1:length(Y)-1,function(i){colSums(cdf[1:n+m*i,,drop=FALSE])},rep(0,length(X)))
   # index order is (X,Y)
 
   return(cdf)

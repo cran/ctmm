@@ -117,7 +117,7 @@ ctmm.fit <- function(data,CTMM=ctmm(),method="pHREML",COV=TRUE,control=list(),tr
     CTMM <- unit.ctmm(CTMM,length=1/SCALE,time=1/TSCALE)
 
     # translate back to origin from center
-    CTMM$mu <- drift@shift(CTMM$mu,SHIFT)
+    CTMM <- drift.shift(CTMM,SHIFT)
 
     # log-likelihood adjustment
     CTMM$loglike <- CTMM$loglike - length(axes)*n*log(SCALE)
@@ -138,7 +138,6 @@ ctmm.fit <- function(data,CTMM=ctmm(),method="pHREML",COV=TRUE,control=list(),tr
 
   # clean/validate
   CTMM <- ctmm.ctmm(CTMM)
-  drift <- get(CTMM$mean)
   CTMM$mu <- NULL # can always profile mu analytically
   range <- CTMM$range
 
@@ -198,7 +197,7 @@ ctmm.fit <- function(data,CTMM=ctmm(),method="pHREML",COV=TRUE,control=list(),tr
   linear.cov <- FALSE # represent sigma linearly (for perturbation) versus * (for optimization)
   setup.parameters <- function(CTMM,profile=profile,linear=FALSE)
   {
-    STUFF <- id.parameters(CTMM,profile=profile,linear=linear,linear.cov=linear.cov,UERE.FIT=UERE.FIT,dt=dt,df=df,dz=dz,STRUCT=ORIGINAL)
+    STUFF <- id.parameters(CTMM,profile=profile,linear=linear,linear.cov=linear.cov,UERE.FIT=UERE.FIT,dt=dt,df=df,dz=dz,STRUCT=ORIGINAL,fit=TRUE)
     NAMES <<- STUFF$NAMES
     parscale <<- STUFF$parscale
     lower <<- STUFF$lower
@@ -348,6 +347,7 @@ ctmm.fit <- function(data,CTMM=ctmm(),method="pHREML",COV=TRUE,control=list(),tr
       return(CTMM)
     }
     CTMM <- store.pars(pars,profile=profile,finish=TRUE)
+    # time-lag information is now deleted
 
     profile <- FALSE # no longer solving covariance analytically, no matter what
     setup.parameters(CTMM,profile=FALSE)
@@ -356,7 +356,9 @@ ctmm.fit <- function(data,CTMM=ctmm(),method="pHREML",COV=TRUE,control=list(),tr
     {
       # if pREML, calculate Hessian in safe parameterization and then transform afterwards
       if(trace) { message("Calculating Hessian.") }
+      CTMM <- ctmm.prepare(data,CTMM,tau=FALSE,calibrate=FALSE) # don't muck with taus, don't calibrate
       DIFF <- genD(par=pars,fn=fn,zero=-CTMM$loglike,lower=lower,upper=upper,parscale=parscale,Richardson=2,mc.cores=1,control=control)
+      CTMM <- ctmm.repair(CTMM,NAMES=NAMES)
       hess <- DIFF$hessian
       grad <- DIFF$gradient
 
@@ -376,7 +378,9 @@ ctmm.fit <- function(data,CTMM=ctmm(),method="pHREML",COV=TRUE,control=list(),tr
       REML <- TRUE
       #ML.grad <- grad # save old ML gradient
       if(trace) { message("Calculating REML gradient.") }
+      CTMM <- ctmm.prepare(data,CTMM,tau=FALSE,calibrate=FALSE) # don't muck with taus, don't calibrate
       DIFF <- genD(par=pars,fn=fn,lower=lower,upper=upper,parscale=parscale,Richardson=2,order=1,mc.cores=1,control=control)
+      CTMM <- ctmm.repair(CTMM,NAMES=NAMES)
 
       J <- diag(length(pars))
       dimnames(J) <- list(NAMES,NAMES)
@@ -400,8 +404,13 @@ ctmm.fit <- function(data,CTMM=ctmm(),method="pHREML",COV=TRUE,control=list(),tr
       linear.cov <- TRUE
       setup.parameters(CTMM,profile=FALSE)
 
+      # clamp inverse-Hessian contribution of pREML correction to DOF=1
+      Cov <- eigen(CTMM$COV)
+      Cov$values <- pmin( Cov$values , 2*c(t(Cov$vectors) %*% pars)^2 )
+      Cov <- Cov$vectors %*% diag(Cov$values,nrow=length(Cov$values)) %*% t(Cov$vectors)
+
       # calculate linear parameter correction
-      d.pars <- -c(J %*% CTMM$COV %*% DIFF$gradient)
+      d.pars <- -c(J %*% Cov %*% DIFF$gradient)
       # Jacobians cancel out between inverse Hessian and gradient
 
       # gradient or something else was bad
@@ -472,7 +481,9 @@ ctmm.fit <- function(data,CTMM=ctmm(),method="pHREML",COV=TRUE,control=list(),tr
         # control$covariance <- covariance() parameter storage and optimization representations can differ
         control$parscale <- parscale
         control$zero <- TRUE
+        CTMM <- ctmm.prepare(data,CTMM,tau=FALSE,calibrate=FALSE) # don't muck with taus, don't calibrate
         RESULT <- optimizer(par=pars,fn=fn,method=op.method,lower=lower,upper=upper,period=period,reset=reset,control=control)
+        CTMM <- ctmm.repair(CTMM,NAMES=names(pars))
         pars <- clean.parameters(RESULT$par,timelink=CTMM$timelink)
       }
 
@@ -495,7 +506,9 @@ ctmm.fit <- function(data,CTMM=ctmm(),method="pHREML",COV=TRUE,control=list(),tr
 
       if(trace) { message("Calculating REML Hessian.") }
       # calcualte REML Hessian at pREML parameters
+      CTMM <- ctmm.prepare(data,CTMM,tau=FALSE,calibrate=FALSE) # don't muck with taus, don't calibrate
       DIFF <- genD(par=pars,fn=fn,lower=lower,upper=upper,parscale=parscale,Richardson=2,mc.cores=1,control=control)
+      CTMM <- ctmm.repair(CTMM,NAMES=NAMES)
       # Using MLE gradient, which should be zero off boundary
       CTMM$COV <- cov.loglike(DIFF$hessian,grad)
     }
@@ -631,8 +644,7 @@ ic.ctmm <- function(CTMM,n)
 
     return(MSPE)
   }
-  drift <- get(CTMM$mean)
-  STUFF <- drift@energy(CTMM)
+  STUFF <- drift.energy(CTMM)
   UU <- STUFF$UU
   VV <- STUFF$VV
   # Mean square prediction error in locations & velocities
@@ -657,13 +669,12 @@ ctmm.guess <- function(data,CTMM=ctmm(),variogram=NULL,name="GUESS",interactive=
   n <- length(data$t)
   if(n<=2) { CTMM$isotropic = TRUE }
 
-  CTMM <- ctmm.prepare(data,CTMM,precompute=FALSE,tau=FALSE)
+  CTMM <- ctmm.prepare(data,CTMM,precompute=FALSE,tau=FALSE,dt=FALSE)
 
   # mean specific guesswork/preparation
-  drift <- get(CTMM$mean)
-  CTMM <- drift@init(data,CTMM)
+  CTMM <- drift.init(CTMM,data)
   mu <- CTMM$mu
-  u <- drift(data$t,CTMM)
+  u <- drift.mean(CTMM,data$t)
 
   # estimate circulation period if circle=TRUE
   if(CTMM$circle && class(CTMM$circle)[1]=="logical")
@@ -689,7 +700,7 @@ ctmm.guess <- function(data,CTMM=ctmm(),variogram=NULL,name="GUESS",interactive=
     CTMM$circle <- circle
   }
 
-  #
+  # other stuff...
 
   variogram.fit(variogram,CTMM=CTMM,name=name,interactive=interactive)
 }

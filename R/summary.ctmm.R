@@ -110,7 +110,8 @@ confint.ctmm <- function(model,alpha=0.05,UNICODE=FALSE)
       J <- J.zero(POV)
       J[NAME,NAME] <- J0
       J <- quad2lin(J,diag=TRUE)
-      VAR <- diag( J %*% COV.POV %*% t(J) )
+      VAR <- rep(0,nrow(COV))
+      if(!is.null(COV.POV)) { VAR <- diag( J %*% COV.POV %*% t(J) ) }
       names(VAR) <- rownames(COV)
       VAR <- VAR[NAME]/TAU^4 + (-2*PAR/TAU)^2*VAR.TAU
     }
@@ -163,7 +164,8 @@ confint.ctmm <- function(model,alpha=0.05,UNICODE=FALSE)
       J <- J.zero(POV)
       J["circle","circle"] <- J0
       J <- quad2lin(J,diag=TRUE)
-      VAR <- tr(J %*% COV.POV %*% t(J))/f^4 + (-2*PAR/circle)^2*COV["circle","circle"]
+      VAR <- (-2*PAR/circle)^2*COV["circle","circle"]
+      if(!is.null(COV.POV)) { VAR <- VAR + tr(J %*% COV.POV %*% t(J))/f^4 }
 
       CI <- sqrt( chisq.ci(PAR,VAR=VAR,alpha=alpha) )
       par <- rbind(par,CI)
@@ -262,7 +264,6 @@ summary.ctmm.single <- function(object, level=0.95, level.UD=0.95, units=TRUE, .
   axes <- object$axes
 
   object <- get.taus(object) # populate with parameter stuff
-  drift <- get(object$mean)
 
   circle <- object$circle
   tau <- object$tau
@@ -334,7 +335,7 @@ summary.ctmm.single <- function(object, level=0.95, level.UD=0.95, units=TRUE, .
     var.ms <- STUFF$COV
 
     # include mean
-    MSPEED <- drift@speed(object)
+    MSPEED <- drift.speed(object)
     ms <- ms + MSPEED$EST
     var.ms <- var.ms + MSPEED$VAR
 
@@ -361,7 +362,8 @@ summary.ctmm.single <- function(object, level=0.95, level.UD=0.95, units=TRUE, .
 
       J <- rbind(J0,array(0,length(J0)-1:0))
       J <- quad2lin(J,diag=TRUE)
-      VAR <- tr(J %*% COV.POV %*% t(J))/ms^4 + (-2*PAR/ms)^2*var.ms
+      VAR <- (-2*PAR/ms)^2*var.ms
+      if(!is.null(COV.POV)) { VAR <- VAR + tr(J %*% COV.POV %*% t(J))/ms^4 }
 
       # CoV^2 of MS[speed]
       PAR <- chisq.ci(PAR,VAR=VAR,alpha=alpha)
@@ -440,7 +442,8 @@ summary.ctmm.single <- function(object, level=0.95, level.UD=0.95, units=TRUE, .
       J0 <- rbind(J0,array(0,length(J0)-1:0))
       rownames(J0) <- colnames(J0)
       J <- quad2lin(J0,diag=TRUE)
-      VAR <- tr(J %*% COV.POV %*% t(J))/D^4 + (-2*PAR/D)^2*STUFF$VAR
+      VAR <- (-2*PAR/D)^2*STUFF$VAR
+      if(!is.null(COV.POV)) { VAR <- VAR + tr(J %*% COV.POV %*% t(J))/D^4 }
 
       # CoV^2
       PAR <- chisq.ci(PAR,VAR=VAR,alpha=alpha)
@@ -523,7 +526,7 @@ summary.ctmm.single <- function(object, level=0.95, level.UD=0.95, units=TRUE, .
   par <- rbind(timelink.summary(object,level=level),par)
 
   # anything else interesting from the mean function
-  par <- rbind(drift@summary(object,level,level.UD),par)
+  par <- rbind(drift.summary(object,level=level,level.UD=level.UD,units=units),par)
 
   colnames(par) <- NAMES.CI
 
@@ -594,13 +597,15 @@ DOF.mean <- function(CTMM)
   else
   {
     sigma <- CTMM$POV.mu
+    if(length(dim(sigma))==4) { sigma <- sigma[,1,1,] } # take only stationary mean POV
+
     sigma <- sqrtm(sigma)
   }
 
   if(any(is.na(COV))) { return(0) }
 
   # symmetric under trace and det
-  DOF <- sigma %*% PDsolve(COV) %*% sigma
+  DOF <- sigma %*% pd.solve(COV) %*% sigma
   DOF <- mean(diag(DOF))
 
   return(DOF)

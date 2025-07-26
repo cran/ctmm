@@ -60,7 +60,7 @@ inside <- function(A,B)
 
 
 ##############
-SpatialPolygonsDataFrame.UD <- function(object,convex=FALSE,level.UD=0.95,level=0.95,...)
+SpatialPolygonsDataFrame.UD <- function(object,level.UD=0.95,level=0.95,convex=FALSE,...)
 {
   UD <- object
 
@@ -69,7 +69,7 @@ SpatialPolygonsDataFrame.UD <- function(object,convex=FALSE,level.UD=0.95,level=
   ID <- NULL
   for(i in 1:length(level.UD))
   {
-    p <- CI.UD(UD,level.UD[i],level,P=TRUE,convex=convex)
+    p <- CI.UD(UD,level.UD[i],level,P=TRUE)
     P <- cbind(P,p)
     ID <- cbind(ID,paste(UD@info$identity," ",round(100*level.UD[i]),"% ",names(p),sep=""))
   }
@@ -78,72 +78,88 @@ SpatialPolygonsDataFrame.UD <- function(object,convex=FALSE,level.UD=0.95,level=
   P <- c(P)
   ID <- c(ID)
 
+  seg.id <- function(id) { ifelse(id<=length(CL),id,id-length(CL)) }
+  seg.rv <- function(id) { id <- seg.id(id); CL[[id]]$x <<- rev(CL[[id]]$x) ; CL[[id]]$y <<- rev(CL[[id]]$y) }
+
   polygons <- list()
   for(i in 1:length(P))
   {
-    CL <- grDevices::contourLines(UD$r,z=UD$CDF,levels=P[i])
-
-    if(length(CL)==0) # nudge sp to make a contour
-    { CL <- grDevices::contourLines(UD$r,z=UD$CDF,levels=P[i]*(1+.Machine$double.eps)) }
-
-    if(length(CL)==0) # fallback on the mode
+    if(!convex)
     {
-      CL <- list()
-      CL$level <- P[i]
-      MODE <- which.min(UD$CDF)
-      MODE <- arrayInd(MODE,dim(UD$CDF))
-      MODE <- c( UD$r$x[ MODE[1,1] ] , UD$r$y[ MODE[1,2] ] )
-      AREA <- summary(UD,level.UD=P[i],units=FALSE)$CI[2]
-      RAD <- sqrt(AREA/pi)
-      RAD <- max(RAD,.Machine$double.eps)
-      CL$x <- MODE[1] + c(1,0,-1,0)*RAD
-      CL$y <- MODE[2] + c(0,1,0,-1)*RAD
-      CL <- list(CL)
-    }
+      options(max.contour.segments=.Machine$integer.max)
+      CL <- contourLines(UD,levels=P[i])
 
-    # # sp complains when less than 4 vertices
-    # GOOD <- rep(TRUE,length(CL))
-    # for(i in 1:length(CL))
-    # { if(length(CL[[i]]$x)<4) { GOOD[i] <- FALSE } }
-    # CL <- CL[GOOD]
-    # # doing this, sp then gives an error about the area slot missing
-    # # TODO check if sf also complains about this
-
-    if(convex)
-    {
-      xy <- NULL
-      for(cl in CL) { xy <- rbind(xy, cbind(x=cl$x,y=cl$y) ) }
-      SUB <- grDevices::chull(xy) # convex hull indices
-      xy <- xy[SUB,] # convex hull points
-      # format like contourLines output
-      CL <- list( list(level=P[i],x=xy[,'x'],y=xy[,'y']) )
-    }
-
-    # create contour heirarchy matrix (half of it)
-    H <- array(0,c(1,1)*length(CL))
-    for(row in 1:length(CL))
-    {
-      for(col in row:length(CL))
+      CHANGE <- TRUE
+      while(CHANGE && length(CL)>1) # segment join loop
       {
-        H[row,col] <- inside(CL[[row]],CL[[col]])
+        ## join contour segments ## contourLines can fail to join segments into complete polygons
+        DIST <- array(0,c(2*length(CL),2))
+        DIST[1:length(CL),] <- t( sapply(CL,function(cl){c(cl$x[1],cl$y[1])}) )
+        DIST[length(CL)+1:length(CL),] <- t( sapply(CL,function(cl){c(last(cl$x),last(cl$y))}) )
+        DIST <- outer(DIST[,1],FUN='-')^2 + outer(DIST[,2],FUN='-')^2
+        diag(DIST) <- Inf
+
+        MINS <- sort(DIST,index.return=TRUE)$ix
+        MINS <- arrayInd(MINS,dim(DIST))
+
+        MATCH <- array(0,2*length(CL))
+        for(j in nrow(MINS):1)
+        {
+          MATCH[MINS[j,1]] <- MINS[j,2]
+          MATCH[MINS[j,2]] <- MINS[j,1]
+        }
+
+        CHANGE <- FALSE
+        for(j in 1:nrow(MATCH))
+        {
+          k <- MATCH[j]
+          if(seg.id(j)!=seg.id(k))
+          {
+            # connect to the tail of i
+            if(j<=seg.id(j)) { seg.rv(j) }
+            j <- seg.id(j)
+
+            # connect to the beginning of j
+            if(k>seg.id(k)) { seg.rv(k) }
+            k <- seg.id(k)
+
+            CL[[j]]$x <- c( CL[[j]]$x , CL[[k]]$x )
+            CL[[j]]$y <- c( CL[[j]]$y , CL[[k]]$y )
+            CL <- CL[-k]
+            CHANGE <- TRUE
+            break
+          } # made change and re-calculated distances
+        } # no changes made, consider next match
+      } # no more disconnected segments
+
+      # create contour heirarchy matrix (half of it)
+      H <- array(0,c(1,1)*length(CL))
+      for(row in 1:length(CL))
+      {
+        for(col in row:length(CL))
+        { H[row,col] <- inside(CL[[row]],CL[[col]]) }
       }
+
+      # number of contours that this contour is inside
+      I <- rowSums(H)
+
+      # if I is odd, then you are a hole inside a positive area
+      hole <- is.odd(I)
+
+      # polygon
+      polygons[[i]] <- list()
+      for(j in 1:length(CL))
+      { polygons[[i]][[j]] <- sp::Polygon( cbind( CL[[j]]$x , CL[[j]]$y ) , hole=hole[j] ) }
+
+      # polygonS
+      polygons[[i]] <- sp::Polygons(polygons[[i]],ID=ID[i])
     }
-
-    # number of contours that this contour is inside
-    I <- rowSums(H)
-
-    # if I is odd, then you are a hole inside a positive area
-    hole <- is.odd(I)
-
-    # polygon
-    polygons[[i]] <- list()
-    for(j in 1:length(CL))
+    else # if(convex)
     {
-      polygons[[i]][[j]] <- sp::Polygon( cbind( CL[[j]]$x , CL[[j]]$y ) , hole=hole[j] )
-    }
+      CL <- convex(UD,level=P[i],SP=FALSE,ID=ID[i],convex=convex)
 
-    # polygonS
-    polygons[[i]] <- sp::Polygons(polygons[[i]],ID=ID[i])
+      polygons[[i]] <- CL
+    }
   }
   names(polygons) <- ID
 
@@ -161,15 +177,15 @@ SpatialPolygonsDataFrame.UD <- function(object,convex=FALSE,level.UD=0.95,level=
 
 
 ###########
-writeVector.UD <- function(x,filename,filetype="ESRI Shapefile",convex=FALSE,level.UD=0.95,level=0.95,...)
+writeVector.UD <- function(x,filename,filetype="ESRI Shapefile",level.UD=0.95,level=0.95,convex=FALSE,...)
 {
   if(missing(filename)) { filename <- attr(x,"info")$identity }
   x <- SpatialPolygonsDataFrame.UD(x,convex=convex,level.UD=level.UD,level=level)
   x <- terra::vect(x)
   terra::writeVector(x,filename,filetype=filetype,...)
 }
-methods::setMethod("writeVector",methods::signature(x="UD",filename="character"), function(x,filename,filetype="ESRI Shapefile",convex=FALSE,level.UD=0.95,level=0.95,...) writeVector.UD(x,filename,filetype=filetype,convex=convex,level.UD=level.UD,level=level,...) )
-methods::setMethod("writeVector",methods::signature(x="UD",filename="missing"), function(x,filename,filetype="ESRI Shapefile",convex=FALSE,level.UD=0.95,level=0.95,...) writeVector.UD(x,filename,filetype=filetype,convex=convex,level.UD=level.UD,level=level,...) )
+methods::setMethod("writeVector",methods::signature(x="UD",filename="character"), function(x,filename,filetype="ESRI Shapefile",level.UD=0.95,level=0.95,convex=FALSE,...) writeVector.UD(x,filename,filetype=filetype,convex=convex,level.UD=level.UD,level=level,...) )
+methods::setMethod("writeVector",methods::signature(x="UD",filename="missing"), function(x,filename,filetype="ESRI Shapefile",level.UD=0.95,level=0.95,convex=FALSE,...) writeVector.UD(x,filename,filetype=filetype,convex=convex,level.UD=level.UD,level=level,...) )
 
 
 ################

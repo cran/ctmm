@@ -1,3 +1,6 @@
+OPTIM <- list()
+OPTIM$n.algo <- 10^5 # if length(par) is too large, switch to simpler optimizer
+
 ###################################
 # make a wrapper that applies optim then afterwards numDeriv, possibly on a boundary with one-sided derivatives if necessary
 optimizer <- function(par,fn,...,method="pNewton",lower=-Inf,upper=Inf,period=FALSE,reset=identity,control=list())
@@ -90,7 +93,7 @@ optimizer <- function(par,fn,...,method="pNewton",lower=-Inf,upper=Inf,period=FA
 
 ## search up to and and then along a boundary/period (recursively)
 # this is used by NR step only, not by line-search algorithm
-box.search <- function(p0,grad,hess,cov=PDsolve(hess),lower=-Inf,upper=Inf,period=F,period.max=1/2)
+box.search <- function(p0,grad,hess,cov=pd.solve(hess),lower=-Inf,upper=Inf,period=F,period.max=1/2)
 {
   # how far we can go before boundary
   n <- length(p0)
@@ -423,9 +426,9 @@ mc.optim <- function(par,fn,...,lower=-Inf,upper=Inf,period=FALSE,reset=identity
   }
   # preconditioning is safe
   if(!is.null(covariance))
-  { hessian <- PDsolve(covariance) }
+  { hessian <- pd.solve(covariance) }
   else if(!is.null(hessian))
-  { covariance <- PDsolve(hessian) }
+  { covariance <- pd.solve(hessian) }
   else # use parscale to start
   {
     covariance <- diag(1,DIM) # inverse hessian
@@ -832,7 +835,7 @@ mc.optim <- function(par,fn,...,lower=-Inf,upper=Inf,period=FALSE,reset=identity
       {
         FREE <- !BOXED # now the free dimensions
 
-        if(any(BOXED) && any(FREE)) { COV <- PDsolve(hessian[FREE,FREE]) }
+        if(any(BOXED) && any(FREE)) { COV <- pd.solve(hessian[FREE,FREE]) }
         else { COV <- covariance } # avoid costly matrix inversion if possible
 
         if(!CG.RESET) # continue with preconditioned conjugate gradient
@@ -967,6 +970,13 @@ mc.optim <- function(par,fn,...,lower=-Inf,upper=Inf,period=FALSE,reset=identity
       fn.par <- fn.all[MIN]
 
       END <- (MIN==1 || MIN==length(fn.all))
+      if(END) # did we cross zero without any resolution
+      {
+        TEST <- apply(par.all,1,function(r){abs(diff(sign(r)))})
+        TEST <- apply(TEST,1,sum)
+        if((MIN==1 && TEST[1]) || (MIN==length(fn.all) && TEST[length(fn.all)-1]))
+        { END <- FALSE } # resolve this case better
+      }
 
       if(trace==2) { message(sprintf("%s %s search",format(zero+fn.par,digits=16),LINE.TYPE)) }
       if(trace==3) { message("\tc(",paste0(NAMES,"=",par,collapse=', '),")") }
@@ -1110,7 +1120,7 @@ mc.optim <- function(par,fn,...,lower=-Inf,upper=Inf,period=FALSE,reset=identity
 
             SEQ <- seq(M1,M,length.out=n)
           }
-        }
+        } # if((MIN==1 && M<=0) || (MIN==length(fn.all) && M>=0))
         else # interpolation search
         {
           LINE.TYPE <- "1D Newton-Raphson refinement"
@@ -1188,8 +1198,8 @@ mc.optim <- function(par,fn,...,lower=-Inf,upper=Inf,period=FALSE,reset=identity
 
           n <- mc.min(2,cores)
 
-          M1 <- sqrt(sum((par-par.all[,MIN-1])^2))
-          M2 <- sqrt(sum((par-par.all[,MIN+1])^2))
+          M1 <- sqrt(sum(( par-par.all[,max(MIN-1,1)] )^2))
+          M2 <- sqrt(sum(( par-par.all[,min(MIN+1,length(fn.all))] )^2))
 
           n1 <- nant(M1/(M1+M2),1/2)*(n+2) - 1
           n1 <- clamp(n1,1,n-1)

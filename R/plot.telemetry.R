@@ -165,7 +165,7 @@ plot.env <- new.env()
 #######################################
 plot.telemetry <- function(x,CTMM=NULL,UD=NULL,col.bg='white',
                            cex=NULL,col="red",lwd=1,pch=1,type='p',error=TRUE,transparency.error=0.25,velocity=FALSE,
-                           DF="CDF",col.DF="blue",col.grid="white",labels=NULL,convex=FALSE,level=0.95,level.UD=0.95,col.level="black",lwd.level=1,
+                           DF="CDF",col.UD="blue",col.grid="white",labels=NULL,level=0.95,level.UD=0.95,convex=FALSE,col.level="black",lwd.level=1,
                            SP=NULL,border.SP=TRUE,col.SP=NA,
                            R=NULL,col.R="green",legend=FALSE,
                            fraction=1,xlim=NULL,ylim=NULL,ext=NULL,units=TRUE,add=FALSE,...)
@@ -186,7 +186,7 @@ plot.telemetry <- function(x,CTMM=NULL,UD=NULL,col.bg='white',
   if(length(dim(UD[[1]]$CDF))==3)
   { return(plot3d(data=x,UD=UD,level=level,level.UD=level.UD,xlim=xlim,ylim=ylim,ext=ext,
                   cex=cex,col=col,lwd=lwd,pch=pch,type=type,error=error,transparency.error=transparency.error,velocity=velocity,
-                  DF=DF,col.DF=col.DF,col.grid=col.grid,labels=labels,col.level=col.level,lwd.level=lwd.level,
+                  DF=DF,col.UD=col.UD,col.grid=col.grid,labels=labels,col.level=col.level,lwd.level=lwd.level,
                   SP=SP,border.SP=border.SP,col.SP=col.SP,
                   fraction=fraction,units=units,add=add,...)) }
 
@@ -216,7 +216,7 @@ plot.telemetry <- function(x,CTMM=NULL,UD=NULL,col.bg='white',
 
   # unlist annotation colors
   col.level <- simplify.color(col.level)
-  col.DF <- simplify.color(col.DF)
+  col.UD <- simplify.color(col.UD)
 
   #########################
   # PLOT GAUSSIAN CONTOURS AND DENSITY
@@ -224,7 +224,7 @@ plot.telemetry <- function(x,CTMM=NULL,UD=NULL,col.bg='white',
   {
     # contours colour
     col.level <- array(col.level,length(CTMM))
-    col.DF <- array(col.DF,length(CTMM))
+    col.UD <- array(col.UD,length(CTMM))
 
     for(i in 1:length(CTMM))
     {
@@ -233,7 +233,7 @@ plot.telemetry <- function(x,CTMM=NULL,UD=NULL,col.bg='white',
 
       # plot denisty function lazily reusing KDE code
       pdf <- agde(CTMM[[i]],res=500)
-      plot_df(pdf,DF=DF,col=col.DF[[i]],...)
+      plot_df(pdf,DF=DF,col=col.UD[[i]],...)
 
       # plot ML estimate, regular style
       plot_ctmm(CTMM[[i]],alpha.UD,col=col.level[[i]],lwd=lwd.level,...)
@@ -260,12 +260,11 @@ plot.telemetry <- function(x,CTMM=NULL,UD=NULL,col.bg='white',
   if(!is.null(UD))
   {
     # UD <- lapply(UD,function(ud){ unit.UD(ud,length=dist$scale) }) # now done in plot.UD
-    plot.UD(UD,level.UD=level.UD,level=level,DF=DF,col.level=col.level,col.DF=col.DF,col.grid=col.grid,labels=labels,fraction=fraction,add=TRUE,xlim=xlim,ylim=ylim,ext=ext,cex=cex,lwd.level=lwd.level,convex=convex,...)
+    plot.UD(UD,level.UD=level.UD,level=level,DF=DF,col.level=col.level,col.UD=col.UD,col.grid=col.grid,labels=labels,fraction=fraction,add=TRUE,xlim=xlim,ylim=ylim,ext=ext,cex=cex,lwd.level=lwd.level,convex=convex,...)
   }
 
   #########################
   # PLOT TELEMETRY DATA
-
   col <- format_par(col,x)
   pch <- format_par(pch,x)
   lwd <- format_par(lwd,x)
@@ -273,7 +272,7 @@ plot.telemetry <- function(x,CTMM=NULL,UD=NULL,col.bg='white',
   error <- rep(error,length(x))
 
   # automagic the plot point size
-  if(is.null(cex))
+  if(is.null(cex) && length(x))
   {
     p <- sum(sapply(x, function(d) { length(d$t) } ))
     if(p>1000) { cex <- 1000/p } else { cex <- 1 }
@@ -284,7 +283,7 @@ plot.telemetry <- function(x,CTMM=NULL,UD=NULL,col.bg='white',
   z <- sqrt(-2*log(alpha.UD))
 
   # now plot individually
-  for(i in 1:length(x))
+  for(i in 1%:%length(x))
   {
     if(!nrow(x[[i]])) { next } # skip empty data
 
@@ -392,8 +391,9 @@ plot.telemetry <- function(x,CTMM=NULL,UD=NULL,col.bg='white',
       # calculate kernels
       UD <- kde(r,ERROR,grid=GRID)
       UD <- new.UD(UD,info=list())
+      UD$scaled <- TRUE # don't let plot.UD rescale from meters
       # plot kernels
-      plot.UD(UD,level.UD=NA,level=NA,DF='PDF',col.DF=col[[i]],col.level=NA,col.grid=NA,add=TRUE,...)
+      plot.UD(UD,level.UD=NA,level=NA,DF='PDF',col.UD=col[[i]],col.level=NA,col.grid=NA,add=TRUE,...)
     } # end kernel plot
 
     # also plot velocity vectors at dt scale
@@ -425,11 +425,22 @@ plot.telemetry <- function(x,CTMM=NULL,UD=NULL,col.bg='white',
 #methods::setMethod("plot",signature(x="telemetry",y="UD"), function(x,y,...) plot.telemetry(x,akde=y,...))
 #methods::setMethod("plot",signature(x="telemetry"), function(x,...) plot.telemetry(x,...))
 
+plot.ctmm <- function(x,data=NULL,UD=NULL,col.bg='white',
+                           cex=NULL,col="red",lwd=1,pch=1,type='p',error=TRUE,transparency.error=0.25,velocity=FALSE,
+                           DF="CDF",col.UD="blue",col.grid="white",labels=NULL,level=0.95,level.UD=0.95,convex=FALSE,col.level="black",lwd.level=1,
+                           SP=NULL,border.SP=TRUE,col.SP=NA,
+                           R=NULL,col.R="green",legend=FALSE,
+                           fraction=1,xlim=NULL,ylim=NULL,ext=NULL,units=TRUE,add=FALSE,...)
+{ plot.telemetry(x=data,CTMM=x,UD=UD,col.bg=col.bg,cex=cex,col=col,lwd=lwd,pch=pch,type=type,error=error,
+                 transparency.error=transparency.error,velocity=velocity,DF=DF,col.UD=col.UD,col.grid=col.grid,
+                 labels=labels,convex=convex,level=level,level.UD=level.UD,col.level=col.level,lwd.level=lwd.level,
+                 SP=SP,border.SP=border.SP,col.SP=col.SP,R=R,col.R=col.R,legend=legend,fraction=fraction,xlim=xlim,
+                 ylim=ylim,ext=ext,units=units,add=add,...) }
 
 # format point characteristics for dataset x
 format_par <- function(pchar,x,all=FALSE)
 {
-  if(!is.list(pchar))
+  if(!is.list(pchar) && !is.null(pchar))
   {
     if(length(x)>1)
     {
@@ -517,7 +528,7 @@ plot_SP <- function(SP=NULL,border.SP=TRUE,col.SP=NA,PROJ=NULL,...)
 
 
 ##############
-plot.UD <- function(x,col.bg="white",DF="CDF",col.DF="blue",col.grid="white",labels=NULL,convex=FALSE,level=0.95,level.UD=0.95,col.level="black",lwd.level=1,
+plot.UD <- function(x,col.bg="white",DF="CDF",col.UD="blue",col.grid="white",labels=NULL,level=0.95,level.UD=0.95,convex=FALSE,col.level="black",lwd.level=1,
                     SP=NULL,border.SP=TRUE,col.SP=NA,
                     R=NULL,col.R="green",legend=FALSE,
                     fraction=1,xlim=NULL,ylim=NULL,ext=NULL,units=TRUE,add=FALSE,...)
@@ -527,7 +538,7 @@ plot.UD <- function(x,col.bg="white",DF="CDF",col.DF="blue",col.grid="white",lab
   # catch 3D UDs
   if(length(dim(x[[1]]$CDF))==3)
   { return(plot3d(UD=x,level=level,level.UD=level.UD,xlim=xlim,ylim=ylim,ext=ext,
-                  DF=DF,col.DF=col.DF,col.grid=col.grid,labels=labels,col.level=col.level,lwd.level=lwd.level,
+                  DF=DF,col.UD=col.UD,col.grid=col.grid,labels=labels,col.level=col.level,lwd.level=lwd.level,
                   SP=SP,border.SP=border.SP,col.SP=col.SP,
                   fraction=fraction,units=units,add=add,...)) }
 
@@ -564,17 +575,18 @@ plot.UD <- function(x,col.bg="white",DF="CDF",col.DF="blue",col.grid="white",lab
     labels[,,3] <- paste(labels[,,3],"(high)")
   }
 
-  col.DF <- array(col.DF,length(x))
+  col.UD <- array(col.UD,length(x))
   col.grid <- array(col.grid,length(x))
 
   # UNIT CONVERSIONS
   for(i in 1:length(x))
   {
     # unit conversion
-    x[[i]] <- unit.UD(x[[i]],length=dist$scale)
+    if(is.null(x[[i]]$scaled))
+    { x[[i]] <- unit.UD(x[[i]],length=dist$scale) }
 
     # ML DENSITY PLOTS
-    plot_df(x[[i]],DF=DF,col=col.DF[[i]],...)
+    plot_df(x[[i]],DF=DF,col=col.UD[[i]],...)
   }
 
   if(DF %nin% c("PDF","CDF")) { return(invisible(NULL)) } # NPR
@@ -683,7 +695,7 @@ plot_df <- function(kde,DF="CDF",col="blue",...)
 
   # imageRaster is faster but is not reliably called from image
   TEST <- try( graphics::image(kde$r,z=kde[[DF]],useRaster=TRUE,zlim=zlim,col=col,add=TRUE,...) )
-  if(!is.null(TEST)) { graphics::image(kde$r,z=kde[[DF]],useRaster=FALSE,zlim=zlim,col=col,add=TRUE,...) }
+  # if(!is.null(TEST)) { graphics::image(kde$r,z=kde[[DF]],useRaster=FALSE,zlim=zlim,col=col,add=TRUE,...) }
 }
 
 
@@ -705,7 +717,7 @@ plot_kde <- function(kde,level=0.95,labels=round(level*100),col="black",convex=F
   {
     for(i in 1:length(level))
     {
-      SP <- convex(kde,level=level[i]) # now spatial polygons
+      SP <- convex(kde,level=level[i],convex=convex) # now spatial polygons
       sp::plot(SP,border=col,add=TRUE,...)
     }
   }

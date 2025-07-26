@@ -48,3 +48,40 @@ legendre <- function(n,x)
   else if(n==5)
   { 252*x^5 - 630*x^4 + 560*x^3 - 210*x^2 + 30*x - 1 }
 }
+
+# sinc functions
+sinc <- function(x,SIN=sin(x))
+{
+  return(ifelse(x==0, 1, SIN/x))
+}
+
+sinch <- function(x,SINH=sinh(x))
+{
+  return(ifelse(x==0, 1, SINH/x))
+}
+
+
+# multivariate polygamma function
+mpsigamma <- function(x,deriv=0,dim=1)
+{
+  PSI <- 1 - 1:dim
+  PSI <- x + PSI/2
+  if(deriv>=0) { PSI <- sapply(PSI,function(p) psigamma(p,deriv=deriv)) }
+  else if(deriv==-1) { PSI <- sapply(PSI,function(p) lgamma(p)) }
+  else { stop("Derivative ",deriv+1," of log(Gamma(x)) not supported.") }
+  PSI <- sum(PSI)
+  return(PSI)
+}
+
+
+logit <- function(p)
+{
+  p <- clamp(p,0,1)
+  log(p/(1-p))
+}
+
+ilogit <- function(z) { 1/(1+exp(-z)) }
+
+binom <- function(x,y) { 1/(x+1)/beta(y+1,x-y+1) }
+
+lbinom <- function(x,y) { -log(x+1) - lbeta(y+1,x-y+1) }

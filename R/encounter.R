@@ -1,212 +1,120 @@
-cde <- function(object,include=NULL,exclude=NULL,debias=FALSE,...)
+# relative encounter rates (trajectory based)
+encounter.ecdf <- function(data,UD,level=0.95,debias=TRUE,res.time=1,r=NULL,...)
 {
-  UD <- object
-  check.projections(UD)
+  if(class(UD[[1]])[1]=="UD")
+  { CTMM <- lapply(UD,function(ud){ud@CTMM}) }
+  else
+  { CTMM <- UD }
 
-  # by default, we exclude twin encounters
-  if(is.null(include) && is.null(exclude)) { exclude <- diag(1,length(UD)) }
-  if(is.null(include)) { include <- 1 - exclude }
+  t1 <- c(data[[1]]$t[1],data[[2]]$t[1])
+  t2 <- c(last(data[[1]]$t),last(data[[2]]$t))
+  OVER <- ( min(t2)-max(t1) ) / ( max(t2)-min(t1) )
 
-  axes <- UD[[1]]$axes
-  AXES <- length(axes)
+  if(OVER<=0) { stop("No overlapping times.") }
 
-  CTMM <- lapply(UD,function(U){U@CTMM})
+  DIFF <- difference(data,CTMM,uniform=TRUE,res.time=1,...)
+  # prediction information
+  R2 <- DIFF$x^2+DIFF$y^2
+  VAR <- 2*DIFF$VAR.xy
+  # worst/null prediction
+  VAR0 <- sum((CTMM[[1]]$mu-CTMM[[2]]$mu)^2) + var.covm(CTMM[[1]]$sigma) + var.covm(CTMM[[2]]$sigma)
+  # added information
+  DOF <- VAR0/VAR - 1
+  DOF <- clamp(DOF,0,Inf)
+  # uncertainty of added information
+  VAR <- VAR0/DOF
+  # natural weights
+  w <- ifelse(DOF>1,VAR0/(VAR0+VAR),0)
+  w <- w/sum(w)
 
-  # Gaussian approximation
-  STUFF <- cde.ctmm(CTMM,include=include,exclude=exclude,debias=debias)
-  CTMM <- STUFF$CTMM
-  BIAS <- STUFF$BIAS # individual biases
-  bias <- STUFF$bias # pairwise biases
-
-  DOF.area <- rep(DOF.area(CTMM),AXES)
-  names(DOF.area) <- axes
-
-  # bias correction (precision)
-  for(i in 1:length(object))
+  if(is.null(r)) # default grid (roughly 1% increments)
   {
-    UD[[i]]$PMF <- UD[[i]]$PDF * prod(UD[[i]]$dr)
-    if(debias) { UD[[i]]$PMF <- debias.volume(UD[[i]]$PMF,BIAS[i])$PMF }
+    dr <- sqrt(stats::median(R2))/50
+    r <- (1:100)*dr
+  }
+  # cumulative probability
+  P <- array(0,length(r))
+
+  # smoothed estimate
+  R <- sqrt(R2)
+  for(i in 1:length(R))
+  {
+    j <- r>=R[i]
+    P[j] <- P[j] + w[i]
   }
 
-  GRID <- grid.union(object) # r,dr of grid union
-  DIM <- c(length(GRID$r$x),length(GRID$r$y))
-  PMF <- matrix(0,DIM[1],DIM[2]) # initialize CDE PMF
-
-  for(i in 1:(length(UD)-1))
+  if(debias)
   {
-    for(j in (i+1):length(UD))
+    # 1x variance CDF
+    P1 <- array(0,length(r))
+    VAR <- 2*DIFF$VAR.xy
+    DOF <- 2*R2/VAR
+    r2 <- r^2
+
+    # +variance calculation
+    for(i in 1:length(R2))
     {
-      # compute overlapping grid subset
-      SUB <- grid.intersection(list(GRID,UD[[i]],UD[[j]]))
-
-      if(length(SUB[[1]]$x) && length(SUB[[1]]$y))
-      {
-        PROD <- UD[[i]]$PMF[SUB[[2]]$x,SUB[[2]]$y] * UD[[j]]$PMF[SUB[[3]]$x,SUB[[3]]$y]
-        if(debias) # bias correction (variance)
-        {
-          gamma <- sum(PROD) # don't muck with weights
-          PROD <- PROD / gamma
-          PROD <- debias.volume(PROD,bias[i,j])$PMF
-          PROD <- PROD * gamma # don't muck with weights
-        }
-        PMF[SUB[[1]]$x,SUB[[1]]$y] <- PMF[SUB[[1]]$x,SUB[[1]]$y] + include[i,j] * PROD
-      }
+      X2 <- r2/R2[i] # reduced X^2
+      X2 <- X2 * DOF[i] # X^2
+      P1 <- P1 + w[i] * stats::pchisq(X2,DOF[i])
     }
-  }
+    P1 <- clamp(P1,0,1)
 
-  dV <- prod(UD[[1]]$dr)
-  GAMMA <- sum(PMF) # useful for relative encounter rates
-  PMF <- PMF / GAMMA
+    # 2x variance CDF
+    P2 <- array(0,length(r))
+    DOF <- DOF/2
 
-  object <- GRID
-  object$PDF <- PMF / dV
-  object$CDF <- pmf2cdf(PMF)
-  object$axes <- axes
-  object$weight <- GAMMA # store overall weight for future averaging
-
-  # resolution (add up like covariance?)
-  IN <- 0
-  H <- matrix(0,AXES,AXES)
-  for(i in 1:(length(UD)-1))
-  {
-    for(j in (i+1):length(UD))
+    # ++variance calculation
+    for(i in 1:length(R2))
     {
-      IN <- IN + include[i,j]
-      H <- H + include[i,j] * PDsolve( PDsolve(UD[[i]]$H) + PDsolve(UD[[i]]$H) )
+      X2 <- r2/R2[i] # reduced X^2
+      X2 <- X2 * DOF[i] # X^2
+      P2 <- P2 + w[i] * stats::pchisq(X2,DOF[i])
     }
-  }
-  H <- H/IN
-  dimnames(H) <- list(axes,axes)
+    P2 <- clamp(P2,0,1)
 
-  object$H <- H
-  object$DOF.area <- DOF.area
+    P <- logit(P)
+    P1 <- logit(P1)
+    P2 <- logit(P2)
 
-  info <- mean_info(UD)
-  object <- new.UD(object,info=info,type='range',variable="encounter",CTMM=CTMM)
+    BIAS <- P2-P1
+    P <- P-BIAS
 
-  return(object)
-}
-
-################
-# Gaussian encounters
-cde.ctmm <- function(CTMM,include=NULL,exclude=NULL,debias=FALSE,...)
-{
-  # check.projections(CTMM)
-
-  # Gaussian / cumulants
-  axes <- CTMM[[1]]$axes
-  AXES <- length(axes)
-  isotropic <- sapply(CTMM,function(C){C$isotropic})
-  DIM <- ifelse(isotropic,1,AXES)
-  WC <- 1 + DIM # inverse-Wishart/chi^2 constant (DOF threshold)
-  MULT <- ifelse(isotropic,AXES,1) # DOF multiplier
-  WC <- WC/MULT
-
-  CLAMP <- 1 # DOF minimum
-
-  # Wishart DOFs - DOF.wishart() is flaky
-  DOF <- sapply(CTMM,DOF.area)
-  BIAS <- 1/(1+WC/clamp(DOF,CLAMP,Inf)) # asymptotic
-
-  # finished with this
-  isotropic <- all(isotropic)
-
-  # precision matrices
-  P <- lapply(CTMM,function(M){PDsolve(M$sigma)})
-
-  # pairwise DOFs (asymptotic)
-  dof <- matrix(0,length(DOF),length(DOF))
-  # pairwise bias - asymptotic
-  bias <- matrix(1,length(DOF),length(DOF))
-
-  for(i in 1:length(DOF))
-  {
-    for(j in 1:length(DOF))
-    {
-      Pi <- tr(P[[i]])
-      Pj <- tr(P[[j]])
-      Pij <- Pi + Pj
-      dof[i,j] <- Pij^2 / ( Pi^2/DOF[i] + Pj^2/DOF[j] )
-      wc <- (Pi/Pij)*WC[i] + (Pj/Pij)*WC[j] # placeholder interpolation
-      bias[i,j] <- 1 + wc/clamp(dof[i,j],2*CLAMP,Inf)
-    }
+    P <- ilogit(P)
   }
 
-  fn <- function(CTMM)
-  {
-    IN <- 0
-    M1 <- array(0,AXES)
-    M2 <- matrix(0,AXES,AXES)
+  # PDF-based calculation
+  DOF <- encounter(data,CTMM,debias=FALSE,method="PDF")$DOF[1,2]
+  DOF <- DOF * OVER # correction for partial temporal overlap
 
-    # precision matrices # have to recalculate these for gradients
-    P <- lapply(CTMM,function(M){PDsolve(M$sigma)})
+  R <- data.frame(r=r,P=P,P=P,P=P)
+  names(R) <- c('r',NAMES.CI)
+  alpha <- 1-level
+  # binomial CIs
+  for(i in 1:length(P)) { R[i,NAMES.CI] <-  beta.ci(P[i],2*P[i]^2/DOF,level=level) }
 
-    for(i in 1:(length(CTMM)-1))
-    {
-      for(j in (i+1):length(CTMM))
-      {
-        Pi <- P[[i]]
-        Pj <- P[[j]]
-        if(debias) # bias correction (precision)
-        {
-          Pi <- Pi * BIAS[i]
-          Pj <- Pj * BIAS[j]
-        }
-        Pij <- Pi + Pj
-        sigma <- PDsolve(Pij)
+  # class(R) <- "ECDF"
 
-        mu <- sigma %*% (Pi %*% CTMM[[i]]$mu[1,] + Pj %*% CTMM[[j]]$mu[1,])
-        mu <- c(mu)
-
-        # intrinsic weight from multiplying two densities and renormalizing
-        include[i,j] <- include[i,j] / sqrt( det(CTMM[[i]]$sigma) * det(CTMM[[j]]$sigma) * det(Pij) )
-
-        # the interplay between the bias correction steps and weighting has to be the same here as for the AKDEs
-        if(debias) { sigma <- sigma / bias[i,j] } # bias correction (variance)
-
-        IN <- IN + include[i,j]
-        M1 <- M1 + include[i,j] * mu
-        M2 <- M2 + include[i,j] * (sigma + outer(mu))
-      }
-    }
-
-    M1 <- M1/IN
-    M2 <- M2/IN
-
-    mu <- M1
-    sigma <- M2 - outer(M1)
-    sigma <- covm(sigma)@par
-    if(isotropic) { sigma <- sigma[1] }
-
-    return(c(mu,sigma))
-  }
-
-  STUFF <- gauss.comp(fn,CTMM,COV=TRUE)
-
-  I <- 1:AXES
-  mu <- STUFF$MLE[I]
-  names(mu) <- axes
-  COV.mu <- STUFF$COV[I,I,drop=FALSE]
-  dimnames(COV.mu) <- list(axes,axes)
-
-  I <- (AXES+1):length(STUFF$MLE)
-  sigma <- STUFF$MLE[I]
-  sigma <- covm(sigma,axes=axes,isotropic=isotropic)
-  COV <- STUFF$COV[I,I,drop=FALSE]
-  NAMES <- names(sigma@par)[1:length(I)] # isotropic
-  dimnames(COV) <- list(NAMES,NAMES)
-
-  info <- mean_info(CTMM)
-
-  CTMM <- ctmm(mu=mu,sigma=sigma,COV.mu=COV.mu,COV=COV,axes=axes,isotropic=isotropic,info=info)
-  return(list(CTMM=CTMM,BIAS=BIAS,bias=bias))
+  return(R)
 }
 
 
-# relative encounter rates
-encounter <- function(object,debias=FALSE,level=0.95,normalize=FALSE,self=TRUE,...)
+# relative encounter rates (UD based)
+encounter <- function(data,UD,method="ECDF",debias=TRUE,level=0.95,r=NULL,res.time=1,normalize=FALSE,self=TRUE,...)
 {
   units <- FALSE
+  method <- match.arg(method,c("PDF","ECDF"))
+
+  if(method=="ECDF")
+  { return(encounter.ecdf(data,UD,debias=debias,r=r,res.time=res.time,...)) }
+
+  if(class(data[[1]])[1]=="UD")
+  {
+    UD <- data
+    rm(data)
+  }
+  object <- UD
+  rm(UD)
 
   R <- overlap(object,debias=debias,level=level,method="Rate",...)
   R$CI <- nant(R$CI,0)
@@ -225,7 +133,7 @@ encounter <- function(object,debias=FALSE,level=0.95,normalize=FALSE,self=TRUE,.
   # fix diagonals # self encounter rate
   if(self)
   {
-    diag(R$CI[,,1]) <- diag(R$CI[,,2]) <- diag(R$CI[,,3]) <- Inf
+    diag(R$CI[,,1]) <- diag(R$CI[,,2]) <- diag(R$CI[,,3]) <- 1
     diag(R$DOF) <- Inf
   }
 

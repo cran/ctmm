@@ -16,9 +16,9 @@ get.link <- function(CTMM)
   return(link)
 }
 
-ctmm.circulate <- function(CTMM,t,dt=diff(t))
+ctmm.circulate <- function(CTMM,t)
 {
-  dt <- c(0,dt)
+  dt <- CTMM$dt # from ctmm.prepare
   dynamics <- CTMM$dynamics
 
   if(is.null(dynamics) || dynamics==FALSE || dynamics=="stationary")
@@ -79,17 +79,23 @@ ctmm.loglike <- function(data,CTMM=ctmm(),REML=FALSE,profile=TRUE,zero=0,verbose
   { FAIL <- -Inf }
 
   # employ link function on time
-  if(length(CTMM$timelink.par)) { data$t <- linktime(data,CTMM) }
+  if(length(CTMM$timelink.par))
+  {
+    data$t <- linktime(data,CTMM)
+    # prepare dt information
+    CTMM$dt <- c(Inf,diff(data$t))
+    dti <- sort(CTMM$dt,index.return=TRUE)
+    CTMM$dtl <- unique(dti$x) # dt levels
+  }
 
   n <- length(data$t)
-  AXES <- length(CTMM$axes)
+  axes <- CTMM$axes
+  AXES <- length(axes)
 
   # save original tau length
   K <- length(CTMM$tau)
   # prepare model for numerics
-  CTMM <- ctmm.prepare(data,CTMM)
-
-  # drift <- get(CTMM$mean)
+  CTMM <- ctmm.prepare(data,CTMM,verbose=verbose,dt=is.null(CTMM$dt))
 
   range <- CTMM$range
   isotropic <- CTMM$isotropic
@@ -110,7 +116,7 @@ ctmm.loglike <- function(data,CTMM=ctmm(),REML=FALSE,profile=TRUE,zero=0,verbose
       SUB <- c(2,3)
       x[SUB] <- nant(x[SUB],0)
     }
-    covm(x,isotropic=CTMM$isotropic,axes=CTMM$axes)
+    covm(x,isotropic=CTMM$isotropic,axes=axes)
   }
 
   # sigma is current estimate and M.sigma is what we compute the Kalman filter with
@@ -134,13 +140,15 @@ ctmm.loglike <- function(data,CTMM=ctmm(),REML=FALSE,profile=TRUE,zero=0,verbose
     CTMM$sigma <- COVM(0)
   }
 
+  # if(!drift.is.finite(CTMM,data)) { return(FAIL) }
+
   circle <- CTMM$circle
   if(circle && ECC.EXT) { return(FAIL) } # can't squeeze !!! need 2D Langevin code
 
   n <- length(data$t)
 
   t <- data$t
-  dt <- c(Inf,diff(t)) # time lags
+  dt <- CTMM$dt # time lags from ctmm.prepare
 
   if(range) # timescale constant for profiling
   { DT <- 1 }
@@ -156,7 +164,7 @@ ctmm.loglike <- function(data,CTMM=ctmm(),REML=FALSE,profile=TRUE,zero=0,verbose
   }
 
   # data z and mean vector u
-  z <- get.telemetry(data,CTMM$axes)
+  z <- get.telemetry(data,axes)
   u <- CTMM$mean.vec
   M <- ncol(u) # number of linear parameters per spatial dimension
 
@@ -171,7 +179,7 @@ ctmm.loglike <- function(data,CTMM=ctmm(),REML=FALSE,profile=TRUE,zero=0,verbose
   class <- CTMM$class.mat
   ELLIPSE <- attr(error,"ellipse") # do we need error ellipses?
   # are we fitting the error?, then the above is not yet normalized
-  TYPE <- DOP.match(CTMM$axes)
+  TYPE <- DOP.match(axes)
   if(TYPE!="unknown")
   {
     UERE.RMS <- attr(data,"UERE")$UERE[,TYPE]
@@ -264,7 +272,7 @@ ctmm.loglike <- function(data,CTMM=ctmm(),REML=FALSE,profile=TRUE,zero=0,verbose
   if(circle) ## COROTATING FRAME FOR circle=TRUE ##
   {
     # R <- circle*(t-t[1])
-    R <- ctmm.circulate(CTMM,t,dt) # circle * (t-t[1])
+    R <- ctmm.circulate(CTMM,t) # circle * (t-t[1])
     R <- rotates(-R) # rotation matrices
     u <- rotates.vec(cbind(z,u),R)
     z <- u[,1:2]
@@ -380,13 +388,13 @@ ctmm.loglike <- function(data,CTMM=ctmm(),REML=FALSE,profile=TRUE,zero=0,verbose
     fn <- function(sigma){ KMR*sigma[1] }
     CTMM <- sigma.apply(CTMM,fn,states)
     CTMM$sigma <- SIGMA[1] # should now be redundant
-    KALMAN1 <- kalman(cbind(z[,1]),u,t=t,dt=dt,CTMM=CTMM,error=error[,1,1,drop=FALSE]) # errors are relative to PRO.VAR if PROFILE
+    KALMAN1 <- kalman(cbind(z[,1]),u,t=t,CTMM=CTMM,error=error[,1,1,drop=FALSE]) # errors are relative to PRO.VAR if PROFILE
 
     # minor axis likelihood
     fn <- function(sigma){ KMR*sigma[4] }
     CTMM <- sigma.apply(CTMM,fn,states)
     CTMM$sigma <- SIGMA[2] # should now be redundant
-    KALMAN2 <- kalman(cbind(z[,2]),u,t=t,dt=dt,CTMM=CTMM,error=error[,2,2,drop=FALSE]) # errors are relative to PRO.VAR if PROFILE
+    KALMAN2 <- kalman(cbind(z[,2]),u,t=t,CTMM=CTMM,error=error[,2,2,drop=FALSE]) # errors are relative to PRO.VAR if PROFILE
 
     mu <- cbind(KALMAN1$mu,KALMAN2$mu)
 
@@ -400,7 +408,7 @@ ctmm.loglike <- function(data,CTMM=ctmm(),REML=FALSE,profile=TRUE,zero=0,verbose
     dim(COV.mu) <- c(2*M,2*M)
 
     logdetCOV <- KALMAN1$logdet + KALMAN2$logdet
-    logdetcov <- -log(det(KALMAN1$W)) - log(det(KALMAN2$W))
+    logdetcov <- -pd.logdet(KALMAN1$W) - pd.logdet(KALMAN2$W)
   }
   else ### 1x 1D or 2D Kalman filter ###
   {
@@ -420,7 +428,7 @@ ctmm.loglike <- function(data,CTMM=ctmm(),REML=FALSE,profile=TRUE,zero=0,verbose
 
     if(DIM==1) { error <- error[,1,1,drop=FALSE] } # isotropic && UERE redundant error information
 
-    KALMAN <- kalman(z,u,t=t,dt=dt,CTMM=CTMM,error=error,DIM=DIM)
+    KALMAN <- kalman(z,u,t=t,CTMM=CTMM,error=error,DIM=DIM)
 
     mu <- KALMAN$mu
 
@@ -433,7 +441,7 @@ ctmm.loglike <- function(data,CTMM=ctmm(),REML=FALSE,profile=TRUE,zero=0,verbose
     {
       COV.mu <- KALMAN$iW # (2*M,2*M) from riffle
 
-      logdetcov <- -PDlogdet(KALMAN$W) # log cov[beta] absolute # PRO.VAR handled below
+      logdetcov <- -pd.logdet(KALMAN$W) # log cov[beta] absolute # PRO.VAR handled below
     }
     else # lower or 1D filter return - cases where we have one u(t) for all dimensions
     {
@@ -446,7 +454,7 @@ ctmm.loglike <- function(data,CTMM=ctmm(),REML=FALSE,profile=TRUE,zero=0,verbose
       COV.mu <- aperm(COV.mu,c(3,1,4,2))
       dim(COV.mu) <- c(AXES*M,AXES*M)
 
-      logdetcov <- -AXES*PDlogdet(KALMAN$W) # log cov[beta] absolute
+      logdetcov <- -AXES*pd.logdet(KALMAN$W) # log cov[beta] absolute
     }
 
     logdetCOV <- (AXES/DIM)*KALMAN$logdet # log autocovariance / n
@@ -459,7 +467,7 @@ ctmm.loglike <- function(data,CTMM=ctmm(),REML=FALSE,profile=TRUE,zero=0,verbose
   if(UNIT)
   {
     if(UNIT==1) { log.det.sigma <- AXES*log(PRO.VAR) } # unit-max-variance adjustment
-    else if(UNIT==2) { log.det.sigma <- PDlogdet(M.sigma) } # unit-COV adjustment
+    else if(UNIT==2) { log.det.sigma <- pd.logdet(M.sigma) } # unit-COV adjustment
 
     logdetCOV <- logdetCOV + log.det.sigma # per n || n-1
     logdetcov <- logdetcov + M*log.det.sigma # absolute # !range handled below
@@ -467,7 +475,7 @@ ctmm.loglike <- function(data,CTMM=ctmm(),REML=FALSE,profile=TRUE,zero=0,verbose
 
   # discard infinite prior uncertainty in stationary mean for BM/IOU
   if(!length(states) && !CTMM$range)
-  { logdetcov <- ifelse(M==1,0, -PDlogdet(COV.mu[-(1:AXES),-(1:AXES)]) ) }
+  { logdetcov <- ifelse(M==1,0, -pd.logdet(COV.mu[-(1:AXES),-(1:AXES)]) ) }
   else if(length(states))
   {
     offset <- 0
@@ -480,7 +488,7 @@ ctmm.loglike <- function(data,CTMM=ctmm(),REML=FALSE,profile=TRUE,zero=0,verbose
       offset <- offset + nrow(CTMM[[s]]$mu)
     }
     if(any(IND))
-    { logdetcov <- -PDlogdet(COV.mu[IND,IND]) }
+    { logdetcov <- -pd.logdet(COV.mu[IND,IND]) }
     else
     { logdetcov <- 0 }
   }
@@ -578,9 +586,16 @@ ctmm.loglike <- function(data,CTMM=ctmm(),REML=FALSE,profile=TRUE,zero=0,verbose
 
     if(TYPE!="unknown") { CTMM$UERE <- attr(data,"UERE")$UERE[,TYPE] }
 
+    # mean component names
+    NAMES <- rownames(CTMM$UU)
+    if(is.null(NAMES)) { NAMES <- 1:nrow(CTMM$UU) }
+
+    rownames(mu) <- NAMES
+    if(length(dim(COV.mu))==4) { dimnames(COV.mu) <- list(axes,NAMES,NAMES,axes) }
+    else { dimnames(COV.mu) <- list(axes,axes) }
+
     CTMM <- ctmm.repair(CTMM,K=K)
 
-    # mu <- drift@shift(mu,mu.center) # translate back to origin from center
     CTMM$mu <- mu
     CTMM$COV.mu <- COV.mu
 
@@ -590,7 +605,7 @@ ctmm.loglike <- function(data,CTMM=ctmm(),REML=FALSE,profile=TRUE,zero=0,verbose
     {
       IND <- offset + 1:nrow(CTMM[[s]]$mu)
       CTMM[[s]]$mu <- CTMM$mu[IND,]
-      CTMM[[s]]$COV.mu <- CTMM$COV.mu[,IND,,IND]
+      CTMM[[s]]$COV.mu <- CTMM$COV.mu[,IND,IND,]
       offset <- offset + nrow(CTMM[[s]]$mu)
     }
 

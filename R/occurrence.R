@@ -28,25 +28,27 @@ occurrence <- function(data,CTMM,R=list(),SP=NULL,SP.in=TRUE,H=0,variable="utili
   KDE <- list()
   for(i in 1:n)
   { KDE[[i]] <- currence(data[[i]],CTMM[[i]],H=H,variable=variable,res.time=res.time,res.space=res.space,grid=grid,cor.min=cor.min,dt.max=dt.max,buffer=buffer,...) }
+  W <- sapply(KDE,function(k){sum(k$W)})
 
   # determine desired (absolute) resolution
   dr <- sapply(1:n,function(i){KDE[[i]]$dr})
   dim(dr) <- c(COL,n)
-  dr <- apply(dr,1,min)
+  dr <- apply(dr,1,grid$dr.fn)
 
   if(COMPATIBLE) # force grids compatible
   {
     grid$align.to.origin <- TRUE
-    if(is.null(grid$dr)) { grid$dr <- dr }
+    if("dr" %nin% names(grid)) { grid$dr <- dr }
   }
 
   # finish distribution calculation
   for(i in 1:n)
   {
     # using the same data format as AKDE, but with only the ML estimate (alpha=1)
-    KDE[[i]]  <- kde(KDE[[i]]$data,CTMM=CTMM[[i]],H=KDE[[i]]$H,W=KDE[[i]]$W,dr=dr,grid=grid,SP=SP,SP.in=SP.in,RASTER=R)
+    KDE[[i]]  <- kde(KDE[[i]]$data,CTMM=CTMM[[i]],H=KDE[[i]]$H,W=KDE[[i]]$W,dr=dr,grid=grid,SP=SP,SP.in=SP.in,RASTER=R,variable=variable)
     KDE[[i]]$H <- diag(0,2)
     dimnames(KDE[[i]]$H) <- list(axes,axes)
+    KDE[[i]]$W <- W[i]
     KDE[[i]] <- new.UD(KDE[[i]],info=attr(data[[i]],"info"),type='occurrence',CTMM=CTMM[[i]])
   }
   names(KDE) <- names(data)
@@ -56,7 +58,7 @@ occurrence <- function(data,CTMM,R=list(),SP=NULL,SP.in=TRUE,H=0,variable="utili
 }
 
 # occurrence for single indviduals
-currence <- function(data,CTMM,H=0,variable="utilization",res.time=10,res.space=10,grid=NULL,cor.min=0.05,dt.max=NULL,buffer=TRUE,...)
+currence <- function(data,CTMM,H=0,variable="utilization",VMM=NULL,res.time=10,res.space=10,grid=NULL,cor.min=0.05,dt.max=NULL,buffer=TRUE,...)
 {
   if(length(CTMM$tau)<2)
   {
@@ -77,20 +79,21 @@ currence <- function(data,CTMM,H=0,variable="utilization",res.time=10,res.space=
 
   info <- attr(data,"info")
   SIGMA <- CTMM$sigma # diffusion matrix for later
-  CTMM <- ctmm.prepare(data,CTMM,precompute=FALSE) # not the final t for calculating u
+  CTMM <- ctmm.prepare(data,CTMM,precompute=FALSE,dt=FALSE) # not the final t for calculating u and dt
   error <- get.error(data,CTMM,circle=TRUE)
   MIN.ERR <- min(error) # Fix something here?
 
   # format data to be relatively evenly spaced with missing observations
+  raw.data <- data
   data <- fill.data(data,CTMM,verbose=TRUE,res=res.time,cor.min=cor.min,dt.max=dt.max,buffer=buffer)
   t.grid <- data$t.grid
   dt.grid <- data$dt.grid
   w.grid <- data$w.grid
   data <- data$data
+  CTMM <- ctmm.prepare(data,CTMM,precompute=FALSE) # final t for calculating u and dt
 
   # calculate trend
-  drift <- get(CTMM0$mean)
-  drift <- drift(data$t,CTMM0) %*% CTMM0$mu
+  drift <- drift.mean(CTMM0,data$t) %*% CTMM0$mu
 
   # detrend for smoothing - retrend later
   z <- get.telemetry(data,axes=axes)
@@ -98,6 +101,20 @@ currence <- function(data,CTMM,H=0,variable="utilization",res.time=10,res.space=
 
   # smooth mean-zero data # run through smoother to get
   state <- smoother(data,CTMM,smooth=TRUE)
+
+  # smooth & predict annotated variables
+  if(variable != "utilization")
+  {
+    # Brownian motion null model - straight-line interpolation
+    if(is.null(VMM))
+    {
+      VMM <- ctmm(axes=variable,tau=Inf,range=FALSE)
+      VMM <- ctmm.loglike(data,VMM,verbose=TRUE)
+    }
+
+    data[[variable]] <- predict(raw.data,VMM,t=data$t)
+  }
+  rm(raw.data)
 
   # skip repeated timestamps in data (full information retained)
   KEEP <- !data$skip

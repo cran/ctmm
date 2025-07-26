@@ -1,9 +1,3 @@
-# numerically stable evaluation of
-# 1 - exp(-x)^2
-dexp2 <- function(x,Exp=exp(-x)) { ifelse(Exp<0.7071068,1-Exp^2,2*Exp*sinh(x)) }
-# 1 - exp(-x)^1
-dexp1 <- function(x,Exp=exp(-x)) { ifelse(Exp<0.5,1-Exp,2*sqrt(Exp)*sinh(x/2)) }
-
 ###############################
 # Propagator/Green's function and Two-time correlation from Langevin equation for Kalman filter and simulations
 # random CTMM objects need to be run through get.taus() first, to precompute various parameters
@@ -176,8 +170,13 @@ langevin <- function(dt,CTMM,DIM=1)
 }
 
 
-Langevin <- function(t,dt=c(Inf,diff(t)),CTMM,DIM=1)
+Langevin <- function(t,CTMM,DIM=1)
 {
+  # time-lag information from ctmm.prepare
+  dt <- CTMM$dt
+  dtl <- CTMM$dtl
+  dti <- match(dt, dtl)
+
   n <- length(dt)
   tau <- CTMM$tau
   K <- max(1,length(tau))  # dimension of hidden state per spatial dimension
@@ -191,14 +190,21 @@ Langevin <- function(t,dt=c(Inf,diff(t)),CTMM,DIM=1)
   # default stationary process
   if(is.null(dynamics) || dynamics==FALSE || dynamics=="stationary")
   {
+    nl <- length(dtl)
+    Greenl <- array(0,c(nl,K*DIM,K*DIM))
+    Sigmal <- array(0,c(nl,K*DIM,K*DIM))
+
+    for(l in 1:nl) # level index
+    {
+      LANGEVIN <- langevin(dt=dtl[l],CTMM=CTMM,DIM=DIM)
+      Greenl[l,,] <- LANGEVIN$Green # (K*DIM,K*DIM)
+      Sigmal[l,,] <- LANGEVIN$Sigma # (K*DIM,K*DIM)
+    } # end all time-lag levels
+
     for(i in 1:n)
     {
-      # does the time lag change values? Then update the propagators.
-      if(i==1 || dt[i] != dt[i-1])
-      { LANGEVIN <- langevin(dt=dt[i],CTMM=CTMM,DIM=DIM) }
-
-      Green[i,,] <- LANGEVIN$Green # (K*DIM,K*DIM)
-      Sigma[i,,] <- LANGEVIN$Sigma # (K*DIM,K*DIM)
+      Green[i,,] <- Greenl[dti[i],,]
+      Sigma[i,,] <- Sigmal[dti[i],,]
     }
   }
   else if(dynamics=="change.point")
@@ -253,8 +259,11 @@ Langevin <- function(t,dt=c(Inf,diff(t)),CTMM,DIM=1)
 # # FALSE: don't assume or return computed glob
 # # +1: store a computed glob in the environment
 # # -1: use a computed glob from the environment
-kalman <- function(z,u,t=NULL,dt=c(Inf,diff(t)),CTMM,error=NULL,DIM=1,smooth=FALSE,sample=FALSE,residual=FALSE,precompute=FALSE)
+kalman <- function(z,u,t=NULL,CTMM,error=NULL,DIM=1,smooth=FALSE,sample=FALSE,residual=FALSE,precompute=FALSE)
 {
+  # time-lag information from ctmm.prepare
+  dt <- CTMM$dt
+
   # STUFF THAT CAN BE PRECOMPUTED IF DOING MULTIPLE SIMULATIONS
   if(precompute>=0)
   {
@@ -300,7 +309,7 @@ kalman <- function(z,u,t=NULL,dt=c(Inf,diff(t)),CTMM,error=NULL,DIM=1,smooth=FAL
     sRes <- array(0,c(n,OBS*DIM,OBS*DIM))
 
     # Propagators from Langevin equation
-    LANGEVIN <- Langevin(t=t,dt=dt,CTMM=CTMM,DIM=DIM)
+    LANGEVIN <- Langevin(t=t,CTMM=CTMM,DIM=DIM)
     Green <- LANGEVIN$Green
     Sigma <- LANGEVIN$Sigma
 
@@ -318,7 +327,7 @@ kalman <- function(z,u,t=NULL,dt=c(Inf,diff(t)),CTMM,error=NULL,DIM=1,smooth=FAL
       # forecast residuals
       zRes[i,,] <- zRes[i,,] - (t(P) %*% zFor[i,,]) # (OBS*DIM,VEC) # zRes is initially just z
 
-      Gain <- sForP %*% PDsolve(sRes[i,,]) # (K*DIM,OBS*DIM) # updated to invert Inf uncertainty to 0
+      Gain <- sForP %*% pd.solve(sRes[i,,]) # (K*DIM,OBS*DIM) # updated to invert Inf uncertainty to 0
       # 0/0 NaN have Gain of 1 (P) # # Inf*epsilon have Gain of 1 (P)
       INF <- is.nan(Gain) | (Gain==Inf)
       if(any(INF)) { Gain[INF] <- P[INF] }
@@ -389,7 +398,7 @@ kalman <- function(z,u,t=NULL,dt=c(Inf,diff(t)),CTMM,error=NULL,DIM=1,smooth=FAL
         rm(u)
       }
 
-      isRes <- vapply(1:n,function(i){PDsolve(sRes[i,,])},diag(OBS*DIM)) # (OBS*DIM,OBS*DIM,n)
+      isRes <- vapply(1:n,function(i){pd.solve(sRes[i,,])},diag(OBS*DIM)) # (OBS*DIM,OBS*DIM,n)
       dim(isRes) <- c(OBS*DIM,OBS*DIM,n) # R arrays are awful
       uisRes <- vapply(1:n,function(i){isRes[,,i] %*% zRes[i,,MEAN]},array(0,c(OBS*DIM,length(MEAN)))) # (OBS*DIM,MEAN,n) - dont need data terms
       dim(uisRes) <- c(OBS*DIM,length(MEAN),n) # R arrays are awful
@@ -407,7 +416,8 @@ kalman <- function(z,u,t=NULL,dt=c(Inf,diff(t)),CTMM,error=NULL,DIM=1,smooth=FAL
       {
         D <- as.matrix(uisRes %*% zRes[,DATA]) # (MEAN,DATA) quadratic terms
         W <- as.matrix(uisRes %*% zRes[,MEAN]) # (MEAN,MEAN)
-        iW <- PDsolve(W) # (MEAN,MEAN)
+        # iW <- pd.solve(W) # (MEAN,MEAN)
+        iW <- pd.solve(W,semi=FALSE) # (MEAN,MEAN)
 
         M.MEAN <- MEAN
         M.DATA <- DATA
@@ -431,7 +441,7 @@ kalman <- function(z,u,t=NULL,dt=c(Inf,diff(t)),CTMM,error=NULL,DIM=1,smooth=FAL
         SUB1 <- seq(1,length(M.MEAN),2) # x,x terms
         SUB2 <- seq(2,length(M.MEAN),2) # y,y terms
         W[SUB1,SUB1] <- W[SUB2,SUB2] <- (uisRes[SUB1,] %*% zRes[,length(M.DATA)+SUB1]) # x,x==y,y  &&  x,y=0
-        iW[SUB1,SUB1] <- iW[SUB2,SUB2] <- PDsolve(W[SUB1,SUB1])
+        iW[SUB1,SUB1] <- iW[SUB2,SUB2] <- pd.solve(W[SUB1,SUB1])
       }
       # if DIM==1, dim(D)==c(M,2), else dim(D)==c(2*M,1) - reversed order
       rm(uisRes)
@@ -553,7 +563,7 @@ kalman <- function(z,u,t=NULL,dt=c(Inf,diff(t)),CTMM,error=NULL,DIM=1,smooth=FAL
     {
       # Inf * 0 -> 0
       TL <- nant( sCon[i,,] %*% t(Green[i+1,,]) ,0)
-      INV <- PDsolve(sFor[i+1,,],force=TRUE,tol=0)
+      INV <- pd.solve(sFor[i+1,,],semi=FALSE)
       # 0/0 & Inf/Inf -> 1
       #NAN <- diag(TL)==0 & diag(INV)==Inf
       # Inf * 1 -> Inf # even though off-diagnals contribute Inf * 0

@@ -1,7 +1,7 @@
 # generalized covariance from negative-log-likelihood derivatives
 cov.loglike <- function(hess,grad=rep(0,sqrt(length(hess))),tol=.Machine$double.eps,WARN=TRUE)
 {
-  EXCLUDE <- c("ctmm.boot","cv.like","ctmm.select")
+  EXCLUDE <- c("ctmm.boot","cv.like","ctmm.select","rsf.select")
 
   # in case of bad derivatives, use worst-case numbers
   grad <- nant(grad,Inf)
@@ -10,7 +10,7 @@ cov.loglike <- function(hess,grad=rep(0,sqrt(length(hess))),tol=.Machine$double.
   # if hessian is likely to be positive definite
   if(all(diag(hess)>0))
   {
-    COV <- try(PDsolve(hess),silent=TRUE)
+    COV <- try(pd.solve(hess),silent=TRUE)
     if(class(COV)[1]=="matrix" && all(diag(COV)>0)) { return(COV) }
   }
   # one of the curvatures is negative or close to negative
@@ -259,15 +259,22 @@ lognorm.ci <- function(MLE,VAR,level=0.95,alpha=1-level)
 # beta distributed CI given mean and variance estimates
 beta.ci <- function(MLE,VAR,level=0.95,alpha=1-level)
 {
-  n <- MLE*(1-MLE)/VAR - 1
-  if(n<=0)
-  { CI <- c(0,MLE,1) }
-  else
-  {
-    a <- n * MLE
-    b <- n * (1-MLE)
-    CI <- stats::qbeta(c(alpha/2,0.5,1-alpha/2),a,b)
-    CI[2] <- MLE # replace median with mean
+  MLE <- nant(MLE,0)
+  VAR <- nant(VAR,Inf)
+  if(VAR == 0) {
+    # handle the degenerate case (the beta distribution becomes a delta)
+    CI <- c(MLE, MLE, MLE)
+  } else {
+    n <- MLE*(1-MLE)/VAR - 1
+    if(n<=0)
+    { CI <- c(0,MLE,1) }
+    else
+    {
+      a <- n * MLE
+      b <- n * (1-MLE)
+      CI <- stats::qbeta(c(alpha/2,0.5,1-alpha/2),a,b)
+      CI[2] <- MLE # replace median with mean
+    }
   }
   names(CI) <- NAMES.CI
   return(CI)
@@ -314,7 +321,6 @@ qfbinom <- function(p,size,prob)
 
   return(q)
 }
-
 
 
 # robust central tendency & dispersal estimates with high breakdown threshold
@@ -620,7 +626,7 @@ DD.IG.ratio <- function(par,VAR,n)
 # }
 
 
-# F-distribution CIs with exact means and variances for the ratio, numerator, and denominator
+## F-distribution CIs with exact means and variances for the ratio, numerator, and denominator
 # E1 == E[numerator]
 # VAR1 == VAR[numerator]
 # E2 == E[1/denominator]
@@ -645,7 +651,25 @@ F.CI <- function(E1,VAR1,E2,VAR2,level=0.95)
   }
 
   names(CI) <- NAMES.CI
+  return(CI)
+}
 
+## log(F) CIs
+# E1 == E[numerator]
+# VAR1 == VAR[numerator]
+# E2 == E[denominator]
+# VAR2 == VAR[denominator]
+Log.F.CI <- function(E1,VAR1,E2,VAR2,level=0.95)
+{
+  N1 <- 2*E1^2/VAR1 # chi^2 DOF
+  N2 <- 2*E2^2/VAR2 # chi^2 DOF
+
+  alpha <- (1-level)/2
+  CI <- numeric(3)
+  CI[c(1,3)] <- log( stats::qf(c(alpha,1-alpha),N1,N2) )
+  CI[2] <- CI[2] + (log(E1) - log_chi2_bias(N1)) - (log(E2) - log_chi2_bias(N2))
+
+  names(CI) <- NAMES.CI
   return(CI)
 }
 

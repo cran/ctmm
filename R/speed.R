@@ -18,7 +18,7 @@ speed.ctmm <- function(object,data=NULL,t=NULL,level=0.95,robust=FALSE,units=TRU
     return(INF)
   }
 
-  if(prior && fast)
+  if(prior && fast && "COV" %in% names(object))
   {
     TEST <- try(any(eigen(object$COV)$values<=.Machine$double.eps),silent=TRUE)
     TEST <- class(TEST)[1]!="logical" || TEST
@@ -33,9 +33,9 @@ speed.ctmm <- function(object,data=NULL,t=NULL,level=0.95,robust=FALSE,units=TRU
   { stop("Parametric boostrap cannot be performed without data.") }
 
   # analytically solvable cases
-  if(!robust && is.null(data) && object$mean=="stationary" && (!prior || fast))
+  if(!robust && is.null(data) && (!prior || fast))
   {
-    if(object$isotropic[1]) # chi_2 : circular velocity distribution
+    if(object$isotropic[1] && object$mean!="stationary") # chi_2 : circular velocity distribution
     {
       CI <- summary(object,level=level,units=FALSE)
       DOF <- CI$DOF['speed']
@@ -43,37 +43,19 @@ speed.ctmm <- function(object,data=NULL,t=NULL,level=0.95,robust=FALSE,units=TRU
     }
     else # elliptical velocity distribution
     {
-      # propagate error uncertainty
-      UERE.FIT <- object$error>0 & ( paste("error",names(object$error)) %in% dimnames(object)[[1]] )
-      STUFF <- id.parameters(object,profile=FALSE,linear=FALSE,UERE.FIT=UERE.FIT)
-      NAMES <- STUFF$NAMES
-      parscale <- STUFF$parscale
-      lower <- STUFF$lower
-      upper <- STUFF$upper
-
-      fn <- function(p)
-      {
-        CTMM <- set.parameters(object,p)
-        speed_deterministic(CTMM)
-      }
-
-      PAR <- get.parameters(object,NAMES)
-      MEAN <- fn(PAR)
+      MEAN <- speed_deterministic(object)
 
       if(prior && fast)
       {
-        GRAD <- genD(par=PAR,fn=fn,lower=lower,upper=upper,parscale=parscale,Richardson=2,mc.cores=1)$grad
-        # GRAD <- numDeriv::grad(fn,PAR) # don't step outside of (0,1)
-        if("COV" %in% names(object))
-        { VAR <- c(GRAD %*% object$COV[NAMES,NAMES] %*% GRAD) } # emulate can lose features
-        else
-        { VAR <- Inf }
+        STUFF <- speed_variance(object,MEAN=MEAN)
+        VAR <- STUFF$VAR
 
         # propagate errors (chi)
         M2 <- VAR + MEAN^2
         DOF <- chi.dof(MEAN,M2) # chi DOF
         CI <- sqrt(chisq.ci(M2,DOF=DOF,alpha=1-level)) # chi=sqrt(chi^2) CI
         CI <- CI / chi.bias(DOF)
+        CI[1] <- nant(CI[1],0) # 0/0
         CI[2] <- MEAN # shouldn't be necessary?
       }
       else # ! prior
@@ -82,7 +64,7 @@ speed.ctmm <- function(object,data=NULL,t=NULL,level=0.95,robust=FALSE,units=TRU
         names(CI) <- NAMES.CI
         DOF <- 0
       }
-    }
+    } # end elliptical velocity distribution
   }
   else # simulation based evaluation
   {
@@ -216,6 +198,8 @@ speed_rand <- function(CTMM,data=NULL,prior=TRUE,fast=TRUE,cor.min=0.5,dt.max=NU
 {
   # capture model uncertainty
   if(prior) { CTMM <- emulate(CTMM,data=data,fast=fast,...) }
+  #DEBUG <<- list(CTMM=CTMM,data=data,prior=FALSE,fast=fast,cor.min=cor.min,dt.max=dt.max,error=error,precompute=precompute,DT=DT,TP=TP,DOF=DOF,...)
+
   # fail state for fractal process
   if(length(CTMM$tau)<2 || CTMM$tau[2]<=.Machine$double.eps) { return(Inf) }
   if(CTMM$tau[2]==Inf) { return(0) }
@@ -234,9 +218,8 @@ speed_rand <- function(CTMM,data=NULL,prior=TRUE,fast=TRUE,cor.min=0.5,dt.max=NU
   {
     # check for rare cases in sampling disribution where motion is almost but not fractal relative to sampling schedule
     # first check if non-stationary mean is irrelevant
-    drift <- get(CTMM$mean)
     MSV <- sum(diag(CTMM$sigma))/ ifelse(CTMM$range,prod(CTMM$tau),CTMM$tau[2])
-    if(nant(drift@speed(CTMM)$EST/MSV,0)<error^2)
+    if(nant(drift.speed(CTMM)$EST/MSV,0)<error^2)
     {
       # now check if there are many steps per sampled interval
       FRAC <- CTMM$tau[2]/DT
@@ -245,7 +228,7 @@ speed_rand <- function(CTMM,data=NULL,prior=TRUE,fast=TRUE,cor.min=0.5,dt.max=NU
         # finally check if the simulated distance would be much greater than sampled net displacement
         FAKE <- CTMM
         FAKE$mean <- "stationary"
-        SPD <- speed(FAKE,prior=FALSE)[2]
+        SPD <- speed(FAKE,prior=FALSE,units=FALSE)$CI[2]
         FRAC <- sqrt(diff(data$x)^2+diff(data$y)^2)/DT / SPD
         if(all(FRAC<error)) { return(SPD) }
       }
@@ -278,14 +261,70 @@ speed_rand <- function(CTMM,data=NULL,prior=TRUE,fast=TRUE,cor.min=0.5,dt.max=NU
 # only for stationary processes
 speed_deterministic <- function(CTMM,sigma=CTMM$sigma)
 {
-  sigma <- eigenvalues.covm(sigma)
+  if(CTMM$range)
+  { sigma <- sigma/prod(CTMM$tau) } # OUF
+  else
+  { sigma <- sigma/CTMM$tau[2] } # IOU
+
+  if(CTMM$mean!="stationary") # this is approximate
+  {
+    E <- drift.energy(CTMM)$VV
+    E <- t(CTMM$mu) %*% E %*% CTMM$mu
+    sigma <- sigma + E
+  }
+
+  sigma <- eigen(sigma)$values
 
   if(CTMM$isotropic || sigma[1]==sigma[2])
   { v <- sqrt(sigma[1] * pi/2) }
   else
   { v <- sqrt(2/pi) * sqrt(sigma[1]) * pracma::ellipke(1-clamp(sigma[2]/sigma[1]))$e }
 
-  v <- v/sqrt(ifelse(CTMM$range,prod(CTMM$tau),CTMM$tau[2]))
-
   return(v)
+}
+
+
+speed_variance <- function(object,MEAN=NULL)
+{
+  # propagate error uncertainty
+  UERE.FIT <- object$error>0 & ( paste("error",names(object$error)) %in% dimnames(object)[[1]] )
+  STUFF <- id.parameters(object,profile=FALSE,linear=FALSE,UERE.FIT=UERE.FIT)
+  NAMES <- STUFF$NAMES
+  parscale <- STUFF$parscale
+  lower <- STUFF$lower
+  upper <- STUFF$upper
+
+  fn <- function(p)
+  {
+    object <- set.parameters(object,p)
+    speed_deterministic(object)
+  }
+
+  PAR <- get.parameters(object,NAMES)
+  if(is.null(MEAN)) { MEAN <- fn(PAR) }
+
+  GRAD <- genD(par=PAR,fn=fn,lower=lower,upper=upper,parscale=parscale,Richardson=2,mc.cores=1)$grad
+  # GRAD <- numDeriv::grad(fn,PAR) # don't step outside of (0,1)
+  if("COV" %in% names(object))
+  { VAR <- c(GRAD %*% object$COV[NAMES,NAMES] %*% GRAD) } # emulate can lose features
+  else
+  { VAR <- Inf }
+
+  if(object$mean!="stationary")
+  {
+    fn <- function(p)
+    {
+      object$mu[] <- p
+      speed_deterministic(object)
+    }
+
+    GRAD <- genD(par=c(object$mu),fn=fn,Richardson=2,mc.cores=1)$grad
+    VAR2 <- aperm(object$COV.mu,c(2,1,3,4))
+    dim(VAR2) <- c(1,1)*length(GRAD)
+    VAR2 <- c(GRAD %*% VAR2 %*% GRAD)
+    VAR <- VAR + VAR2
+  }
+
+  R <- list(MEAN=MEAN,VAR=VAR,J=GRAD)
+  return(R)
 }

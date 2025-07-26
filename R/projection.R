@@ -75,6 +75,54 @@ setMethod('projection<-', signature(x='list'), `projection<-.list`)
 
 
 # change the projection of one telemetry object
+"projection<-.ctmm" <- function(x,value)
+{
+  # convert to PROJ4 format if location
+  value <- format_projection(value)
+
+  # from projection
+  PROJ <- projection(x)
+
+  # mean location
+  X <- x$mu[1,,drop=FALSE]
+  Y <- project(X,from=PROJ,to=value)
+
+  # long-lat
+  L <- project(X,from=PROJ)
+  colnames(L) <- c("longitude","latitude")
+
+  # initial northing angle
+  TELE <- data.frame(cbind(L,X))
+  INFO <- attr(x,"info")
+  TELE <- new.telemetry(TELE,info=INFO)
+  N1 <- northing(TELE,proj=PROJ,angle=TRUE)
+
+  # final northing angle
+  TELE <- data.frame(cbind(L,Y))
+  INFO$projection <- value
+  TELE <- new.telemetry(TELE,info=INFO)
+  N2 <- northing(TELE,proj=value,angle=TRUE)
+
+  # rotation angle
+  theta <- (N2-N1)/360*(2*pi)
+
+  # rotate differences from mean
+  x$mu[] <- rotate.vec(x$mu,theta)
+
+  # fix mean location
+  x$mu[1,] <- Y
+
+  # rotate the covariance matrix
+  x$sigma <- rotate.covm(x$sigma,theta)
+
+  attr(x,"info")$projection <- value
+
+  return(x)
+}
+setMethod('projection<-', signature(x='ctmm'), `projection<-.ctmm`)
+
+
+# change the projection of one telemetry object
 "projection<-.telemetry" <- function(x,value)
 {
   # delete projection information
@@ -104,6 +152,8 @@ setMethod('projection<-', signature(x='list'), `projection<-.list`)
   {
     # local vectors pointing north
     NORTH <- northing(x,value)
+
+    x <- cov.geo2xy(x,value,NORTH)
 
     ### project error ellipses ###
     if('COV.angle' %in%  NAMES)
@@ -170,6 +220,7 @@ northing <- function(x,proj,angle=FALSE)
 
 
 # rotate northing to heading
+# Argos format - clockwise angle from due north
 # u = dim(2,n)
 # return = dim(n,2)
 rotate.north <- function(u,heading)
@@ -188,9 +239,13 @@ rotate.north <- function(u,heading)
 # put projection into character format
 format_projection <- function(proj,datum="WGS84")
 {
-  if(class(proj)[1]=="CRS")
+  if(class(proj)[1]=="numeric" && length(proj)==1) # EPSG
+  { proj <- paste0("EPSG:",proj) }
+  else if(class(proj)[1]=="CRS") # PROJ4
   { proj <- as.character(proj) }
-  else if(class(proj)[1] != "character")
+  else if(class(proj)[1]=="crs") # PROJ6
+  { proj <- sf::st_crs(proj)$proj4string }
+  else if(class(proj)[1] != "character") # else assume rows of long-lat foci
   {
     # pull out geodesic coordinates and format into matrix
     proj <- as.matrix(rbind(proj)[,c("longitude","latitude")])
@@ -257,3 +312,52 @@ check.projections <- function(object)
   return(PROJ)
 }
 
+
+cov.geo2xy <- function(x,value,NORTH=northing(x,value))
+{
+  if(!all(DOP.LIST$horizontal$COV.geo %in% names(x))) { return(x) }
+
+  n <- nrow(x)
+  # major axis eigen vector
+  COV <- rotate.north(NORTH,x$COV.angle) # [n,2]
+  # major axis eigen matrices
+  COV <- sapply(1:n,function(i){outer(COV[i,])},simplify="array") # [2,2,n]
+  ID <- diag(2)
+  # covariance matrices
+  COV <- sapply(1:n,function(i){x$COV.major[i]*COV[,,i] + x$COV.minor[i]*(ID-COV[,,i])},simplify="array") # [2,2,n]
+  # flatten spatial indices
+  dim(COV) <- c(2*2,n)
+  # unique entries
+  ID <- c(upper.tri(ID,diag=TRUE))
+  x[DOP.LIST$horizontal$COV] <- t(COV[ID,]) # R is so confusing
+
+  return(x)
+}
+
+
+cov.xy2geo <- function(x,value)
+{
+  if(!all(DOP.LIST$horizontal$COV %in% names(x))) { return(x) }
+
+  NORTH <- northing(x,value)
+  NORTH <- atan2(NORTH[,2],NORTH[,1])
+
+  n <- nrow(x)
+  COV <- cbind(x$COV.x.x,x$COV.x.y,x$COV.x.y,x$COV.y.y)
+  dim(COV) <- c(n,2,2)
+
+  x$COV.major <- x$COV.minor <- x$COV.angle <- NA
+  NAS <- is.na(x$COV.x.x) | is.na(x$COV.y.y) | is.na(x$COV.x.y)
+  for(i in which(!NAS))
+  {
+    EIGEN <- eigen(COV[i,,])
+    x$COV.major[i] <- clamp(EIGEN$values[1],0,Inf)
+    x$COV.minor[i] <- clamp(EIGEN$values[2],0,Inf)
+    angle <- EIGEN$vector[,1]
+    x$COV.angle[i] <- atan2(angle[2],angle[1])
+  }
+  x$COV.angle <- x$COV.angle - NORTH
+  x$COV.angle <- (-360/(2*pi)) * x$COV.angle # Argos format - clockwise angle from due north
+
+  return(x)
+}
